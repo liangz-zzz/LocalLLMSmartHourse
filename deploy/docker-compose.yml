@@ -1,0 +1,174 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto:/mosquitto
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+    privileged: true
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - MQTT_SERVER=${MQTT_SERVER:-mqtt://mqtt:1883}
+    devices:
+      - "${ZIGBEE_SERIAL_PATH:-/dev/ttyUSB0}:/dev/ttyUSB0"
+    volumes:
+      - ./zigbee2mqtt:/app/data
+    ports:
+      - "${Z2M_FRONTEND_PORT:-8080}:8080"
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./homeassistant:/config
+    ports:
+      - "${HA_HTTP_PORT:-8123}:8123"
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-smarthome}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-smarthome}
+      - POSTGRES_DB=${POSTGRES_DB:-smarthome}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  api-gateway:
+    build:
+      context: ../backend/services/api-gateway
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/api-gateway:dev
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - db
+      - redis
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PORT=${API_HTTP_PORT:-4000}
+      - WS_PORT=${API_WS_PORT:-4001}
+      - MQTT_URL=${MQTT_SERVER:-mqtt://mqtt:1883}
+      - POSTGRES_URL=postgres://${POSTGRES_USER:-smarthome}:${POSTGRES_PASSWORD:-smarthome}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-smarthome}
+      - REDIS_URL=redis://redis:${REDIS_PORT:-6379}
+      - HA_BASE_URL=http://homeassistant:${HA_HTTP_PORT:-8123}
+      - HA_TOKEN=${HA_ELEVATED_TOKEN:-}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/api-gateway:/app
+      - api_gateway_node_modules:/app/node_modules
+    ports:
+      - "${API_HTTP_PORT:-4000}:4000"
+      - "${API_WS_PORT:-4001}:4001"
+    command: ["sleep", "infinity"]
+
+  device-adapter:
+    build:
+      context: ../backend/services/device-adapter
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/device-adapter:dev
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - homeassistant
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - MQTT_URL=${MQTT_SERVER:-mqtt://mqtt:1883}
+      - HA_BASE_URL=http://homeassistant:${HA_HTTP_PORT:-8123}
+      - HA_TOKEN=${HA_ELEVATED_TOKEN:-}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/device-adapter:/app
+      - device_adapter_node_modules:/app/node_modules
+    command: ["sleep", "infinity"]
+
+  rules-engine:
+    build:
+      context: ../backend/services/rules-engine
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/rules-engine:dev
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - api-gateway
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - MQTT_URL=${MQTT_SERVER:-mqtt://mqtt:1883}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/rules-engine:/app
+      - rules_engine_node_modules:/app/node_modules
+    command: ["sleep", "infinity"]
+
+  llm-bridge:
+    build:
+      context: ../backend/services/llm-bridge
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/llm-bridge:dev
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - LLM_API_BASE=${LLM_API_BASE:-http://llm-bridge:5000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-dummy-key}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/llm-bridge:/app
+      - llm_bridge_node_modules:/app/node_modules
+    ports:
+      - "5000:5000"
+    command: ["sleep", "infinity"]
+
+  traefik:
+    image: traefik:v3.1
+    profiles: ["edge"]
+    restart: unless-stopped
+    command:
+      - "--providers.file.filename=/etc/traefik/traefik.yml"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/certs:/etc/traefik/certs:ro
+    ports:
+      - "80:80"
+      - "443:443"
+
+networks:
+  default:
+    name: smarthouse-net
+
+volumes:
+  api_gateway_node_modules:
+  device_adapter_node_modules:
+  rules_engine_node_modules:
+  llm_bridge_node_modules:

@@ -1,0 +1,21 @@
+{
+  "name": "LocalLLMSmartHouse",
+  "dockerComposeFile": ["../deploy/docker-compose.yml"],
+  "service": "api-gateway",
+  "workspaceFolder": "/app",
+  "remoteUser": "app",
+  "shutdownAction": "stopCompose",
+  "postCreateCommand": "corepack enable && pnpm -v || true",
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}
