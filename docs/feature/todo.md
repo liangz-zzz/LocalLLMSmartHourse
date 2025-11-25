@@ -10,8 +10,8 @@
 - [done] API Gateway 最小接口  
   - Fastify + mock store，`GET /devices`、`GET /devices/:id`；WebSocket 占位；`MODE=redis` 可读取 `device:*` JSON（等待适配器写入）。  
   - 测试：mock store 单测 + HTTP 集成测试。
-- [next] 设备模型验证工具  
-  - 在 `pkg/device-model` 增加 Zod 校验 helper，导出给 adapter/gateway；为样例跑校验测试。
+- [done] 设备模型验证工具  
+  - 在 `pkg/device-model` 增加 Zod 校验 helper，导出给 adapter/gateway；样例校验单测已添加。
 - [todo] 数据持久化基础  
   - 选 Prisma，建 `device`/`device_state` 表，迁移脚本 & `pnpm db:migrate`。  
   - 适配 adapter 写入与 gateway 读取。

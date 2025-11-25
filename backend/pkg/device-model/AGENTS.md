@@ -26,6 +26,10 @@ Schema
 - TypeScript 类型：`types.ts`
 - JSON Schema：`device.schema.json`
 - 样例：`examples/living_room_plug.json`
+- Zod 校验：`src/validator.js`（导出 `deviceSchema`/`validateDevice`/`validateDevices`），用于 adapter/gateway。
+
+运行/测试
+- 安装依赖与测试：`docker run --rm -v $(pwd):/workspace -w /workspace/backend/pkg/device-model node:20-alpine sh -c "npm install && npm test"`
 
 测试
 - 需提供 Schema 校验测试（Ajv/Zod）与样例解析测试。
