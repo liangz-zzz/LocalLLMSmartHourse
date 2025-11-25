@@ -22,7 +22,7 @@ async function main() {
 
   let store;
   if (config.mode === "redis") {
-    store = new RedisStore(config.redisUrl, logger);
+    store = new RedisStore({ redisUrl: config.redisUrl, logger });
     logger.info("Using Redis store", config.redisUrl);
   } else {
     store = new MockStore(samplePath);
