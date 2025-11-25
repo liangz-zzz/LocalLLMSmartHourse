@@ -14,8 +14,8 @@
 - 在实现时替换 compose 占位镜像与命令。
 
 运行/模式
-- 默认 `MODE=mock` 使用内置样例设备（`src/fixtures/living_room_plug.json`）。
-- `MODE=redis` 时从 `REDIS_URL` 读取 `device:*` JSON（未来由 device-adapter 写入）。
+- 默认 `MODE=redis`（compose 场景下直接读适配器写入的 `device:*`）；如无 Redis 可切换 `MODE=mock` 使用 `src/fixtures/living_room_plug.json`。
+- `MODE=redis` 时从 `REDIS_URL` 读取 `device:*` JSON（由 device-adapter 写入）。
 
 命令（通过 compose 容器）
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm install`

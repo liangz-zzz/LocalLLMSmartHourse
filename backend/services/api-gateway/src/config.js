@@ -1,7 +1,8 @@
 export function loadConfig() {
+  const defaultMode = process.env.MODE ? process.env.MODE : "redis"; // prefer redis when services are up
   return {
     port: Number(process.env.PORT || 4000),
-    mode: process.env.MODE || "mock", // mock | redis
+    mode: defaultMode, // mock | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",
     logLevel: process.env.LOG_LEVEL || "info"
   };
