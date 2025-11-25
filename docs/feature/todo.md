@@ -13,7 +13,7 @@
 - [done] 设备模型验证工具  
   - 在 `pkg/device-model` 增加 Zod 校验 helper，导出给 adapter/gateway；样例校验单测已添加。
 - [todo] 数据持久化基础  
-  - 选 Prisma，建 `device`/`device_state` 表，迁移脚本 & `pnpm db:migrate`。  
+  - Redis 缓存已接入适配器（`STORAGE=redis` 写入 `device:*`）；下一步：选 Prisma，建 `device`/`device_state` 表，迁移脚本 & `pnpm db:migrate`。  
   - 适配 adapter 写入与 gateway 读取。
 - [todo] 规则引擎骨架  
   - 定义最小 JSON DSL（triggers + conditions + actions），加载本地 rules.json，匹配后打印动作（占位）。

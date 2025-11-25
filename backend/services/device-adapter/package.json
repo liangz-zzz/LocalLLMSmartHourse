@@ -8,6 +8,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "ioredis": "^5.4.2",
     "mqtt": "^5.10.1"
   },
   "devDependencies": {

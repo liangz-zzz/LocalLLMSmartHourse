@@ -1,12 +1,16 @@
 import { loadConfig } from "./config.js";
 import { Logger } from "./log.js";
-import { MemoryStore } from "./memory-store.js";
+import { MemoryStore, RedisStore } from "./store.js";
 import { DeviceAdapter } from "./adapter.js";
 
 async function main() {
   const config = loadConfig();
   const logger = new Logger(config.logLevel);
-  const store = new MemoryStore();
+
+  const store =
+    config.storage === "redis"
+      ? new RedisStore({ url: config.redisUrl, prefix: config.redisKeyPrefix, logger })
+      : new MemoryStore();
 
   const adapter = new DeviceAdapter({
     mode: config.mode,

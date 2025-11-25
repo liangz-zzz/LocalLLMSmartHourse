@@ -4,7 +4,7 @@ import net from "node:net";
 import mqtt from "mqtt";
 import aedes from "aedes";
 import { DeviceAdapter } from "../src/adapter.js";
-import { MemoryStore } from "../src/memory-store.js";
+import { MemoryStore } from "../src/store.js";
 import { Logger } from "../src/log.js";
 
 test("device adapter consumes MQTT messages and stores normalized device", async (t) => {
