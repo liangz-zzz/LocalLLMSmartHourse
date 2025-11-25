@@ -1,0 +1,12 @@
+{
+  "ieee_address": "0x00158d00045abcde",
+  "friendly_name": "living_room_plug",
+  "type": "Router",
+  "definition": {
+    "model": "ZNCZ04LM",
+    "vendor": "Xiaomi",
+    "description": "Mi power plug (Zigbee)"
+  },
+  "power_source": "Mains (single phase)",
+  "supported": true
+}

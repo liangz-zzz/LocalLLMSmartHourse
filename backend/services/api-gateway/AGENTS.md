@@ -12,3 +12,13 @@
 - 共享类型与设备模型从 `backend/pkg/device-model` 导入。
 - 与 `device-adapter` 通讯：REST/GRPC/消息队列任选，首发可直接调用其 HTTP。
 - 在实现时替换 compose 占位镜像与命令。
+
+运行/模式
+- 默认 `MODE=mock` 使用内置样例设备（`src/fixtures/living_room_plug.json`）。
+- `MODE=redis` 时从 `REDIS_URL` 读取 `device:*` JSON（未来由 device-adapter 写入）。
+
+命令（通过 compose 容器）
+- 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm install`
+- 运行（mock 模式）：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm run dev`
+- 运行（redis 模式）：`MODE=redis REDIS_URL=redis://redis:6379 docker compose -f deploy/docker-compose.yml run --rm api-gateway npm run dev`
+- 测试：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm test`（含单元 + 集成）

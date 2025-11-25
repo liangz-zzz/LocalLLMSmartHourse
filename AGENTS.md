@@ -35,7 +35,7 @@
 ## 测试与质量
 - CI：GitHub Actions `ci.yml` 当前仅校验 compose 配置，后续补充 lint/test。
 - 本地建议：预留 `pnpm lint/test`（前端、后端分别执行）；`docker compose config` 校验部署。
-- 变更时更新相关 `AGENTS.md` 以保持信息真实。
+- 默认约定：提交/开发时为新增功能编写并执行相应测试或脚本（含手动验证命令），并在 `AGENTS.md` 中记录用法与验证方式。
 
 ## 安全与密钥
 - `.env` 不纳入版本控制；HA Token、LLM Key 存储于本地/Secrets。

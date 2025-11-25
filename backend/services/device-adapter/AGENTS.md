@@ -15,3 +15,12 @@
 
 测试
 - 单元：对编解码/校验函数；集成：使用本地 mqtt + 模拟 zigbee2mqtt payload。
+
+工具/样例
+- `mock-adapter.js`: 离线将 `mock-data/zigbee2mqtt` 的示例 payload 归一化为设备模型，用于无设备时的 dry-run。
+
+运行与测试
+- 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。
+- 运行离线模式：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm run dev`（默认 `MODE=offline`，加载 mock 数据）。
+- 切换 MQTT 模式：`MODE=mqtt MQTT_URL=mqtt://mqtt:1883 docker compose -f deploy/docker-compose.yml run --rm device-adapter npm run dev`。
+- 测试：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm test`（包含单元与内存 MQTT 集成用例）。

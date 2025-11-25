@@ -23,7 +23,9 @@ placement 细化（满足“位置/功能描述”需求）
 
 Schema
 - 详见 `docs/device-model.md` 的 JSON Schema/样例。
-- TypeScript 类型在此目录下维护（待添加），前后端与 LLM 消费者共享。
+- TypeScript 类型：`types.ts`
+- JSON Schema：`device.schema.json`
+- 样例：`examples/living_room_plug.json`
 
 测试
 - 需提供 Schema 校验测试（Ajv/Zod）与样例解析测试。

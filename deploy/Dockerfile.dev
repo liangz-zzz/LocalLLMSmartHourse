@@ -1,0 +1,36 @@
+FROM node:20-alpine
+
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
+RUN sed -i 's|https://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g' /etc/apk/repositories \
+  && apk add --no-cache \
+    git \
+    curl \
+    ca-certificates \
+    bash \
+    python3 \
+    py3-pip \
+    build-base \
+    shadow
+
+# Align container user with host to avoid permission issues when mounting the repo
+RUN if [ "${LOCAL_GID}" != "$(id -g node)" ]; then groupmod -g "${LOCAL_GID}" node; fi \
+  && if [ "${LOCAL_UID}" != "$(id -u node)" ]; then usermod -u "${LOCAL_UID}" node; fi \
+  && mkdir -p /home/node/.local/share/pnpm \
+  && chown -R node:node /home/node/.local
+
+ENV PNPM_HOME=/home/node/.local/share/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
+RUN npm config set registry ${NPM_REGISTRY} \
+  && corepack enable \
+  && corepack prepare pnpm@9 --activate
+
+WORKDIR /workspace
+USER node
+
+# Keep the container running for exec-based workflows; override with your command if needed
+CMD ["sleep", "infinity"]

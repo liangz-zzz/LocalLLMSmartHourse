@@ -1,0 +1,19 @@
+{
+  "name": "device-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1"
+  },
+  "devDependencies": {
+    "aedes": "^0.51.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

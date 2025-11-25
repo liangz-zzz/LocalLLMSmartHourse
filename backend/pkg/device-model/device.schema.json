@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeviceModel",
+  "type": "object",
+  "required": ["id", "name", "placement", "protocol", "bindings", "traits", "capabilities"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "placement": {
+      "type": "object",
+      "required": ["room"],
+      "properties": {
+        "room": { "type": "string" },
+        "zone": { "type": "string" },
+        "floor": { "type": "string" },
+        "mount": { "type": "string", "enum": ["ceiling", "wall", "desktop", "window", "floor"] },
+        "description": { "type": "string" },
+        "coordinates": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" },
+            "lat": { "type": "number" },
+            "lon": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocol": { "type": "string", "enum": ["zigbee", "wifi", "bluetooth_mesh", "matter", "virtual"] },
+    "bindings": {
+      "type": "object",
+      "properties": {
+        "zigbee2mqtt": {
+          "type": "object",
+          "properties": {
+            "topic": { "type": "string" },
+            "friendly_name": { "type": "string" },
+            "ieee_address": { "type": "string" }
+          },
+          "required": ["topic"],
+          "additionalProperties": false
+        },
+        "ha_entity_id": { "type": "string" },
+        "ha": {
+          "type": "object",
+          "properties": {
+            "entity_id": { "type": "string" }
+          },
+          "required": ["entity_id"],
+          "additionalProperties": false
+        },
+        "vendor_extra": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "traits": {
+      "type": "object",
+      "properties": {
+        "switch": {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "enum": ["on", "off"] },
+            "power_w": { "type": "number" },
+            "energy_kwh": { "type": "number" }
+          },
+          "required": ["state"],
+          "additionalProperties": false
+        },
+        "dimmer": {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "enum": ["on", "off"] },
+            "brightness": { "type": "number", "minimum": 0, "maximum": 100 }
+          },
+          "required": ["state"],
+          "additionalProperties": false
+        },
+        "climate": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["off", "heat", "cool", "auto", "dry", "fan_only"] },
+            "target_temperature_c": { "type": "number" },
+            "current_temperature_c": { "type": "number" },
+            "fan_mode": { "type": "string", "enum": ["off", "low", "medium", "high", "auto"] },
+            "humidity_percent": { "type": "number" }
+          },
+          "required": ["mode"],
+          "additionalProperties": false
+        },
+        "cover": {
+          "type": "object",
+          "properties": {
+            "position_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+            "state": { "type": "string", "enum": ["opening", "closing", "stopped"] }
+          },
+          "additionalProperties": false
+        },
+        "telemetry": {
+          "type": "object",
+          "properties": {
+            "last_seen": { "type": "string" },
+            "battery_percent": { "type": "number" },
+            "linkquality": { "type": "number" },
+            "signal_dbm": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "action": { "type": "string" },
+          "description": { "type": "string" },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "type"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string", "enum": ["boolean", "number", "string", "enum"] },
+                "minimum": { "type": "number" },
+                "maximum": { "type": "number" },
+                "enum": { "type": "array", "items": { "type": "string" } },
+                "description": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "properties": {
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "preferred_scenes": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "vendor": { "type": "string" },
+        "model": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

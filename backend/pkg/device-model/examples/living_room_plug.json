@@ -1,0 +1,47 @@
+{
+  "id": "plug_living_room_1",
+  "name": "客厅插座",
+  "placement": {
+    "room": "living_room",
+    "zone": "sofa_corner",
+    "mount": "wall",
+    "description": "电视柜下方的智能插座"
+  },
+  "protocol": "zigbee",
+  "bindings": {
+    "zigbee2mqtt": {
+      "topic": "zigbee2mqtt/living_room_plug",
+      "friendly_name": "living_room_plug",
+      "ieee_address": "0x00158d00045abcde"
+    },
+    "ha": {
+      "entity_id": "switch.living_room_plug"
+    }
+  },
+  "traits": {
+    "switch": {
+      "state": "on",
+      "power_w": 12.4
+    },
+    "telemetry": {
+      "last_seen": "2024-05-01T12:00:00Z",
+      "linkquality": 120
+    }
+  },
+  "capabilities": [
+    {
+      "action": "turn_on",
+      "description": "通断插座电源"
+    },
+    {
+      "action": "turn_off",
+      "description": "关闭插座电源"
+    }
+  ],
+  "semantics": {
+    "tags": ["plug", "power"],
+    "preferred_scenes": ["movie_night"],
+    "vendor": "Xiaomi",
+    "model": "ZNCZ04LM"
+  }
+}

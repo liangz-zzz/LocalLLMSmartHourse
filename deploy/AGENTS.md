@@ -18,6 +18,14 @@
 2) `docker compose -f deploy/docker-compose.yml up -d --build`
 3) 首次启动会在 `deploy/homeassistant`、`deploy/zigbee2mqtt` 等目录生成配置
 
+说明：Postgres/Redis 默认映射 `15432` / `16379` 避免与宿主已有实例冲突，若需要其它端口或完全关闭映射可在 `.env` 调整或移除 `ports`。
+
+## 开发容器（简化模式）
+- 需要单容器 dev shell 时使用 `deploy/Dockerfile.dev` + `deploy/dev-container.sh`，默认挂载整个仓库到 `/workspace`。
+- 构建/启动/进入：`./deploy/dev-container.sh build`、`./deploy/dev-container.sh start`、`./deploy/dev-container.sh into`；停止 `./deploy/dev-container.sh stop`。
+- Linux 上会自动 `--network host`，macOS/Windows 默认为桥接；若需要 GPU 支持可设置 `ENABLE_GPU=1`。
+- 该容器只提供开发工具链（Node + pnpm + Python 等），业务服务仍可通过 `docker compose -f deploy/docker-compose.yml up <service>` 启动或在容器内手工运行。
+
 ## 约定
 - 协调器使用 `privileged: true` 以兼容更多 USB/串口；如果不需要可移除。
 - Compose 采用开发模式：挂载源码目录，`command: sleep infinity` 供 devcontainer 进入后运行自定义命令。

@@ -1,0 +1,8 @@
+{
+  "state": "ON",
+  "power": 12.4,
+  "energy": 1.23,
+  "linkquality": 120,
+  "update": { "state": "idle" },
+  "last_seen": "2024-05-01T12:00:00Z"
+}
