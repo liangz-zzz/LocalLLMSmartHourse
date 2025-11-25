@@ -19,10 +19,11 @@ export class MemoryStore {
 }
 
 export class RedisStore {
-  constructor({ url, prefix = "device", logger }) {
+  constructor({ url, prefix = "device", updatesChannel = "device:updates", logger }) {
     this.prefix = prefix;
     this.redis = new Redis(url);
     this.logger = logger;
+    this.updatesChannel = updatesChannel;
   }
 
   key(id) {
@@ -31,6 +32,9 @@ export class RedisStore {
 
   async upsert(device) {
     await this.redis.set(this.key(device.id), JSON.stringify(device));
+    if (this.updatesChannel) {
+      await this.redis.publish(this.updatesChannel, JSON.stringify(device));
+    }
   }
 
   async list() {

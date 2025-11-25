@@ -1,6 +1,8 @@
 import { loadConfig } from "./config.js";
 import { buildServer } from "./server.js";
 import { MockStore, RedisStore } from "./store.js";
+import { RedisBus } from "./bus.js";
+import { setupWs } from "./ws.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -22,7 +24,7 @@ async function main() {
 
   let store;
   if (config.mode === "redis") {
-    store = new RedisStore({ redisUrl: config.redisUrl, logger });
+    store = new RedisStore({ redisUrl: config.redisUrl, logger, prefix: "device" });
     logger.info("Using Redis store", config.redisUrl);
   } else {
     store = new MockStore(samplePath);
@@ -30,8 +32,22 @@ async function main() {
     logger.info("Using mock store");
   }
 
-  const app = buildServer({ store, logger, config });
+  let bus;
+  if (config.mode === "redis") {
+    bus = new RedisBus({
+      redisUrl: config.redisUrl,
+      updatesChannel: config.redisUpdatesChannel,
+      actionsChannel: config.redisActionsChannel,
+      logger
+    });
+    await bus.start();
+  }
+
+  const app = buildServer({ store, logger, config, bus });
   await app.listen({ port: config.port, host: "0.0.0.0" });
+  if (bus) {
+    setupWs({ server: app.server, bus, mode: config.mode, logger });
+  }
   logger.info(`API Gateway listening on :${config.port} (mode=${config.mode})`);
 }
 

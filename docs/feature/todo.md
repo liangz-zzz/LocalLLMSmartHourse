@@ -12,6 +12,10 @@
   - 测试：mock store 单测 + HTTP 集成测试。
 - [done] 设备模型验证工具  
   - 在 `pkg/device-model` 增加 Zod 校验 helper，导出给 adapter/gateway；样例校验单测已添加。
+- [done] 事件流与动作总线  
+  - 适配器写 Redis 并发布 `device:updates`，监听 `device:actions`（当前 stub 日志）。  
+  - 网关默认 Redis 模式，通过 WebSocket `/ws` 转发更新，`POST /devices/:id/actions` 发布到 `device:actions`。  
+  - 测试：Redis WS 集成测试（gateway）、Redis 集成（adapter）。
 - [todo] 数据持久化基础  
   - Redis 缓存已接入适配器（`STORAGE=redis` 写入 `device:*`）；下一步：选 Prisma，建 `device`/`device_state` 表，迁移脚本 & `pnpm db:migrate`。  
   - 适配 adapter 写入与 gateway 读取。

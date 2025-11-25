@@ -8,6 +8,8 @@ export function loadConfig() {
     logLevel: process.env.LOG_LEVEL || "info",
     storage, // memory | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",
-    redisKeyPrefix: process.env.REDIS_PREFIX || "device"
+    redisKeyPrefix: process.env.REDIS_PREFIX || "device",
+    redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
+    redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions"
   };
 }

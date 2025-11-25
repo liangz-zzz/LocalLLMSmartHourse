@@ -1,9 +1,7 @@
 import Fastify from "fastify";
-import websocket from "@fastify/websocket";
 
-export function buildServer({ store, logger, config }) {
+export function buildServer({ store, logger, config, bus }) {
   const app = Fastify({ logger: false });
-  app.register(websocket);
 
   app.get("/health", async () => ({ status: "ok" }));
 
@@ -20,9 +18,21 @@ export function buildServer({ store, logger, config }) {
     return device;
   });
 
-  app.get("/ws", { websocket: true }, (conn) => {
-    conn.socket.send(JSON.stringify({ type: "hello", mode: config.mode }));
-    // Placeholder: future event streaming via Redis Pub/Sub or MQTT bridge
+  app.post("/devices/:id/actions", async (req, reply) => {
+    const { action, params } = req.body || {};
+    if (!action) {
+      return reply.code(400).send({ error: "action_required" });
+    }
+    if (!bus) {
+      return reply.code(503).send({ error: "bus_unavailable" });
+    }
+    await bus.publishAction({
+      id: req.params.id,
+      action,
+      params: params || {},
+      ts: Date.now()
+    });
+    return { status: "queued" };
   });
 
   app.setErrorHandler((err, _req, reply) => {

@@ -23,5 +23,5 @@
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。
 - 运行离线模式：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm run dev`（默认 `MODE=offline`，加载 mock 数据）。
 - 运行 MQTT + Redis（默认）：`MODE=mqtt MQTT_URL=mqtt://mqtt:1883 docker compose -f deploy/docker-compose.yml run --rm device-adapter npm run dev`（`MODE=mqtt` 时默认 `STORAGE=redis`，写入 `REDIS_URL=redis://redis:6379`，前缀 `REDIS_PREFIX=device`）。
-- 存储：可显式 `STORAGE=memory` 关闭 Redis 写入。
+- 存储：可显式 `STORAGE=memory` 关闭 Redis 写入。Redis 模式会在 `REDIS_UPDATES_CHANNEL`（默认 `device:updates`）发布状态更新，监听 `REDIS_ACTIONS_CHANNEL`（默认 `device:actions`）的动作，当前仅日志占位。
 - 测试：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm test`（含内存 MQTT + Redis 集成用例）。

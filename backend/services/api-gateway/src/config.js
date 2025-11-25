@@ -4,6 +4,8 @@ export function loadConfig() {
     port: Number(process.env.PORT || 4000),
     mode: defaultMode, // mock | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",
+    redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
+    redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
     logLevel: process.env.LOG_LEVEL || "info"
   };
 }
