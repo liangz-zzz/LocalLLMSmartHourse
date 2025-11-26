@@ -1,20 +1,21 @@
 import Redis from "ioredis";
 
 export class ActionsSubscriber {
-  constructor({ redisUrl, channel, logger }) {
+  constructor({ redisUrl, channel, onAction, logger }) {
     this.redisUrl = redisUrl;
     this.channel = channel;
     this.logger = logger;
     this.sub = null;
+    this.onAction = onAction;
   }
 
-  async start(onAction) {
+  async start() {
     this.sub = new Redis(this.redisUrl);
     await this.sub.subscribe(this.channel);
     this.sub.on("message", (_channel, message) => {
       try {
         const parsed = JSON.parse(message);
-        onAction?.(parsed);
+        this.onAction?.(parsed);
       } catch (err) {
         this.logger?.error?.("Failed to parse action", err);
       }

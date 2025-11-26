@@ -29,6 +29,20 @@ export class DeviceAdapter {
     }
   }
 
+  async handleAction(action) {
+    // Expected shape: { id, action, params }
+    if (!this.client || !this.store) return;
+    const device = await this.store.get(action.id);
+    if (!device || !device.bindings?.zigbee2mqtt?.topic) {
+      this.logger.warn("Action ignored, device not found or missing topic", action.id);
+      return;
+    }
+    const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
+    const payload = buildZ2MSetPayload(action);
+    this.logger.info("Publishing action to MQTT", topic, payload);
+    this.client.publish(topic, JSON.stringify(payload));
+  }
+
   async loadMockData() {
     const devicePath = path.join(new URL(this.mockDataDir).pathname, "device.json");
     const statePath = path.join(new URL(this.mockDataDir).pathname, "state.json");
@@ -98,4 +112,14 @@ function parseJson(buf) {
 async function readJson(p) {
   const raw = await fs.readFile(p, "utf8");
   return JSON.parse(raw);
+}
+
+function buildZ2MSetPayload(action) {
+  if (action.action === "turn_on") return { state: "ON" };
+  if (action.action === "turn_off") return { state: "OFF" };
+  if (action.action === "set_brightness") {
+    const b = action.params?.brightness ?? action.params?.level;
+    return { state: "ON", brightness: b ?? 254 };
+  }
+  return { state: "TOGGLE" };
 }

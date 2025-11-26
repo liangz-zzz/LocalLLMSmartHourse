@@ -41,12 +41,13 @@ async function main() {
     actionsSubscriber = new ActionsSubscriber({
       redisUrl: config.redisUrl,
       channel: config.redisActionsChannel,
-      logger
+      logger,
+      onAction: async (action) => {
+        logger.info("Received action", action);
+        await adapter.handleAction?.(action);
+      }
     });
-    await actionsSubscriber.start((action) => {
-      logger.info("Received action (stub only)", action);
-      // TODO: map to protocol-specific call (e.g., publish to MQTT)
-    });
+    await actionsSubscriber.start();
   }
 
   await adapter.start();
