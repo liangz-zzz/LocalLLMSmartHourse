@@ -121,8 +121,10 @@ test("adapter publishes HA result when MQTT path unavailable", async () => {
   const msg = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout")), 3000);
     sub.on("message", (_ch, payload) => {
+      const parsed = JSON.parse(payload);
+      if (parsed.id !== "ha_only_device") return;
       clearTimeout(timer);
-      resolve(JSON.parse(payload));
+      resolve(parsed);
     });
   });
 

@@ -10,10 +10,11 @@ export class RedisBus {
     this.logger = logger;
     this.updateHandlers = new Set();
     this.actionResultHandlers = new Set();
+    this.stateSnapshotHandlers = new Set();
   }
 
   async start() {
-    const channels = [this.updatesChannel, this.actionResultsChannel].filter(Boolean);
+    const channels = [this.updatesChannel, this.actionResultsChannel, this.actionResultsChannel ? `${this.actionResultsChannel}:state` : null].filter(Boolean);
     if (channels.length) {
       await this.sub.subscribe(channels);
       this.sub.on("message", (channel, message) => {
@@ -23,6 +24,8 @@ export class RedisBus {
             for (const handler of this.updateHandlers) handler(parsed);
           } else if (channel === this.actionResultsChannel) {
             for (const handler of this.actionResultHandlers) handler(parsed);
+          } else if (channel === `${this.actionResultsChannel}:state`) {
+            for (const handler of this.stateSnapshotHandlers) handler(parsed);
           }
         } catch (err) {
           this.logger?.warn("Failed to parse pubsub message", err);
@@ -40,6 +43,11 @@ export class RedisBus {
   onActionResult(handler) {
     this.actionResultHandlers.add(handler);
     return () => this.actionResultHandlers.delete(handler);
+  }
+
+  onStateSnapshot(handler) {
+    this.stateSnapshotHandlers.add(handler);
+    return () => this.stateSnapshotHandlers.delete(handler);
   }
 
   async publishAction(action) {

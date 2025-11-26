@@ -25,6 +25,7 @@ export class RedisStore {
     this.logger = logger;
     this.updatesChannel = updatesChannel;
     this.actionResultsChannel = actionResultsChannel;
+    this.stateResultsChannel = `${actionResultsChannel}:state`;
   }
 
   key(id) {
@@ -41,6 +42,11 @@ export class RedisStore {
   async publishActionResult(result) {
     if (!this.actionResultsChannel) return;
     await this.redis.publish(this.actionResultsChannel, JSON.stringify(result));
+  }
+
+  async publishStateSnapshot(device) {
+    if (!this.stateResultsChannel) return;
+    await this.redis.publish(this.stateResultsChannel, JSON.stringify({ id: device.id, traits: device.traits, ts: Date.now() }));
   }
 
   async list() {

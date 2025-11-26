@@ -28,9 +28,19 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
     }
   }) || (() => {});
 
+  const unsubscribeState = bus?.onStateSnapshot?.((snapshot) => {
+    const msg = JSON.stringify({ type: "state_snapshot", data: snapshot });
+    for (const client of clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(msg);
+      }
+    }
+  }) || (() => {});
+
   const stop = () => {
     unsubscribe();
     unsubscribeAction();
+    unsubscribeState();
     clients.forEach((c) => c.close());
     return new Promise((resolve) => wss.close(() => resolve()));
   };
