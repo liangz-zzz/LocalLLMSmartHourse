@@ -11,9 +11,11 @@ export function loadConfig() {
     redisKeyPrefix: process.env.REDIS_PREFIX || "device",
     redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
     redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
+    redisActionResultsChannel: process.env.REDIS_ACTION_RESULTS_CHANNEL || "device:action_results",
     dbEnabled: process.env.DB_ENABLED === "true",
     databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome",
     haBaseUrl: process.env.HA_BASE_URL || "http://homeassistant:8123",
-    haToken: process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN
+    haToken: process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN,
+    actionTransport: process.env.ACTION_TRANSPORT || "auto" // auto | mqtt | ha
   };
 }

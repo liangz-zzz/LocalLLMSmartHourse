@@ -26,7 +26,9 @@ test("adapter publishes MQTT set payload on redis action", async () => {
     mqttUrl,
     store,
     logger: new Logger("error"),
-    mockDataDir: ""
+    mockDataDir: "",
+    haBaseUrl: "http://homeassistant:8123",
+    haToken: "dummy"
   });
   const actionsSubscriber = new ActionsSubscriber({
     redisUrl,

@@ -4,7 +4,7 @@ import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
 
 export class DeviceAdapter {
-  constructor({ mode, mqttUrl, store, mockDataDir, logger, haBaseUrl, haToken }) {
+  constructor({ mode, mqttUrl, store, mockDataDir, logger, haBaseUrl, haToken, actionTransport }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
     this.store = store;
@@ -13,6 +13,7 @@ export class DeviceAdapter {
     this.client = null;
     this.haBaseUrl = haBaseUrl;
     this.haToken = haToken;
+    this.actionTransport = actionTransport || "auto";
   }
 
   async start() {
@@ -41,17 +42,27 @@ export class DeviceAdapter {
     }
 
     const hasZ2M = device.bindings?.zigbee2mqtt?.topic && this.client;
-    if (hasZ2M) {
+    const preferHa = this.actionTransport === "ha";
+    const preferMqtt = this.actionTransport === "mqtt";
+
+    if (!preferHa && hasZ2M) {
       const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
       const payload = buildZ2MSetPayload(action);
       this.logger.info("Publishing action to MQTT", topic, payload);
       this.client.publish(topic, JSON.stringify(payload));
+      await this.store.publishActionResult?.({
+        id: device.id,
+        action: action.action,
+        status: "ok",
+        transport: "mqtt",
+        ts: Date.now()
+      });
       return;
     }
 
     const haEntity = device.bindings?.ha?.entity_id || device.bindings?.ha_entity_id;
-    if (haEntity && this.haToken) {
-      await callHaService({
+    if (!preferMqtt && haEntity && this.haToken) {
+      const ok = await callHaService({
         baseUrl: this.haBaseUrl,
         token: this.haToken,
         entityId: haEntity,
@@ -59,10 +70,25 @@ export class DeviceAdapter {
         params: action.params || {},
         logger: this.logger
       });
+      await this.store.publishActionResult?.({
+        id: device.id,
+        action: action.action,
+        status: ok ? "ok" : "error",
+        transport: "ha",
+        ts: Date.now()
+      });
       return;
     }
 
     this.logger.warn("No delivery path for action", action);
+    await this.store.publishActionResult?.({
+      id: device.id,
+      action: action.action,
+      status: "error",
+      transport: "none",
+      ts: Date.now(),
+      reason: "no_delivery_path"
+    });
   }
 
   async loadMockData() {
@@ -170,10 +196,12 @@ async function callHaService({ baseUrl, token, entityId, action, params, logger 
     if (!res.ok) {
       const text = await res.text();
       logger?.warn?.("HA service call failed", res.status, text);
-    } else {
-      logger?.info?.("HA service called", url);
+      return false;
     }
+    logger?.info?.("HA service called", url);
+    return true;
   } catch (err) {
     logger?.error?.("HA service call error", err);
+    return false;
   }
 }

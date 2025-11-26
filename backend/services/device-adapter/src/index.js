@@ -15,6 +15,7 @@ async function main() {
           url: config.redisUrl,
           prefix: config.redisKeyPrefix,
           updatesChannel: config.redisUpdatesChannel,
+          actionResultsChannel: config.redisActionResultsChannel,
           logger
         })
       : new MemoryStore();
@@ -24,7 +25,10 @@ async function main() {
     mqttUrl: config.mqttUrl,
     mockDataDir: config.mockDataDir,
     store,
-    logger
+    logger,
+    haBaseUrl: config.haBaseUrl,
+    haToken: config.haToken,
+    actionTransport: config.actionTransport
   });
 
   if (config.dbEnabled) {
