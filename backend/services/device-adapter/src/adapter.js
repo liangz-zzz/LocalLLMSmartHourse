@@ -4,13 +4,15 @@ import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
 
 export class DeviceAdapter {
-  constructor({ mode, mqttUrl, store, mockDataDir, logger }) {
+  constructor({ mode, mqttUrl, store, mockDataDir, logger, haBaseUrl, haToken }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
     this.store = store;
     this.mockDataDir = mockDataDir;
     this.logger = logger;
     this.client = null;
+    this.haBaseUrl = haBaseUrl;
+    this.haToken = haToken;
   }
 
   async start() {
@@ -31,16 +33,36 @@ export class DeviceAdapter {
 
   async handleAction(action) {
     // Expected shape: { id, action, params }
-    if (!this.client || !this.store) return;
+    if (!this.store) return;
     const device = await this.store.get(action.id);
-    if (!device || !device.bindings?.zigbee2mqtt?.topic) {
-      this.logger.warn("Action ignored, device not found or missing topic", action.id);
+    if (!device) {
+      this.logger.warn("Action ignored, device not found", action.id);
       return;
     }
-    const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
-    const payload = buildZ2MSetPayload(action);
-    this.logger.info("Publishing action to MQTT", topic, payload);
-    this.client.publish(topic, JSON.stringify(payload));
+
+    const hasZ2M = device.bindings?.zigbee2mqtt?.topic && this.client;
+    if (hasZ2M) {
+      const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
+      const payload = buildZ2MSetPayload(action);
+      this.logger.info("Publishing action to MQTT", topic, payload);
+      this.client.publish(topic, JSON.stringify(payload));
+      return;
+    }
+
+    const haEntity = device.bindings?.ha?.entity_id || device.bindings?.ha_entity_id;
+    if (haEntity && this.haToken) {
+      await callHaService({
+        baseUrl: this.haBaseUrl,
+        token: this.haToken,
+        entityId: haEntity,
+        action,
+        params: action.params || {},
+        logger: this.logger
+      });
+      return;
+    }
+
+    this.logger.warn("No delivery path for action", action);
   }
 
   async loadMockData() {
@@ -122,4 +144,36 @@ function buildZ2MSetPayload(action) {
     return { state: "ON", brightness: b ?? 254 };
   }
   return { state: "TOGGLE" };
+}
+
+async function callHaService({ baseUrl, token, entityId, action, params, logger }) {
+  const domain = entityId.split(".")[0];
+  let service = action.action === "turn_off" ? "turn_off" : "turn_on";
+  let payload = { entity_id: entityId };
+
+  if (action.action === "set_brightness") {
+    service = "turn_on";
+    const pct = typeof params?.brightness === "number" ? params.brightness : undefined;
+    payload = { entity_id: entityId, brightness_pct: pct ?? 100 };
+  }
+
+  const url = `${baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      logger?.warn?.("HA service call failed", res.status, text);
+    } else {
+      logger?.info?.("HA service called", url);
+    }
+  } catch (err) {
+    logger?.error?.("HA service call error", err);
+  }
 }

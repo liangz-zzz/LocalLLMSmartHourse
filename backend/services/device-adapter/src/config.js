@@ -12,6 +12,8 @@ export function loadConfig() {
     redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
     redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
     dbEnabled: process.env.DB_ENABLED === "true",
-    databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome"
+    databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome",
+    haBaseUrl: process.env.HA_BASE_URL || "http://homeassistant:8123",
+    haToken: process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN
   };
 }
