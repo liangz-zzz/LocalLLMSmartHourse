@@ -60,6 +60,7 @@ test("gateway websocket streams device updates from Redis", async () => {
   await app.close();
   await bus.stop();
   await store.clearTestPrefix();
+  await store.close();
 });
 
 async function waitFor(fn, timeoutMs = 2000, intervalMs = 50) {

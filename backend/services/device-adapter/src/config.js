@@ -10,6 +10,8 @@ export function loadConfig() {
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",
     redisKeyPrefix: process.env.REDIS_PREFIX || "device",
     redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
-    redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions"
+    redisActionsChannel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
+    dbEnabled: process.env.DB_ENABLED === "true",
+    databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome"
   };
 }

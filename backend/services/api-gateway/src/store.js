@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import Redis from "ioredis";
+import { PrismaClient } from "@prisma/client";
 
 export class MockStore {
   constructor(samplePath) {
@@ -74,4 +75,55 @@ export class RedisStore {
   async close() {
     await this.redis.quit();
   }
+
+  async upsert(device) {
+    await this.redis.set(this.key(device.id), JSON.stringify(device));
+  }
+
+  async clearTestPrefix() {
+    const keys = await this.redis.keys(`${this.prefix}:*`);
+    if (keys.length) {
+      await this.redis.del(keys);
+    }
+  }
+
+  async close() {
+    await this.redis.quit();
+  }
+}
+
+export class DbStore {
+  constructor({ databaseUrl, logger }) {
+    if (!process.env.DATABASE_URL && databaseUrl) {
+      process.env.DATABASE_URL = databaseUrl;
+    }
+    this.logger = logger;
+    this.prisma = new PrismaClient();
+  }
+
+  async list() {
+    const rows = await this.prisma.device.findMany({
+      include: { states: { orderBy: { createdAt: "desc" }, take: 1 } }
+    });
+    return rows.map(mapDbDevice);
+  }
+
+  async get(id) {
+    const row = await this.prisma.device.findUnique({
+      where: { id },
+      include: { states: { orderBy: { createdAt: "desc" }, take: 1 } }
+    });
+    if (!row) return undefined;
+    return mapDbDevice(row);
+  }
+
+  async close() {
+    await this.prisma.$disconnect();
+  }
+}
+
+function mapDbDevice(row) {
+  const latestState = row.states?.[0]?.traits || {};
+  const { states, ...rest } = row;
+  return { ...rest, traits: latestState };
 }

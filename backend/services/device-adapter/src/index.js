@@ -3,6 +3,7 @@ import { Logger } from "./log.js";
 import { MemoryStore, RedisStore } from "./store.js";
 import { DeviceAdapter } from "./adapter.js";
 import { ActionsSubscriber } from "./actions-subscriber.js";
+import { ensureDatabaseUrl, upsertDeviceAndState } from "./db.js";
 
 async function main() {
   const config = loadConfig();
@@ -25,6 +26,15 @@ async function main() {
     store,
     logger
   });
+
+  if (config.dbEnabled) {
+    ensureDatabaseUrl(config.databaseUrl);
+    const originalUpsert = adapter.store.upsert.bind(adapter.store);
+    adapter.store.upsert = async (device) => {
+      await originalUpsert(device);
+      await upsertDeviceAndState(device);
+    };
+  }
 
   let actionsSubscriber;
   if (config.storage === "redis") {

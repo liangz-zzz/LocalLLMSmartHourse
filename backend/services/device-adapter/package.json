@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "node src/index.js",
-    "test": "node --test"
+    "prisma:generate": "PRISMA_CLI_BINARY_TARGETS=debian-openssl-3.0.x DATABASE_URL=${DATABASE_URL:-postgres://smarthome:smarthome@db:5432/smarthome} prisma generate --schema ${PRISMA_SCHEMA:-./prisma/schema.prisma}",
+    "prisma:push": "PRISMA_CLI_BINARY_TARGETS=debian-openssl-3.0.x DATABASE_URL=${DATABASE_URL:-postgres://smarthome:smarthome@db:5432/smarthome} prisma db push --schema ${PRISMA_SCHEMA:-./prisma/schema.prisma}",
+    "test": "npm run prisma:generate && npm run prisma:push && node --test"
   },
   "dependencies": {
     "ioredis": "^5.4.2",
-    "mqtt": "^5.10.1"
+    "mqtt": "^5.10.1",
+    "@prisma/client": "^5.21.0"
   },
   "devDependencies": {
+    "prisma": "^5.21.0",
     "aedes": "^0.51.3"
   },
   "engines": {

@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.js";
 import { buildServer } from "./server.js";
-import { MockStore, RedisStore } from "./store.js";
+import { MockStore, RedisStore, DbStore } from "./store.js";
 import { RedisBus } from "./bus.js";
 import { setupWs } from "./ws.js";
 
@@ -26,6 +26,9 @@ async function main() {
   if (config.mode === "redis") {
     store = new RedisStore({ redisUrl: config.redisUrl, logger, prefix: "device" });
     logger.info("Using Redis store", config.redisUrl);
+  } else if (config.mode === "db") {
+    store = new DbStore({ databaseUrl: config.databaseUrl, logger });
+    logger.info("Using DB store", config.databaseUrl);
   } else {
     store = new MockStore(samplePath);
     await store.init();

@@ -16,9 +16,10 @@
   - 适配器写 Redis 并发布 `device:updates`，监听 `device:actions`（当前 stub 日志）。  
   - 网关默认 Redis 模式，通过 WebSocket `/ws` 转发更新，`POST /devices/:id/actions` 发布到 `device:actions`。  
   - 测试：Redis WS 集成测试（gateway）、Redis 集成（adapter）。
-- [todo] 数据持久化基础  
-  - Redis 缓存已接入适配器（`STORAGE=redis` 写入 `device:*`）；下一步：选 Prisma，建 `device`/`device_state` 表，迁移脚本 & `pnpm db:migrate`。  
-  - 适配 adapter 写入与 gateway 读取。
+- [done] 数据持久化基础  
+  - Prisma schema (`Device`/`DeviceState`) + `DATABASE_URL`，命令内置 `prisma generate/db push`。  
+  - 适配器可 `DB_ENABLED=true` 时写入 Postgres（同时写 Redis），网关支持 `MODE=db` 直接从 Postgres 读取。  
+  - 测试：适配器 DB 集成测试，网关 DB store/HTTP 集成测试。
 - [todo] 规则引擎骨架  
   - 定义最小 JSON DSL（triggers + conditions + actions），加载本地 rules.json，匹配后打印动作（占位）。
 - [todo] LLM Bridge 占位  
