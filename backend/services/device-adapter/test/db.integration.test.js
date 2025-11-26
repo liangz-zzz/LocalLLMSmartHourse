@@ -7,6 +7,8 @@ import { MemoryStore } from "../src/store.js";
 import { normalizeZigbee2Mqtt } from "../src/normalize.js";
 import { ensureDatabaseUrl, upsertDeviceAndState } from "../src/db.js";
 
+process.env.DATABASE_URL ||= "postgres://smarthome:smarthome@db:5432/smarthome";
+
 const prisma = new PrismaClient();
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 

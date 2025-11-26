@@ -181,6 +181,17 @@ async function callHaService({ baseUrl, token, entityId, action, params, logger 
     service = "turn_on";
     const pct = typeof params?.brightness === "number" ? params.brightness : undefined;
     payload = { entity_id: entityId, brightness_pct: pct ?? 100 };
+  } else if (action.action === "set_cover_position") {
+    service = "set_cover_position";
+    const pos = typeof params?.position === "number" ? params.position : undefined;
+    payload = { entity_id: entityId, position: pos ?? 0 };
+  } else if (action.action === "set_temperature") {
+    service = "set_temperature";
+    const t = typeof params?.temperature === "number" ? params.temperature : params?.target_temperature;
+    payload = { entity_id: entityId, temperature: t ?? 22 };
+  } else if (action.action === "set_hvac_mode") {
+    service = "set_hvac_mode";
+    payload = { entity_id: entityId, hvac_mode: params?.mode || "auto" };
   }
 
   const url = `${baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`;

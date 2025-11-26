@@ -78,6 +78,64 @@ test("adapter publishes MQTT set payload on redis action", async () => {
   broker.close();
 });
 
+test("adapter publishes HA result when MQTT path unavailable", async () => {
+  const store = new RedisStore({ url: redisUrl, prefix: `act_test_${Date.now()}`, updatesChannel: null, actionResultsChannel: "device:action_results" });
+  await store.clearTestPrefix();
+
+  // stub fetch to simulate HA success
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, text: async () => "" });
+
+  // seed a device with only HA binding
+  await store.upsert({
+    id: "ha_only_device",
+    name: "ha device",
+    placement: { room: "lab" },
+    protocol: "zigbee",
+    bindings: { ha: { entity_id: "switch.test" } },
+    traits: {},
+    capabilities: [{ action: "turn_on" }]
+  });
+
+  const sub = new Redis(redisUrl);
+  await sub.subscribe("device:action_results");
+
+  const adapter = new DeviceAdapter({
+    mode: "offline",
+    mqttUrl: "mqtt://invalid",
+    store,
+    logger: new Logger("error"),
+    mockDataDir: "",
+    haBaseUrl: "http://homeassistant:8123",
+    haToken: "dummy",
+    actionTransport: "ha"
+  });
+
+  await adapter.handleAction({
+    id: "ha_only_device",
+    action: "turn_on",
+    params: {}
+  });
+
+  // fetch action result from Redis channel
+  const msg = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), 3000);
+    sub.on("message", (_ch, payload) => {
+      clearTimeout(timer);
+      resolve(JSON.parse(payload));
+    });
+  });
+
+  assert.equal(msg.status, "ok");
+  assert.equal(msg.transport, "ha");
+
+  await sub.unsubscribe("device:action_results");
+  await sub.quit();
+  await store.clearTestPrefix();
+  await store.close();
+  globalThis.fetch = origFetch;
+});
+
 async function waitFor(fn, timeoutMs = 2000, intervalMs = 50) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
