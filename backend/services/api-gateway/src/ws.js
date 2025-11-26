@@ -19,8 +19,18 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
     }
   }) || (() => {});
 
+  const unsubscribeAction = bus?.onActionResult?.((result) => {
+    const msg = JSON.stringify({ type: "action_result", data: result });
+    for (const client of clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(msg);
+      }
+    }
+  }) || (() => {});
+
   const stop = () => {
     unsubscribe();
+    unsubscribeAction();
     clients.forEach((c) => c.close());
     return new Promise((resolve) => wss.close(() => resolve()));
   };

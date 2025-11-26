@@ -1,36 +1,45 @@
 import Redis from "ioredis";
 
 export class RedisBus {
-  constructor({ redisUrl, updatesChannel, actionsChannel, logger }) {
+  constructor({ redisUrl, updatesChannel, actionsChannel, actionResultsChannel, logger }) {
     this.pub = new Redis(redisUrl);
     this.sub = new Redis(redisUrl);
     this.updatesChannel = updatesChannel;
     this.actionsChannel = actionsChannel;
+    this.actionResultsChannel = actionResultsChannel;
     this.logger = logger;
     this.updateHandlers = new Set();
+    this.actionResultHandlers = new Set();
   }
 
   async start() {
-    if (this.updatesChannel) {
-      await this.sub.subscribe(this.updatesChannel);
+    const channels = [this.updatesChannel, this.actionResultsChannel].filter(Boolean);
+    if (channels.length) {
+      await this.sub.subscribe(channels);
       this.sub.on("message", (channel, message) => {
-        if (channel !== this.updatesChannel) return;
         try {
           const parsed = JSON.parse(message);
-          for (const handler of this.updateHandlers) {
-            handler(parsed);
+          if (channel === this.updatesChannel) {
+            for (const handler of this.updateHandlers) handler(parsed);
+          } else if (channel === this.actionResultsChannel) {
+            for (const handler of this.actionResultHandlers) handler(parsed);
           }
         } catch (err) {
-          this.logger?.warn("Failed to parse update message", err);
+          this.logger?.warn("Failed to parse pubsub message", err);
         }
       });
-      this.logger?.info("Subscribed to updates channel", this.updatesChannel);
+      this.logger?.info("Subscribed to channels", channels);
     }
   }
 
   onUpdate(handler) {
     this.updateHandlers.add(handler);
     return () => this.updateHandlers.delete(handler);
+  }
+
+  onActionResult(handler) {
+    this.actionResultHandlers.add(handler);
+    return () => this.actionResultHandlers.delete(handler);
   }
 
   async publishAction(action) {

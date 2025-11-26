@@ -25,6 +25,7 @@ test("gateway websocket streams device updates from Redis", async () => {
     redisUrl,
     updatesChannel: "device:updates",
     actionsChannel: "device:actions",
+    actionResultsChannel: "device:action_results",
     logger: console
   });
   await bus.start();
@@ -49,12 +50,16 @@ test("gateway websocket streams device updates from Redis", async () => {
   await store.upsert(sample); // publish happens inside store when using RedisStore in adapter; here we mimic via bus
   await bus.publishAction({ id: "noop", action: "noop" }); // ensure publish works
   await bus.pub.publish("device:updates", JSON.stringify(sample));
+  await bus.pub.publish("device:action_results", JSON.stringify({ id: sample.id, action: "turn_on", status: "ok" }));
 
   await waitFor(() => messages.find((m) => m.type === "device_update"), 5000);
   const update = messages.find((m) => m.type === "device_update");
   assert.equal(update.data.id, sample.id);
 
-  client.close();
+  await waitFor(() => messages.find((m) => m.type === "action_result"), 5000);
+  const resMsg = messages.find((m) => m.type === "action_result");
+  assert.equal(resMsg.data.action, "turn_on");
+
   client.close();
   await stopWs();
   await app.close();

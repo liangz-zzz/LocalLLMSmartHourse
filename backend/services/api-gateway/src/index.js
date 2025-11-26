@@ -41,6 +41,7 @@ async function main() {
       redisUrl: config.redisUrl,
       updatesChannel: config.redisUpdatesChannel,
       actionsChannel: config.redisActionsChannel,
+      actionResultsChannel: config.redisActionResultsChannel,
       logger
     });
     await bus.start();
