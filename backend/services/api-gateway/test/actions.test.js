@@ -9,7 +9,11 @@ const device = {
   protocol: "zigbee",
   bindings: {},
   traits: { switch: { state: "off" } },
-  capabilities: [{ action: "turn_on" }]
+  capabilities: [
+    { action: "turn_on" },
+    { action: "set_brightness", parameters: [{ name: "brightness", type: "number", minimum: 0, maximum: 100 }] },
+    { action: "mode_enum", parameters: [{ name: "mode", type: "enum", enum: ["a", "b"] }] }
+  ]
 };
 
 class FakeStore {
@@ -48,9 +52,16 @@ test("actions route validates device and capability", async () => {
   const bad = await fetch(`${base}/devices/plug1/actions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "set_brightness" })
+    body: JSON.stringify({ action: "set_brightness", params: { brightness: 200 } })
   });
   assert.equal(bad.status, 400);
+
+  const badEnum = await fetch(`${base}/devices/plug1/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "mode_enum", params: { mode: "c" } })
+  });
+  assert.equal(badEnum.status, 400);
 
   const missing = await fetch(`${base}/devices/unknown/actions`, {
     method: "POST",
