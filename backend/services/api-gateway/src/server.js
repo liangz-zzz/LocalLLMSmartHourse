@@ -23,6 +23,17 @@ export function buildServer({ store, logger, config, bus }) {
     if (!action) {
       return reply.code(400).send({ error: "action_required" });
     }
+
+    const device = await store.get(req.params.id);
+    if (!device) {
+      return reply.code(404).send({ error: "device_not_found" });
+    }
+
+    const allowed = device.capabilities?.some((c) => c.action === action);
+    if (!allowed) {
+      return reply.code(400).send({ error: "action_not_supported" });
+    }
+
     if (!bus) {
       return reply.code(503).send({ error: "bus_unavailable" });
     }
