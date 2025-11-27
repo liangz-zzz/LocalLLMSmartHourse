@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS "Rule" (
+  "id" TEXT PRIMARY KEY,
+  "name" TEXT NOT NULL,
+  "when" JSONB NOT NULL,
+  "then" JSONB NOT NULL,
+  "enabled" BOOLEAN DEFAULT TRUE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);

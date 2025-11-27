@@ -45,8 +45,9 @@ export function buildServer({ store, logger, config, bus, actionStore }) {
       return reply.code(404).send({ error: "not_found" });
     }
     const limit = Math.min(Number(req.query?.limit || 20), 100);
-    const items = await actionStore.listByDevice(req.params.id, limit);
-    return { items };
+    const offset = Math.max(Number(req.query?.offset || 0), 0);
+    const items = await actionStore.listByDevice(req.params.id, limit, offset);
+    return { items, limit, offset };
   });
 
   app.post("/devices/:id/actions", async (req, reply) => {

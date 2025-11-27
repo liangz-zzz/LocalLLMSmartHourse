@@ -127,6 +127,7 @@ services:
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     volumes:
       - ../backend/services/rules-engine:/app
+      - ../backend/prisma:/workspace/prisma
       - rules_engine_node_modules:/app/node_modules
     command: ["sleep", "infinity"]
 

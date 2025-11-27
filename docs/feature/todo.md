@@ -20,9 +20,17 @@
   - Prisma schema (`Device`/`DeviceState`) + `DATABASE_URL`，命令内置 `prisma generate/db push`。  
   - 适配器可 `DB_ENABLED=true` 时写入 Postgres（同时写 Redis），网关支持 `MODE=db` 直接从 Postgres 读取。  
   - 测试：适配器 DB 集成测试，网关 DB store/HTTP 集成测试。
-- [next] 动作结果持久化与查询  
-  - 网关监听 `device:action_results` 并落库/缓存，提供查询接口或 WS ACK。  
-  - 适配器侧可补充更多 HA 服务映射（cover/climate/mode 等）与严格参数校验。
+- [done] 动作结果持久化与查询  
+  - 网关监听 `device:action_results` 并落库，`GET /devices/:id/actions` 查询；WS 推送动作结果/状态快照。  
+  - 适配器支持 MQTT/HA 下行并返回结果。
+- [next] 规则持久化与管理  
+  - 将规则存 Postgres，Gateway 提供 CRUD（列表/创建/删除），规则引擎从 DB 拉取并热更新。  
+  - 规则执行结果写入日志/动作结果（可复用 ActionResult 表或新表）。
+- [next] HA 映射与参数校验增强  
+  - 扩充 cover/climate 等 HA service 映射；按 capability 参数做必填/枚举校验，错误返回。  
+  - WS/REST 返回更详细的错误与执行结果。
+- [todo] 前端/LLM 占位  
+  - 简单设备列表/动作触发页面；LLM 体验接口演示（调用 llm-bridge echo）。  
 - [done] 规则引擎骨架  
   - 简单 JSON DSL：`deviceId + traitPath equals` -> 动作发布到 Redis `device:actions`；订阅 `device:updates`。
   - 测试：规则匹配单元；运行入口 `rules-engine` 服务。

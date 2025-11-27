@@ -24,4 +24,4 @@
 - 运行（mock 模式）：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm run dev`
 - 运行（redis 模式）：`MODE=redis REDIS_URL=redis://redis:6379 docker compose -f deploy/docker-compose.yml run --rm api-gateway npm run dev`
 - 运行（db 模式）：`MODE=db DATABASE_URL=postgres://smarthome:smarthome@db:5432/smarthome docker compose -f deploy/docker-compose.yml run --rm api-gateway npm run dev`
-- 测试：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm test`（含 mock store 单测、Redis + WebSocket 集成、DB store 集成）
+- 测试：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm test`（含 mock store 单测、Redis + WebSocket 集成、DB store + 动作结果查询集成）

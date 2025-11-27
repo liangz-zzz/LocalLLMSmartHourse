@@ -45,12 +45,14 @@ export class ActionResultStore {
     });
   }
 
-  async listByDevice(deviceId, limit = 20) {
+  async listByDevice(deviceId, limit = 20, offset = 0) {
     const take = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const skip = Math.max(Number(offset) || 0, 0);
     return this.prisma.actionResult.findMany({
       where: { deviceId },
       orderBy: { createdAt: "desc" },
-      take
+      take,
+      skip
     });
   }
 

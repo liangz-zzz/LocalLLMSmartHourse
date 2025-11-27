@@ -12,5 +12,5 @@
 
 当前实现
 - 简单 JSON 规则（`rules.json`）：条件 `deviceId + traitPath + equals`，动作发布到 Redis `device:actions`。
-- 运行：订阅 `device:updates`，匹配规则即发布动作；入口 `npm run dev`（需 `REDIS_URL`）。
+- 运行：订阅 `device:updates`，匹配规则即发布动作；入口 `npm run dev`（需 `REDIS_URL`）。若设置 `DATABASE_URL` 则从 Postgres `Rule` 表拉取规则并周期刷新（`RULES_REFRESH_MS`）。
 - 测试：`docker compose -f deploy/docker-compose.yml run --rm rules-engine npm test`（规则匹配单元）。
