@@ -4,6 +4,7 @@ import { MockStore, RedisStore, DbStore } from "./store.js";
 import { RedisBus } from "./bus.js";
 import { setupWs } from "./ws.js";
 import { ActionResultStore } from "./action-store.js";
+import { RuleStore } from "./rule-store.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -38,8 +39,12 @@ async function main() {
 
   let bus;
   let actionStore;
-  if (config.actionResultsPersist && config.databaseUrl) {
-    actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
+  let ruleStore;
+  if (config.databaseUrl) {
+    if (config.actionResultsPersist) {
+      actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
+    }
+    ruleStore = new RuleStore({ databaseUrl: config.databaseUrl });
   }
 
   if (config.mode === "redis") {
@@ -62,7 +67,7 @@ async function main() {
     }
   }
 
-  const app = buildServer({ store, logger, config, bus, actionStore });
+  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger });

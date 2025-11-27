@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 
-export function buildServer({ store, logger, config, bus, actionStore }) {
+export function buildServer({ store, logger, config, bus, actionStore, ruleStore }) {
   const app = Fastify({ logger: false });
 
   const validateActionParams = (device, action, params) => {
@@ -81,6 +81,29 @@ export function buildServer({ store, logger, config, bus, actionStore }) {
       ts: Date.now()
     });
     return { status: "queued" };
+  });
+
+  // Rule management (requires DB)
+  app.get("/rules", async (_req, reply) => {
+    if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
+    const items = await ruleStore.list();
+    return { items };
+  });
+
+  app.post("/rules", async (req, reply) => {
+    if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
+    const { id, name, when, then, enabled } = req.body || {};
+    if (!id || !when || !then) {
+      return reply.code(400).send({ error: "invalid_rule" });
+    }
+    const created = await ruleStore.create({ id, name, when, then, enabled });
+    return created;
+  });
+
+  app.delete("/rules/:id", async (req, reply) => {
+    if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
+    await ruleStore.delete(req.params.id);
+    return { status: "deleted" };
   });
 
   app.setErrorHandler((err, _req, reply) => {
