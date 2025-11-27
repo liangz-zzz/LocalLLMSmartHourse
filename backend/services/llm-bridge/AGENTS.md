@@ -9,3 +9,8 @@
 
 测试
 - 为 prompt/解析逻辑建黄金样本测试；可在 CI 中使用小模型或 mock。
+
+当前实现
+- 占位回显服务：`POST /v1/chat/completions` 返回最新 user 消息的 echo；`/health`。
+- 运行：`docker compose -f deploy/docker-compose.yml run --rm llm-bridge npm install`，`npm run dev`（PORT 默认 5000）。
+- 测试：`docker compose -f deploy/docker-compose.yml run --rm llm-bridge npm test`。

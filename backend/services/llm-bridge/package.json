@@ -1,0 +1,16 @@
+{
+  "name": "llm-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "fastify": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
