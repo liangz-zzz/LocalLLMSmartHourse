@@ -4,17 +4,29 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
   const wss = new WebSocketServer({ server, path: "/ws" });
   const clients = new Set();
 
-  wss.on("connection", (socket) => {
-    clients.add(socket);
+  wss.on("connection", (socket, req) => {
+    const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+    const filterIds = url.searchParams.get("devices");
+    const deviceSet = filterIds ? new Set(filterIds.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+
+    clients.add({ socket, devices: deviceSet });
     socket.send(JSON.stringify({ type: "hello", mode }));
-    socket.on("close", () => clients.delete(socket));
+    socket.on("close", () => {
+      for (const entry of clients) {
+        if (entry.socket === socket) {
+          clients.delete(entry);
+          break;
+        }
+      }
+    });
   });
 
   const unsubscribe = bus?.onUpdate?.((update) => {
     const msg = JSON.stringify({ type: "device_update", data: update });
     for (const client of clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(msg);
+      if (client.socket.readyState === client.socket.OPEN) {
+        if (client.devices && update?.id && !client.devices.has(update.id)) continue;
+        client.socket.send(msg);
       }
     }
   }) || (() => {});
@@ -22,8 +34,9 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
   const unsubscribeAction = bus?.onActionResult?.((result) => {
     const msg = JSON.stringify({ type: "action_result", data: result });
     for (const client of clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(msg);
+      if (client.socket.readyState === client.socket.OPEN) {
+        if (client.devices && result?.id && !client.devices.has(result.id)) continue;
+        client.socket.send(msg);
       }
     }
   }) || (() => {});
@@ -31,8 +44,9 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
   const unsubscribeState = bus?.onStateSnapshot?.((snapshot) => {
     const msg = JSON.stringify({ type: "state_snapshot", data: snapshot });
     for (const client of clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(msg);
+      if (client.socket.readyState === client.socket.OPEN) {
+        if (client.devices && snapshot?.id && !client.devices.has(snapshot.id)) continue;
+        client.socket.send(msg);
       }
     }
   }) || (() => {});
@@ -41,7 +55,7 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
     unsubscribe();
     unsubscribeAction();
     unsubscribeState();
-    clients.forEach((c) => c.close());
+    clients.forEach(({ socket }) => socket.close());
     return new Promise((resolve) => wss.close(() => resolve()));
   };
 
