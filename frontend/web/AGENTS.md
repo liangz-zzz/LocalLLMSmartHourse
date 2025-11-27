@@ -12,3 +12,7 @@
 - API SDK 从后端共享类型生成（OpenAPI codegen 或手写）。
 - WebSocket 订阅设备状态/事件；考虑指数退避重连。
 - 将 `placement/semantics` 渲染为“位置/用途”说明，便于人工核对 LLM 知识库。
+
+当前占位
+- `pages/index.tsx`：简单设备列表页面，通过 Next API 代理 `/api/devices` 调用网关。
+- `pages/api/devices.ts`：代理网关 `http://localhost:4000/devices`（可用 `API_HTTP_BASE` 覆盖）。
