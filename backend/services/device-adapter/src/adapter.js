@@ -170,6 +170,18 @@ function buildZ2MSetPayload(action) {
     const b = action.params?.brightness ?? action.params?.level;
     return { state: "ON", brightness: b ?? 254 };
   }
+  if (action.action === "set_cover_position") {
+    const pos = action.params?.position;
+    return { position: pos ?? 0 };
+  }
+  if (action.action === "set_temperature") {
+    const t = action.params?.temperature ?? action.params?.target_temperature;
+    return { temperature: t ?? 22 };
+  }
+  if (action.action === "set_hvac_mode") {
+    const mode = action.params?.mode || "auto";
+    return { state: "ON", fan_mode: mode, mode };
+  }
   return { state: "TOGGLE" };
 }
 

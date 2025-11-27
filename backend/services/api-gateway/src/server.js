@@ -8,7 +8,7 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     if (!capability || !capability.parameters) return { ok: true };
     for (const p of capability.parameters) {
       const value = params?.[p.name];
-      if (value === undefined) continue; // optional unless enum with required? keep loose for now
+      if (value === undefined) continue; // optional unless extended required flag added later
       if (p.type === "boolean" && typeof value !== "boolean") return { ok: false, reason: `param ${p.name} must be boolean` };
       if (p.type === "number") {
         if (typeof value !== "number") return { ok: false, reason: `param ${p.name} must be number` };
