@@ -23,8 +23,9 @@
 - [next] 动作结果持久化与查询  
   - 网关监听 `device:action_results` 并落库/缓存，提供查询接口或 WS ACK。  
   - 适配器侧可补充更多 HA 服务映射（cover/climate/mode 等）与严格参数校验。
-- [todo] 规则引擎骨架  
-  - 定义最小 JSON DSL（triggers + conditions + actions），加载本地 rules.json，匹配后打印动作（占位）。
+- [done] 规则引擎骨架  
+  - 简单 JSON DSL：`deviceId + traitPath equals` -> 动作发布到 Redis `device:actions`；订阅 `device:updates`。
+  - 测试：规则匹配单元；运行入口 `rules-engine` 服务。
 - [todo] LLM Bridge 占位  
   - OpenAI 兼容 `/v1/chat/completions`，内部可回显或代理配置中的 API_BASE，方便前端/LLM 测试。
 - [todo] 前端占位页  

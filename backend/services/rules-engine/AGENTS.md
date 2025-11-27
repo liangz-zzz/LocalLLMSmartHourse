@@ -9,3 +9,8 @@
 
 测试
 - 覆盖规则解析、条件判断、动作调用的单元测试；集成测试模拟 MQTT 事件流。
+
+当前实现
+- 简单 JSON 规则（`rules.json`）：条件 `deviceId + traitPath + equals`，动作发布到 Redis `device:actions`。
+- 运行：订阅 `device:updates`，匹配规则即发布动作；入口 `npm run dev`（需 `REDIS_URL`）。
+- 测试：`docker compose -f deploy/docker-compose.yml run --rm rules-engine npm test`（规则匹配单元）。

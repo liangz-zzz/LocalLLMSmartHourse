@@ -1,0 +1,13 @@
+[
+  {
+    "id": "auto_off_after_on",
+    "when": {
+      "deviceId": "living_room_plug",
+      "traitPath": "traits.switch.state",
+      "equals": "on"
+    },
+    "then": {
+      "action": "turn_off"
+    }
+  }
+]
