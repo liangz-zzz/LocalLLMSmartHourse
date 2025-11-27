@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
+import { buildActionResult } from "./action-results.js";
 
 export class DeviceAdapter {
   constructor({ mode, mqttUrl, store, mockDataDir, logger, haBaseUrl, haToken, actionTransport }) {
@@ -50,13 +51,9 @@ export class DeviceAdapter {
       const payload = buildZ2MSetPayload(action);
       this.logger.info("Publishing action to MQTT", topic, payload);
       this.client.publish(topic, JSON.stringify(payload));
-      await this.store.publishActionResult?.({
-        id: device.id,
-        action: action.action,
-        status: "ok",
-        transport: "mqtt",
-        ts: Date.now()
-      });
+      await this.store.publishActionResult?.(
+        buildActionResult({ deviceId: device.id, action: action.action, status: 'ok', transport: 'mqtt', params: action.params })
+      );
       return;
     }
 
@@ -70,25 +67,29 @@ export class DeviceAdapter {
         params: action.params || {},
         logger: this.logger
       });
-      await this.store.publishActionResult?.({
-        id: device.id,
-        action: action.action,
-        status: ok ? "ok" : "error",
-        transport: "ha",
-        ts: Date.now()
-      });
+      await this.store.publishActionResult?.(
+        buildActionResult({
+          deviceId: device.id,
+          action: action.action,
+          status: ok ? 'ok' : 'error',
+          transport: 'ha',
+          params: action.params
+        })
+      );
       return;
     }
 
     this.logger.warn("No delivery path for action", action);
-    await this.store.publishActionResult?.({
-      id: device.id,
-      action: action.action,
-      status: "error",
-      transport: "none",
-      ts: Date.now(),
-      reason: "no_delivery_path"
-    });
+    await this.store.publishActionResult?.(
+      buildActionResult({
+        deviceId: device.id,
+        action: action.action,
+        status: 'error',
+        transport: 'none',
+        params: action.params,
+        reason: 'no_delivery_path'
+      })
+    );
   }
 
   async loadMockData() {

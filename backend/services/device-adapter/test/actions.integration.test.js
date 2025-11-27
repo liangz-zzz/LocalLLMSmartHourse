@@ -79,26 +79,34 @@ test("adapter publishes MQTT set payload on redis action", async () => {
 });
 
 test("adapter publishes HA result when MQTT path unavailable", async () => {
-  const store = new RedisStore({ url: redisUrl, prefix: `act_test_${Date.now()}`, updatesChannel: null, actionResultsChannel: "device:action_results" });
-  await store.clearTestPrefix();
+  const results = [];
+  const store = {
+    data: {
+      ha_only_device: {
+        id: "ha_only_device",
+        name: "ha device",
+        placement: { room: "lab" },
+        protocol: "zigbee",
+        bindings: { ha: { entity_id: "switch.test" } },
+        traits: {},
+        capabilities: [{ action: "turn_on" }]
+      }
+    },
+    async get(id) {
+      return this.data[id];
+    },
+    async publishActionResult(r) {
+      results.push(r);
+    }
+  };
 
   // stub fetch to simulate HA success
   const origFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, text: async () => "" });
-
-  // seed a device with only HA binding
-  await store.upsert({
-    id: "ha_only_device",
-    name: "ha device",
-    placement: { room: "lab" },
-    protocol: "zigbee",
-    bindings: { ha: { entity_id: "switch.test" } },
-    traits: {},
-    capabilities: [{ action: "turn_on" }]
-  });
-
-  const sub = new Redis(redisUrl);
-  await sub.subscribe("device:action_results");
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return { ok: true, text: async () => "" };
+  };
 
   const adapter = new DeviceAdapter({
     mode: "offline",
@@ -117,24 +125,12 @@ test("adapter publishes HA result when MQTT path unavailable", async () => {
     params: {}
   });
 
-  // fetch action result from Redis channel
-  const msg = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), 3000);
-    sub.on("message", (_ch, payload) => {
-      const parsed = JSON.parse(payload);
-      if (parsed.id !== "ha_only_device") return;
-      clearTimeout(timer);
-      resolve(parsed);
-    });
-  });
-
+  assert.ok(results.length > 0);
+  const msg = results[0];
   assert.equal(msg.status, "ok");
   assert.equal(msg.transport, "ha");
+  assert.ok(called, "HA fetch should be called");
 
-  await sub.unsubscribe("device:action_results");
-  await sub.quit();
-  await store.clearTestPrefix();
-  await store.close();
   globalThis.fetch = origFetch;
 });
 

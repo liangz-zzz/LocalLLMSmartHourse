@@ -18,6 +18,7 @@ model Device {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   states       DeviceState[]
+  actions      ActionResult[]
 }
 
 model DeviceState {
@@ -27,4 +28,19 @@ model DeviceState {
   createdAt DateTime @default(now())
 
   device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model ActionResult {
+  id        String   @id
+  deviceId  String
+  action    String
+  status    String
+  transport String
+  reason    String?
+  params    Json?
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
 }

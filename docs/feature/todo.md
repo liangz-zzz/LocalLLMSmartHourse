@@ -13,13 +13,16 @@
 - [done] 设备模型验证工具  
   - 在 `pkg/device-model` 增加 Zod 校验 helper，导出给 adapter/gateway；样例校验单测已添加。
 - [done] 事件流与动作总线  
-  - 适配器写 Redis 并发布 `device:updates`，监听 `device:actions`（当前 stub 日志）。  
-  - 网关默认 Redis 模式，通过 WebSocket `/ws` 转发更新，`POST /devices/:id/actions` 发布到 `device:actions`。  
-  - 测试：Redis WS 集成测试（gateway）、Redis 集成（adapter）。
+  - 适配器写 Redis 并发布 `device:updates`/`device:action_results`/`device:action_results:state`，监听 `device:actions`，支持 MQTT/HA 下行并回执结果。  
+  - 网关默认 Redis 模式，通过 WebSocket `/ws` 转发更新/动作结果/状态快照；动作发布到 `device:actions`；WS 支持 `?devices=id1,id2` 过滤。  
+  - 测试：Redis WS、动作参数校验、动作结果流、HA/MQTT 下行集成。
 - [done] 数据持久化基础  
   - Prisma schema (`Device`/`DeviceState`) + `DATABASE_URL`，命令内置 `prisma generate/db push`。  
   - 适配器可 `DB_ENABLED=true` 时写入 Postgres（同时写 Redis），网关支持 `MODE=db` 直接从 Postgres 读取。  
   - 测试：适配器 DB 集成测试，网关 DB store/HTTP 集成测试。
+- [next] 动作结果持久化与查询  
+  - 网关监听 `device:action_results` 并落库/缓存，提供查询接口或 WS ACK。  
+  - 适配器侧可补充更多 HA 服务映射（cover/climate/mode 等）与严格参数校验。
 - [todo] 规则引擎骨架  
   - 定义最小 JSON DSL（triggers + conditions + actions），加载本地 rules.json，匹配后打印动作（占位）。
 - [todo] LLM Bridge 占位  
