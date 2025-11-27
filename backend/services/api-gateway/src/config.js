@@ -9,6 +9,7 @@ export function loadConfig() {
     redisActionResultsChannel: process.env.REDIS_ACTION_RESULTS_CHANNEL || "device:action_results",
     redisStateChannel: process.env.REDIS_STATE_CHANNEL || "device:action_results:state",
     databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome",
+    actionResultsPersist: process.env.ACTION_RESULTS_PERSIST !== "false",
     logLevel: process.env.LOG_LEVEL || "info"
   };
 }

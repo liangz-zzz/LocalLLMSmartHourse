@@ -3,6 +3,7 @@ import { buildServer } from "./server.js";
 import { MockStore, RedisStore, DbStore } from "./store.js";
 import { RedisBus } from "./bus.js";
 import { setupWs } from "./ws.js";
+import { ActionResultStore } from "./action-store.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -36,6 +37,11 @@ async function main() {
   }
 
   let bus;
+  let actionStore;
+  if (config.actionResultsPersist && config.databaseUrl) {
+    actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
+  }
+
   if (config.mode === "redis") {
     bus = new RedisBus({
       redisUrl: config.redisUrl,
@@ -45,9 +51,18 @@ async function main() {
       logger
     });
     await bus.start();
+    if (actionStore) {
+      bus.onActionResult(async (result) => {
+        try {
+          await actionStore.save(result);
+        } catch (err) {
+          logger.error("Failed to persist action result", err);
+        }
+      });
+    }
   }
 
-  const app = buildServer({ store, logger, config, bus });
+  const app = buildServer({ store, logger, config, bus, actionStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger });

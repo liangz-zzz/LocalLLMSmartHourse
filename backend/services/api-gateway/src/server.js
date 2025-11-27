@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 
-export function buildServer({ store, logger, config, bus }) {
+export function buildServer({ store, logger, config, bus, actionStore }) {
   const app = Fastify({ logger: false });
 
   const validateActionParams = (device, action, params) => {
@@ -36,6 +36,17 @@ export function buildServer({ store, logger, config, bus }) {
       return reply.code(404).send({ error: "not_found" });
     }
     return device;
+  });
+
+  app.get("/devices/:id/actions", async (req, reply) => {
+    if (!actionStore) return reply.code(503).send({ error: "action_store_unavailable" });
+    const device = await store.get(req.params.id);
+    if (!device) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const limit = Math.min(Number(req.query?.limit || 20), 100);
+    const items = await actionStore.listByDevice(req.params.id, limit);
+    return { items };
   });
 
   app.post("/devices/:id/actions", async (req, reply) => {
