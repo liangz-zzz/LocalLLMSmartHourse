@@ -44,7 +44,7 @@
   - GitHub Actions 运行 docker compose 校验 + 各 Node 服务测试（含 Redis/Postgres 依赖启动）。
 
 ## 下一步（新增）
-- [todo] 前端动作参数输入与状态订阅  
-  - 在 Web 端补充参数化动作（温度/亮度/模式），接入 WebSocket `/ws` 实时更新。
+- [done] 前端动作参数输入与状态订阅  
+  - Web 端补充参数化动作（温度/亮度/模式），接入 WebSocket `/ws` 实时更新（卡片上展示最近动作结果）。
 - [todo] LLM 意图到设备动作链路  
   - 在 llm-bridge 增加意图解析模板 + 回传推荐动作，前端提供“执行/拒绝”交互。
