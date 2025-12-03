@@ -66,3 +66,12 @@ jobs:
           cd backend/services/rules-engine
           npm ci
           npm test
+
+      - name: Test frontend (Playwright)
+        env:
+          NODE_ENV: test
+        run: |
+          cd frontend/web
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test

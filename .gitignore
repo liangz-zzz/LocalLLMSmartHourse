@@ -21,3 +21,6 @@ deploy/zigbee2mqtt/
 deploy/mosquitto/
 deploy/data/
 tmp/
+.next/
+playwright-report/
+test-results/

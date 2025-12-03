@@ -342,6 +342,7 @@ export default function Home() {
                     background: "rgba(16, 24, 40, 0.4)",
                     boxShadow: "0 12px 30px rgba(0,0,0,0.15)"
                   }}
+                  data-testid={`device-card-${device.id}`}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
@@ -398,10 +399,11 @@ export default function Home() {
                             fontWeight: 700,
                             boxShadow: "0 10px 24px rgba(0,0,0,0.18)"
                           }}
-                    >
-                      {cap.action === "turn_on" ? "开" : cap.action === "turn_off" ? "关" : cap.action}
-                    </button>
-                  ))}
+                          data-testid={`quick-${device.id}-${cap.action}`}
+                        >
+                          {cap.action === "turn_on" ? "开" : cap.action === "turn_off" ? "关" : cap.action}
+                        </button>
+                      ))}
                       {actionStatus[device.id] && (
                         <span style={{ fontSize: 12, opacity: 0.8 }}>{actionStatus[device.id]}</span>
                       )}
@@ -414,11 +416,11 @@ export default function Home() {
                       {paramActions.map((cap) => {
                         const key = `${device.id}:${cap.action}`;
                         return (
-                          <div
-                            key={cap.action}
-                            style={{
-                              padding: "0.6rem",
-                              borderRadius: 10,
+                              <div
+                                key={cap.action}
+                                style={{
+                                  padding: "0.6rem",
+                                  borderRadius: 10,
                               background: "rgba(255,255,255,0.04)",
                               border: "1px solid rgba(255,255,255,0.05)",
                               display: "flex",
@@ -426,35 +428,38 @@ export default function Home() {
                               gap: 6
                             }}
                           >
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontWeight: 700 }}>{cap.action}</span>
-                              <button
-                                onClick={() => handleParamAction(device, cap)}
-                                style={{
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                  <span style={{ fontWeight: 700 }}>{cap.action}</span>
+                                  <button
+                                    onClick={() => handleParamAction(device, cap)}
+                                    style={{
                                   background: "#38bdf8",
                                   border: "none",
                                   color: "#0b1221",
                                   padding: "0.35rem 0.7rem",
                                   borderRadius: 8,
                                   cursor: "pointer",
-                                  fontWeight: 700,
-                                  boxShadow: "0 6px 16px rgba(56,189,248,0.25)"
-                                }}
-                              >
-                                发送
-                              </button>
-                            </div>
-                            {cap.parameters?.map((p) => (
-                              <ParamInput
-                                key={`${cap.action}-${p.name}`}
-                                param={p}
-                                value={(paramInputs[key] || {})[p.name]}
-                                onChange={(val) => onParamChange(device.id, cap.action, p.name, val)}
-                              />
-                            ))}
-                          </div>
-                        );
-                      })}
+                                      fontWeight: 700,
+                                      boxShadow: "0 6px 16px rgba(56,189,248,0.25)"
+                                    }}
+                                    data-testid={`send-${device.id}-${cap.action}`}
+                                  >
+                                    发送
+                                  </button>
+                                </div>
+                                {cap.parameters?.map((p) => (
+                                  <ParamInput
+                                    key={`${cap.action}-${p.name}`}
+                                    param={p}
+                                    value={(paramInputs[key] || {})[p.name]}
+                                    onChange={(val) => onParamChange(device.id, cap.action, p.name, val)}
+                                    deviceId={device.id}
+                                    action={cap.action}
+                                  />
+                                ))}
+                              </div>
+                            );
+                          })}
                     </div>
                   )}
 
@@ -586,6 +591,7 @@ export default function Home() {
                   background: "rgba(0,0,0,0.35)",
                   color: "#e8edf7"
                 }}
+                data-testid="intent-input"
               />
               <button
                 onClick={parseIntent}
@@ -599,6 +605,7 @@ export default function Home() {
                   fontWeight: 800,
                   boxShadow: "0 10px 24px rgba(168,85,247,0.35)"
                 }}
+                data-testid="intent-parse"
               >
                 解析
               </button>
@@ -641,6 +648,7 @@ export default function Home() {
                       cursor: "pointer",
                       fontWeight: 800
                     }}
+                    data-testid="intent-exec"
                   >
                     执行动作
                   </button>
@@ -684,9 +692,11 @@ type ParamInputProps = {
   param: CapabilityParam;
   value: any;
   onChange: (val: any) => void;
+  deviceId: string;
+  action: string;
 };
 
-function ParamInput({ param, value, onChange }: ParamInputProps) {
+function ParamInput({ param, value, onChange, deviceId, action }: ParamInputProps) {
   const label = `${param.name}${param.required ? " *" : ""}`;
   if (param.type === "enum" && Array.isArray(param.enum)) {
     return (
@@ -702,6 +712,7 @@ function ParamInput({ param, value, onChange }: ParamInputProps) {
             background: "rgba(0,0,0,0.25)",
             color: "#e8edf7"
           }}
+          data-testid={`param-${deviceId}-${action}-${param.name}`}
         >
           <option value="">选择...</option>
           {param.enum.map((opt) => (
@@ -744,6 +755,7 @@ function ParamInput({ param, value, onChange }: ParamInputProps) {
           background: "rgba(0,0,0,0.25)",
           color: "#e8edf7"
         }}
+        data-testid={`param-${deviceId}-${action}-${param.name}`}
       />
     </label>
   );
