@@ -13,5 +13,6 @@
 当前实现
 - 占位回显服务：`POST /v1/chat/completions` 返回最新 user 消息的 echo；`/health`。
 - 支持透明代理：设置 `UPSTREAM_API_BASE`（可选 `UPSTREAM_API_KEY`）时会转发到兼容 OpenAI 的上游；失败时自动回退到 echo。
+- 意图解析：`POST /v1/intent` 将自然语言解析为推荐动作（`action/deviceId/params/confidence`），基于简单关键词与设备名匹配；可直接给前端确认后调用网关。
 - 运行：`docker compose -f deploy/docker-compose.yml run --rm llm-bridge npm install`，`npm run dev`（PORT 默认 5000）。
 - 测试：`docker compose -f deploy/docker-compose.yml run --rm llm-bridge npm test`。

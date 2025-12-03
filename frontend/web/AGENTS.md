@@ -18,6 +18,7 @@
 - `pages/api/devices.ts`：代理网关 `http://localhost:4000/devices`（可用 `API_HTTP_BASE` 覆盖）。
 - `pages/api/devices/[id]/actions.ts`：代理设备动作下发。
 - `pages/api/chat.ts`：代理 llm-bridge `/v1/chat/completions`（支持 `LLM_HTTP_BASE`/`LLM_API_KEY`）。
+- `pages/api/intent.ts`：代理 llm-bridge `/v1/intent`，返回解析后的动作。
 
 环境变量
 - `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址（默认推断 `ws://<host>:4001/ws`），`NEXT_PUBLIC_WS_PORT` 覆盖端口。

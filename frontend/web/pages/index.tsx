@@ -23,6 +23,13 @@ type Device = {
 };
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
+type IntentResult = {
+  action: string;
+  deviceId?: string;
+  params?: Record<string, any>;
+  confidence?: number;
+  summary?: string;
+};
 
 const gradient = "linear-gradient(135deg, #0f172a 0%, #1d293f 40%, #0b5b5c 100%)";
 
@@ -35,6 +42,9 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatTurn[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
+  const [intentInput, setIntentInput] = useState("");
+  const [intentResult, setIntentResult] = useState<IntentResult | null>(null);
+  const [intentStatus, setIntentStatus] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
 
   const refresh = async () => {
@@ -207,6 +217,59 @@ export default function Home() {
       setChatLog((prev) => [...prev, { role: "assistant", content: (err as Error).message }]);
     } finally {
       setChatBusy(false);
+    }
+  };
+
+  const parseIntent = async () => {
+    if (!intentInput.trim()) return;
+    setIntentStatus("解析中...");
+    try {
+      const payload = {
+        input: intentInput.trim(),
+        devices: deviceList.map((d) => ({ id: d.id, name: d.name, capabilities: d.capabilities }))
+      };
+      const resp = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setIntentStatus(data.error || "解析失败");
+        return;
+      }
+      setIntentResult(data.intent);
+      setIntentStatus("");
+    } catch (err) {
+      setIntentStatus((err as Error).message);
+    }
+  };
+
+  const executeIntent = async () => {
+    if (!intentResult?.deviceId || !intentResult.action) {
+      setIntentStatus("缺少设备或动作");
+      return;
+    }
+    const device = devices[intentResult.deviceId];
+    if (!device) {
+      setIntentStatus("设备不在列表中");
+      return;
+    }
+    setIntentStatus("执行中...");
+    try {
+      const resp = await fetch(`/api/devices/${device.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: intentResult.action, params: intentResult.params })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setIntentStatus(data.reason || data.error || "执行失败");
+        return;
+      }
+      setIntentStatus("已下发");
+    } catch (err) {
+      setIntentStatus((err as Error).message);
     }
   };
 
@@ -491,6 +554,117 @@ export default function Home() {
             >
               {chatBusy ? "发送中" : "发送"}
             </button>
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              padding: "0.8rem",
+              borderRadius: 12,
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10
+            }}
+          >
+            <div>
+              <h3 style={{ margin: "0 0 0.4rem 0" }}>意图解析 → 执行动作</h3>
+              <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
+                将自然语言转成推荐动作，可确认后下发设备。
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <input
+                value={intentInput}
+                onChange={(e) => setIntentInput(e.target.value)}
+                placeholder="例如：把客厅灯调到 30%"
+                style={{
+                  flex: 1,
+                  padding: "0.8rem 1rem",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(0,0,0,0.35)",
+                  color: "#e8edf7"
+                }}
+              />
+              <button
+                onClick={parseIntent}
+                style={{
+                  background: "#a855f7",
+                  border: "none",
+                  color: "#0b1221",
+                  padding: "0 1rem",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  fontWeight: 800,
+                  boxShadow: "0 10px 24px rgba(168,85,247,0.35)"
+                }}
+              >
+                解析
+              </button>
+            </div>
+            {intentResult && (
+              <div
+                style={{
+                  padding: "0.75rem",
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>
+                  动作：{intentResult.action} {intentResult.deviceId ? `@ ${intentResult.deviceId}` : ""}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  置信度：{Math.round((intentResult.confidence || 0) * 100)}% | {intentResult.summary || "无摘要"}
+                </div>
+                {intentResult.params && Object.keys(intentResult.params).length > 0 && (
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>
+                    参数：{" "}
+                    {Object.entries(intentResult.params)
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join("，")}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={executeIntent}
+                    style={{
+                      background: "#22c55e",
+                      border: "none",
+                      color: "#0b1221",
+                      padding: "0.45rem 0.8rem",
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      fontWeight: 800
+                    }}
+                  >
+                    执行动作
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIntentResult(null);
+                      setIntentStatus("");
+                    }}
+                    style={{
+                      background: "rgba(255,255,255,0.1)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      color: "#e8edf7",
+                      padding: "0.45rem 0.8rem",
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      fontWeight: 700
+                    }}
+                  >
+                    清除
+                  </button>
+                </div>
+              </div>
+            )}
+            {intentStatus && <div style={{ fontSize: 12, opacity: 0.8 }}>{intentStatus}</div>}
           </div>
         </div>
       </section>
