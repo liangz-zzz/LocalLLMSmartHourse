@@ -8,7 +8,10 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     if (!capability || !capability.parameters) return { ok: true };
     for (const p of capability.parameters) {
       const value = params?.[p.name];
-      if (value === undefined) continue; // optional unless extended required flag added later
+      if (value === undefined) {
+        if (p.required) return { ok: false, reason: `param ${p.name} is required` };
+        continue; // optional
+      }
       if (p.type === "boolean" && typeof value !== "boolean") return { ok: false, reason: `param ${p.name} must be boolean` };
       if (p.type === "number") {
         if (typeof value !== "number") return { ok: false, reason: `param ${p.name} must be number` };
@@ -20,6 +23,15 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
       }
       if (p.type === "string" && typeof value !== "string") return { ok: false, reason: `param ${p.name} must be string` };
     }
+    return { ok: true };
+  };
+
+  const validateRulePayload = (payload) => {
+    if (!payload || !payload.when || !payload.then) return { ok: false, reason: "rule when/then required" };
+    if (payload.when.deviceId && typeof payload.when.deviceId !== "string") return { ok: false, reason: "deviceId must be string" };
+    if (payload.when.traitPath && typeof payload.when.traitPath !== "string") return { ok: false, reason: "traitPath must be string" };
+    if (payload.when.equals === undefined) return { ok: false, reason: "when.equals required" };
+    if (!payload.then.action) return { ok: false, reason: "then.action required" };
     return { ok: true };
   };
 
@@ -93,11 +105,30 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
   app.post("/rules", async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     const { id, name, when, then, enabled } = req.body || {};
-    if (!id || !when || !then) {
-      return reply.code(400).send({ error: "invalid_rule" });
+    const validation = validateRulePayload({ id, when, then });
+    if (!id || !validation.ok) {
+      return reply.code(400).send({ error: "invalid_rule", reason: validation.reason || "id required" });
     }
     const created = await ruleStore.create({ id, name, when, then, enabled });
     return created;
+  });
+
+  app.get("/rules/:id", async (req, reply) => {
+    if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
+    const rule = await ruleStore.get(req.params.id);
+    if (!rule) return reply.code(404).send({ error: "not_found" });
+    return rule;
+  });
+
+  app.put("/rules/:id", async (req, reply) => {
+    if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
+    const { name, when, then, enabled } = req.body || {};
+    const validation = validateRulePayload({ id: req.params.id, when, then });
+    if (!validation.ok) {
+      return reply.code(400).send({ error: "invalid_rule", reason: validation.reason });
+    }
+    const updated = await ruleStore.update(req.params.id, { name, when, then, enabled });
+    return updated;
   });
 
   app.delete("/rules/:id", async (req, reply) => {

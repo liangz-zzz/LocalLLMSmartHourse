@@ -23,14 +23,40 @@ test("rules CRUD", async () => {
   const createRes = await fetch(`${base}/rules`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: "test_rule", when: { deviceId: "d1" }, then: { action: "turn_on" } })
+    body: JSON.stringify({
+      id: "test_rule",
+      when: { deviceId: "d1", traitPath: "traits.switch.state", equals: "on" },
+      then: { action: "turn_on" }
+    })
   });
   assert.equal(createRes.status, 200);
+
+  const getRes = await fetch(`${base}/rules/test_rule`);
+  assert.equal(getRes.status, 200);
+  const single = await getRes.json();
+  assert.equal(single.id, "test_rule");
+
+  const badRes = await fetch(`${base}/rules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "invalid_rule", when: {}, then: {} })
+  });
+  assert.equal(badRes.status, 400);
 
   const listRes = await fetch(`${base}/rules`);
   assert.equal(listRes.status, 200);
   const list = await listRes.json();
   assert.ok(list.items.find((r) => r.id === "test_rule"));
+
+  const updateRes = await fetch(`${base}/rules/test_rule`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ when: { deviceId: "d1", traitPath: "traits.switch.state", equals: "on" }, then: { action: "turn_off" }, enabled: false })
+  });
+  assert.equal(updateRes.status, 200);
+  const updated = await updateRes.json();
+  assert.equal(updated.enabled, false);
+  assert.equal(updated.then.action, "turn_off");
 
   const delRes = await fetch(`${base}/rules/test_rule`, { method: "DELETE" });
   assert.equal(delRes.status, 200);

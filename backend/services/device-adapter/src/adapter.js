@@ -59,7 +59,7 @@ export class DeviceAdapter {
 
     const haEntity = device.bindings?.ha?.entity_id || device.bindings?.ha_entity_id;
     if (!preferMqtt && haEntity && this.haToken) {
-      const ok = await callHaService({
+      const result = await callHaService({
         baseUrl: this.haBaseUrl,
         token: this.haToken,
         entityId: haEntity,
@@ -71,9 +71,10 @@ export class DeviceAdapter {
         buildActionResult({
           deviceId: device.id,
           action: action.action,
-          status: ok ? 'ok' : 'error',
+          status: result.ok ? 'ok' : 'error',
           transport: 'ha',
-          params: action.params
+          params: action.params,
+          reason: result.reason
         })
       );
       return;
@@ -174,6 +175,17 @@ function buildZ2MSetPayload(action) {
     const pos = action.params?.position;
     return { position: pos ?? 0 };
   }
+  if (action.action === "set_cover_tilt") {
+    const tilt = action.params?.tilt ?? action.params?.tilt_percent;
+    return { tilt: tilt ?? 0 };
+  }
+  if (action.action === "set_color_temp") {
+    const kelvin = action.params?.kelvin ?? action.params?.color_temp_kelvin;
+    const mired = action.params?.mired;
+    if (mired !== undefined) return { color_temp: mired };
+    if (kelvin !== undefined) return { color_temp: Math.round(1000000 / kelvin) };
+    return { color_temp: 350 };
+  }
   if (action.action === "set_temperature") {
     const t = action.params?.temperature ?? action.params?.target_temperature;
     return { temperature: t ?? 22 };
@@ -194,10 +206,16 @@ async function callHaService({ baseUrl, token, entityId, action, params, logger 
     service = "turn_on";
     const pct = typeof params?.brightness === "number" ? params.brightness : undefined;
     payload = { entity_id: entityId, brightness_pct: pct ?? 100 };
+  } else if (action.action === "toggle") {
+    service = "toggle";
   } else if (action.action === "set_cover_position") {
     service = "set_cover_position";
     const pos = typeof params?.position === "number" ? params.position : undefined;
     payload = { entity_id: entityId, position: pos ?? 0 };
+  } else if (action.action === "set_cover_tilt") {
+    service = "set_cover_tilt_position";
+    const tilt = typeof params?.tilt === "number" ? params.tilt : params?.tilt_percent;
+    payload = { entity_id: entityId, tilt_position: tilt ?? 0 };
   } else if (action.action === "set_temperature") {
     service = "set_temperature";
     const t = typeof params?.temperature === "number" ? params.temperature : params?.target_temperature;
@@ -205,6 +223,16 @@ async function callHaService({ baseUrl, token, entityId, action, params, logger 
   } else if (action.action === "set_hvac_mode") {
     service = "set_hvac_mode";
     payload = { entity_id: entityId, hvac_mode: params?.mode || "auto" };
+  } else if (action.action === "set_fan_mode") {
+    service = "set_fan_mode";
+    payload = { entity_id: entityId, fan_mode: params?.fan_mode || params?.mode || "auto" };
+  } else if (action.action === "set_color_temp") {
+    service = "turn_on";
+    const kelvin = typeof params?.kelvin === "number" ? params.kelvin : params?.color_temp_kelvin;
+    const mired = typeof params?.mired === "number" ? params.mired : undefined;
+    payload = { entity_id: entityId };
+    if (kelvin) payload.color_temp_kelvin = kelvin;
+    if (mired) payload.color_temp = mired;
   }
 
   const url = `${baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`;
@@ -220,12 +248,12 @@ async function callHaService({ baseUrl, token, entityId, action, params, logger 
     if (!res.ok) {
       const text = await res.text();
       logger?.warn?.("HA service call failed", res.status, text);
-      return false;
+      return { ok: false, reason: `${res.status} ${text}` };
     }
     logger?.info?.("HA service called", url);
-    return true;
+    return { ok: true };
   } catch (err) {
     logger?.error?.("HA service call error", err);
-    return false;
+    return { ok: false, reason: err.message };
   }
 }

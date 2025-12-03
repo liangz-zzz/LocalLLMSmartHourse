@@ -130,6 +130,7 @@
                 "minimum": { "type": "number" },
                 "maximum": { "type": "number" },
                 "enum": { "type": "array", "items": { "type": "string" } },
+                "required": { "type": "boolean" },
                 "description": { "type": "string" }
               },
               "additionalProperties": false

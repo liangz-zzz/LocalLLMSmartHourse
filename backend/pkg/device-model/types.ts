@@ -77,6 +77,7 @@ export interface CapabilityParameter {
   minimum?: number;
   maximum?: number;
   enum?: string[];
+  required?: boolean;
   description?: string;
 }
 

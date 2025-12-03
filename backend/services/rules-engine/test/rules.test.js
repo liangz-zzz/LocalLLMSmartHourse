@@ -19,6 +19,7 @@ test("evaluateRules matches rule and emits action", () => {
   );
   assert.deepEqual(matched, ["r1"]);
   assert.equal(actions[0].action, "turn_off");
+  assert.equal(actions[0].ruleId, "r1");
 });
 
 test("evaluateRules skips when condition not met", () => {

@@ -35,6 +35,21 @@ async function loadRulesFromDb(prisma) {
   }
 }
 
+async function logRuleAction(prisma, action, event) {
+  if (!prisma) return;
+  await prisma.actionResult.create({
+    data: {
+      id: `rule_${action.ruleId}_${Date.now()}`,
+      deviceId: action.id,
+      action: action.action,
+      status: "queued_by_rule",
+      transport: "rule",
+      reason: `rule:${action.ruleId}`,
+      params: action.params || {}
+    }
+  });
+}
+
 async function main() {
   const useDb = !!process.env.DATABASE_URL;
   const prisma = useDb ? new PrismaClient() : null;
@@ -55,6 +70,9 @@ async function main() {
     try {
       const event = JSON.parse(message);
       const matched = evaluateRules(event, rules, (action) => {
+        if (useDb) {
+          logRuleAction(prisma, action, event).catch((err) => logger.warn("rule log failed", err));
+        }
         pub.publish(actionsChannel, JSON.stringify(action));
       });
       if (matched.length) {

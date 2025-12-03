@@ -9,7 +9,7 @@
 - `protocol` (string): 主协议（`zigbee` | `wifi` | `bluetooth_mesh` | `matter` ...）
 - `bindings` (object): 底层实体映射，如 `zigbee2mqtt.topic`, `ha_entity_id`, `vendor_extra`
 - `traits` (object): 当前状态，按能力分块（见能力表）
-- `capabilities` (array): 可执行动作，含参数定义（类型/范围/单位）
+- `capabilities` (array): 可执行动作，含参数定义（类型/范围/单位、是否必填）
 - `semantics` (object): 自然语言描述/标签/偏好，供 LLM 知识库
 - `telemetry` (object): 元数据，如 `last_seen`, `battery`, `rssi`
 
@@ -84,20 +84,22 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["action", "params"],
+        "required": ["action"],
         "properties": {
           "action": { "type": "string" },
-          "params": {
+          "parameters": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["name", "type"],
               "properties": {
                 "name": { "type": "string" },
-                "type": { "type": "string", "enum": ["int", "float", "bool", "string", "enum"] },
-                "range": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+                "type": { "type": "string", "enum": ["number", "bool", "string", "enum"] },
+                "minimum": { "type": "number" },
+                "maximum": { "type": "number" },
                 "enum": { "type": "array", "items": { "type": "string" } },
-                "unit": { "type": "string" }
+                "unit": { "type": "string" },
+                "required": { "type": "boolean" }
               },
               "additionalProperties": false
             }
@@ -139,7 +141,9 @@
     { "action": "turn_off", "params": [] },
     {
       "action": "set_brightness",
-      "params": [{ "name": "value", "type": "int", "range": [1, 100], "unit": "percent" }]
+      "parameters": [
+        { "name": "value", "type": "number", "minimum": 1, "maximum": 100, "required": true }
+      ]
     }
   ],
   "semantics": {

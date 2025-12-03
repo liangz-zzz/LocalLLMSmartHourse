@@ -80,6 +80,7 @@ const capabilityParameter = z.object({
   minimum: z.number().optional(),
   maximum: z.number().optional(),
   enum: z.array(z.string()).optional(),
+  required: z.boolean().optional(),
   description: z.string().optional()
 });
 

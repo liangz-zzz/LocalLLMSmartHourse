@@ -6,13 +6,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
-  const base = process.env.API_HTTP_BASE || "http://localhost:4000";
-  const { id } = req.query;
+  const base = process.env.LLM_HTTP_BASE || process.env.LLM_API_BASE || "http://localhost:5000";
+  const apiKey = process.env.LLM_API_KEY || "";
 
   try {
-    const resp = await fetch(`${base}/devices/${id}/actions`, {
+    const resp = await fetch(`${base.replace(/\/$/, "")}/v1/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
       body: JSON.stringify(req.body || {})
     });
     const data = await resp.json();

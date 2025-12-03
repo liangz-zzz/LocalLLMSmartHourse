@@ -23,24 +23,28 @@
 - [done] 动作结果持久化与查询  
   - 网关监听 `device:action_results` 并落库，`GET /devices/:id/actions` 查询；WS 推送动作结果/状态快照。  
   - 适配器支持 MQTT/HA 下行并返回结果。
-- [next] 规则持久化与管理  
-  - 将规则存 Postgres，Gateway 提供 CRUD（列表/创建/删除），规则引擎从 DB 拉取并热更新。  
-  - 规则执行结果写入日志/动作结果（可复用 ActionResult 表或新表）。
-- [next] HA 映射与参数校验增强  
-  - 扩充 cover/climate 等 HA service 映射；按 capability 参数做必填/枚举校验，错误返回。  
-  - WS/REST 返回更详细的错误与执行结果。
-- [todo] 前端/LLM 占位  
-  - 简单设备列表/动作触发页面；LLM 体验接口演示（调用 llm-bridge echo）。  
+- [done] 规则持久化与管理  
+  - 规则落库（Postgres）+ Gateway CRUD（列表/查询/创建/更新/删除），规则引擎从 DB 拉取并热更新。  
+  - 规则命中会将动作入 ActionResult 表（status `queued_by_rule`），方便追踪。
+- [done] HA 映射与参数校验增强  
+  - 扩充 cover/climate/light service 映射（tilt/fan_mode/color_temp），调用 Home Assistant 失败会返回 reason。  
+  - capability 参数支持 `required`，REST 校验更严格。
+- [done] 前端/LLM 占位  
+  - Web 首页展示设备卡片，支持 turn_on/turn_off 快捷操作；右侧 LLM 对话（默认 echo，可经 llm-bridge 代理到上游）。
 - [done] 规则引擎骨架  
   - 简单 JSON DSL：`deviceId + traitPath equals` -> 动作发布到 Redis `device:actions`；订阅 `device:updates`。
   - 测试：规则匹配单元；运行入口 `rules-engine` 服务。
-- [todo] LLM Bridge 占位  
-  - OpenAI 兼容 `/v1/chat/completions`，内部可回显或代理配置中的 API_BASE，方便前端/LLM 测试。
-- [todo] 前端占位页  
-  - Next.js 列表页，调用 `/devices` 显示基础信息；支持 mock/真实数据切换。
-- [todo] 工具 & 观测  
-  - `mqtt-dump` 辅助脚本；日志格式统一（JSON line），README/AGENTS 中记录验证命令。
-- [todo] CI/质量  
-  - GitHub Actions 增加 pnpm lint/test；各服务 package.json 加 `lint`/`test`。
+- [done] LLM Bridge 占位  
+  - OpenAI 兼容 `/v1/chat/completions`，默认回显，支持 `UPSTREAM_API_BASE/UPSTREAM_API_KEY` 转发。
+- [done] 前端占位页  
+  - Next.js 列表页，调用 `/devices` 显示基础信息；支持 mock/真实数据切换，并提供 LLM 体验面板。
+- [done] 工具 & 观测  
+  - `mqtt-dump` 辅助脚本；AGENTS 中记录用法。
+- [done] CI/质量  
+  - GitHub Actions 运行 docker compose 校验 + 各 Node 服务测试（含 Redis/Postgres 依赖启动）。
 
-> 当前准备先启动「设备适配器最小闭环」，完成后再推进 API Gateway。
+## 下一步（新增）
+- [todo] 前端动作参数输入与状态订阅  
+  - 在 Web 端补充参数化动作（温度/亮度/模式），接入 WebSocket `/ws` 实时更新。
+- [todo] LLM 意图到设备动作链路  
+  - 在 llm-bridge 增加意图解析模板 + 回传推荐动作，前端提供“执行/拒绝”交互。

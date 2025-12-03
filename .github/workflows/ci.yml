@@ -7,7 +7,62 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://smarthome:smarthome@127.0.0.1:15432/smarthome
+      REDIS_URL: redis://127.0.0.1:16379
+      PRISMA_SCHEMA: ${{ github.workspace }}/backend/prisma/schema.prisma
     steps:
       - uses: actions/checkout@v4
+
       - name: Validate docker compose config
         run: docker compose -f deploy/docker-compose.yml config
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Start backing services (Postgres + Redis)
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d db redis
+          echo "Waiting for db/redis..."
+          until nc -z 127.0.0.1 15432; do sleep 1; done
+          until nc -z 127.0.0.1 16379; do sleep 1; done
+
+      - name: Test device-model package
+        run: |
+          cd backend/pkg/device-model
+          npm ci
+          npm test
+
+      - name: Test llm-bridge
+        run: |
+          cd backend/services/llm-bridge
+          npm ci
+          npm test
+
+      - name: Test device-adapter
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          REDIS_URL: ${{ env.REDIS_URL }}
+          PRISMA_SCHEMA: ${{ env.PRISMA_SCHEMA }}
+        run: |
+          cd backend/services/device-adapter
+          npm ci
+          npm test
+
+      - name: Test api-gateway
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          REDIS_URL: ${{ env.REDIS_URL }}
+          PRISMA_SCHEMA: ${{ env.PRISMA_SCHEMA }}
+        run: |
+          cd backend/services/api-gateway
+          npm ci
+          npm test
+
+      - name: Test rules-engine
+        run: |
+          cd backend/services/rules-engine
+          npm ci
+          npm test

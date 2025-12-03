@@ -12,6 +12,10 @@ export class RuleStore {
     return this.prisma.rule.findMany({ orderBy: { createdAt: "desc" } });
   }
 
+  async get(id) {
+    return this.prisma.rule.findUnique({ where: { id } });
+  }
+
   async create(rule) {
     return this.prisma.rule.create({
       data: {
@@ -20,6 +24,18 @@ export class RuleStore {
         when: rule.when,
         then: rule.then,
         enabled: rule.enabled ?? true
+      }
+    });
+  }
+
+  async update(id, patch) {
+    return this.prisma.rule.update({
+      where: { id },
+      data: {
+        name: patch.name,
+        when: patch.when,
+        then: patch.then,
+        enabled: patch.enabled
       }
     });
   }

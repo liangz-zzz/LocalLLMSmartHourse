@@ -12,7 +12,8 @@ const device = {
   capabilities: [
     { action: "turn_on" },
     { action: "set_brightness", parameters: [{ name: "brightness", type: "number", minimum: 0, maximum: 100 }] },
-    { action: "mode_enum", parameters: [{ name: "mode", type: "enum", enum: ["a", "b"] }] }
+    { action: "mode_enum", parameters: [{ name: "mode", type: "enum", enum: ["a", "b"] }] },
+    { action: "strict_required", parameters: [{ name: "required_param", type: "string", required: true }] }
   ]
 };
 
@@ -62,6 +63,13 @@ test("actions route validates device and capability", async () => {
     body: JSON.stringify({ action: "mode_enum", params: { mode: "c" } })
   });
   assert.equal(badEnum.status, 400);
+
+  const missingRequired = await fetch(`${base}/devices/plug1/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "strict_required", params: {} })
+  });
+  assert.equal(missingRequired.status, 400);
 
   const missing = await fetch(`${base}/devices/unknown/actions`, {
     method: "POST",

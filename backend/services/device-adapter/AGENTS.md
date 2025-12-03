@@ -12,6 +12,7 @@
 - 绑定：保持 `bindings.zigbee2mqtt.topic` 与 `bindings.ha_entity_id`，便于多协议共存。
 - 状态缓存：Redis；事件源：MQTT 订阅 `zigbee2mqtt/#`，落库 Postgres。
 - 位置信息：解析/维护 `placement` 与 `semantics`，供 LLM 使用。
+- HA 映射：支持 turn_on/off、set_brightness、set_cover_position/tilt、set_temperature、set_hvac_mode、set_fan_mode、set_color_temp；无可用通路时返回错误 reason。
 
 测试
 - 单元：对编解码/校验函数；集成：使用本地 mqtt + 模拟 zigbee2mqtt payload。

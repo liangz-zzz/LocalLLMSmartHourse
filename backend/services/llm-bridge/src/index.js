@@ -1,12 +1,40 @@
 import Fastify from "fastify";
 
-export function buildApp() {
+export function buildApp(options = {}) {
+  const forwardBase = options.forwardBase || process.env.UPSTREAM_API_BASE || "";
+  const forwardApiKey = options.forwardApiKey || process.env.UPSTREAM_API_KEY || process.env.LLM_API_KEY || "";
+  const forwardEnabled = Boolean(forwardBase);
+
   const app = Fastify({ logger: false });
 
   app.get("/health", async () => ({ status: "ok" }));
 
   app.post("/v1/chat/completions", async (req, reply) => {
     const { messages = [], model = "local-echo" } = req.body || {};
+
+    if (forwardEnabled) {
+      try {
+        const target = `${forwardBase.replace(/\/$/, "")}/v1/chat/completions`;
+        const upstream = await fetch(target, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: forwardApiKey ? `Bearer ${forwardApiKey}` : undefined
+          },
+          body: JSON.stringify({ ...req.body, model })
+        });
+        if (!upstream.ok) {
+          const text = await upstream.text();
+          app.log?.warn?.("Upstream LLM error", upstream.status, text);
+        } else {
+          const data = await upstream.json();
+          return reply.send(data);
+        }
+      } catch (err) {
+        app.log?.warn?.("Upstream LLM call failed, falling back to echo", err);
+      }
+    }
+
     const content = buildEcho(messages);
     const resp = {
       id: `chatcmpl_${Date.now()}`,

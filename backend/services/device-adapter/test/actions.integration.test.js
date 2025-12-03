@@ -134,6 +134,64 @@ test("adapter publishes HA result when MQTT path unavailable", async () => {
   globalThis.fetch = origFetch;
 });
 
+test("adapter builds correct HA payloads for climate/cover actions", async () => {
+  const captured = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, { body }) => {
+    captured.push({ url, body: JSON.parse(body) });
+    return { ok: true, text: async () => "" };
+  };
+
+  const store = {
+    data: {
+      climate: {
+        id: "climate",
+        name: "climate",
+        placement: { room: "lab" },
+        protocol: "zigbee",
+        bindings: { ha: { entity_id: "climate.lr_ac" } },
+        traits: {},
+        capabilities: [{ action: "set_fan_mode" }]
+      },
+      curtain: {
+        id: "curtain",
+        name: "curtain",
+        placement: { room: "lab" },
+        protocol: "zigbee",
+        bindings: { ha: { entity_id: "cover.lr_curtain" } },
+        traits: {},
+        capabilities: [{ action: "set_cover_tilt" }]
+      }
+    },
+    async get(id) {
+      return this.data[id];
+    },
+    async publishActionResult() {}
+  };
+
+  const adapter = new DeviceAdapter({
+    mode: "offline",
+    mqttUrl: "mqtt://invalid",
+    store,
+    logger: new Logger("error"),
+    mockDataDir: "",
+    haBaseUrl: "http://homeassistant:8123",
+    haToken: "dummy",
+    actionTransport: "ha"
+  });
+
+  await adapter.handleAction({ id: "climate", action: "set_fan_mode", params: { fan_mode: "low" } });
+  await adapter.handleAction({ id: "curtain", action: "set_cover_tilt", params: { tilt: 50 } });
+
+  assert.equal(captured.length, 2);
+  assert.ok(captured[0].url.includes("/api/services/climate/set_fan_mode"));
+  assert.equal(captured[0].body.fan_mode, "low");
+  assert.ok(captured[1].url.includes("/api/services/cover/set_cover_tilt_position"));
+  assert.equal(captured[1].body.tilt_position, 50);
+
+  globalThis.fetch = origFetch;
+});
+
 async function waitFor(fn, timeoutMs = 2000, intervalMs = 50) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
