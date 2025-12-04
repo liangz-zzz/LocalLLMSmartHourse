@@ -4,12 +4,15 @@ export function buildApp(options = {}) {
   const forwardBase = options.forwardBase || process.env.UPSTREAM_API_BASE || "";
   const forwardApiKey = options.forwardApiKey || process.env.UPSTREAM_API_KEY || process.env.LLM_API_KEY || "";
   const forwardEnabled = Boolean(forwardBase);
+  const rateLimitPerMin = Number(process.env.RATE_LIMIT_PER_MIN || 60);
+  const limiter = buildLimiter(rateLimitPerMin);
 
   const app = Fastify({ logger: false });
 
   app.get("/health", async () => ({ status: "ok" }));
 
   app.post("/v1/chat/completions", async (req, reply) => {
+    if (!limiter.ok(req)) return reply.code(429).send({ error: "rate_limited" });
     const { messages = [], model = "local-echo" } = req.body || {};
 
     if (forwardEnabled) {
@@ -61,6 +64,7 @@ export function buildApp(options = {}) {
   });
 
   app.post("/v1/intent", async (req, reply) => {
+    if (!limiter.ok(req)) return reply.code(429).send({ error: "rate_limited" });
     const { input, messages = [], devices = [] } = req.body || {};
     const text = input || extractLastUser(messages);
     if (!text) {
@@ -185,6 +189,24 @@ function extractLastUser(messages) {
   if (!Array.isArray(messages)) return null;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   return lastUser?.content || null;
+}
+
+function buildLimiter(limitPerMin) {
+  const windowMs = 60_000;
+  let bucket = {};
+  let windowStart = Date.now();
+  const ok = (req) => {
+    if (!limitPerMin || limitPerMin <= 0) return true;
+    const now = Date.now();
+    if (now - windowStart > windowMs) {
+      bucket = {};
+      windowStart = now;
+    }
+    const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    bucket[key] = (bucket[key] || 0) + 1;
+    return bucket[key] <= limitPerMin;
+  };
+  return { ok };
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

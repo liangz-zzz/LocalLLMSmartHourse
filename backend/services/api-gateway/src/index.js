@@ -70,7 +70,7 @@ async function main() {
   const app = buildServer({ store, logger, config, bus, actionStore, ruleStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
-    setupWs({ server: app.server, bus, mode: config.mode, logger });
+    setupWs({ server: app.server, bus, mode: config.mode, logger, apiKeys: config.apiKeys });
   }
   logger.info(`API Gateway listening on :${config.port} (mode=${config.mode})`);
 }

@@ -46,3 +46,22 @@ test("chat completions can forward to upstream", async () => {
   await app.close();
   await upstream.close();
 });
+
+test("rate limiter returns 429 when exceeded", async () => {
+  const app = buildApp({ forwardBase: "" });
+  await app.listen({ port: 0 });
+  const port = app.server.address().port;
+
+  let lastStatus = 200;
+  for (let i = 0; i < 70; i++) {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] })
+    });
+    lastStatus = res.status;
+    if (res.status === 429) break;
+  }
+  assert.equal(lastStatus, 429);
+  await app.close();
+});

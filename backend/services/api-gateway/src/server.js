@@ -2,6 +2,17 @@ import Fastify from "fastify";
 
 export function buildServer({ store, logger, config, bus, actionStore, ruleStore }) {
   const app = Fastify({ logger: false });
+  const apiKeys = config.apiKeys || [];
+
+  const authGuard = async (req, reply) => {
+    if (!apiKeys.length) return;
+    const headerKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace(/Bearer\s+/i, "");
+    const qsKey = req.query?.api_key;
+    const ok = apiKeys.includes(String(headerKey)) || apiKeys.includes(String(qsKey));
+    if (!ok) {
+      return reply.code(401).send({ error: "unauthorized" });
+    }
+  };
 
   const validateActionParams = (device, action, params) => {
     const capability = device.capabilities?.find((c) => c.action === action);
@@ -37,12 +48,12 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  app.get("/devices", async () => {
+  app.get("/devices", { preHandler: authGuard }, async () => {
     const list = await store.list();
     return { items: list, count: list.length };
   });
 
-  app.get("/devices/:id", async (req, reply) => {
+  app.get("/devices/:id", { preHandler: authGuard }, async (req, reply) => {
     const device = await store.get(req.params.id);
     if (!device) {
       return reply.code(404).send({ error: "not_found" });
@@ -50,7 +61,7 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     return device;
   });
 
-  app.get("/devices/:id/actions", async (req, reply) => {
+  app.get("/devices/:id/actions", { preHandler: authGuard }, async (req, reply) => {
     if (!actionStore) return reply.code(503).send({ error: "action_store_unavailable" });
     const device = await store.get(req.params.id);
     if (!device) {
@@ -62,7 +73,7 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     return { items, limit, offset };
   });
 
-  app.post("/devices/:id/actions", async (req, reply) => {
+  app.post("/devices/:id/actions", { preHandler: authGuard }, async (req, reply) => {
     const { action, params } = req.body || {};
     if (!action) {
       return reply.code(400).send({ error: "action_required" });
@@ -96,13 +107,13 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
   });
 
   // Rule management (requires DB)
-  app.get("/rules", async (_req, reply) => {
+  app.get("/rules", { preHandler: authGuard }, async (_req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     const items = await ruleStore.list();
     return { items };
   });
 
-  app.post("/rules", async (req, reply) => {
+  app.post("/rules", { preHandler: authGuard }, async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     const { id, name, when, then, enabled } = req.body || {};
     const validation = validateRulePayload({ id, when, then });
@@ -113,14 +124,14 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     return created;
   });
 
-  app.get("/rules/:id", async (req, reply) => {
+  app.get("/rules/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     const rule = await ruleStore.get(req.params.id);
     if (!rule) return reply.code(404).send({ error: "not_found" });
     return rule;
   });
 
-  app.put("/rules/:id", async (req, reply) => {
+  app.put("/rules/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     const { name, when, then, enabled } = req.body || {};
     const validation = validateRulePayload({ id: req.params.id, when, then });
@@ -131,7 +142,7 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     return updated;
   });
 
-  app.delete("/rules/:id", async (req, reply) => {
+  app.delete("/rules/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     await ruleStore.delete(req.params.id);
     return { status: "deleted" };

@@ -6,6 +6,12 @@ info:
 servers:
   - url: http://localhost:4000
     description: Local dev (compose)
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
 paths:
   /health:
     get:
@@ -24,6 +30,8 @@ paths:
   /devices:
     get:
       summary: List devices
+      security:
+        - ApiKey: []
       responses:
         "200":
           description: Device list
@@ -41,6 +49,8 @@ paths:
   /devices/{id}:
     get:
       summary: Get a device
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -59,6 +69,8 @@ paths:
   /devices/{id}/actions:
     get:
       summary: List action results for a device
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -95,6 +107,8 @@ paths:
           description: Device not found
     post:
       summary: Enqueue an action for a device
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -132,6 +146,8 @@ paths:
   /rules:
     get:
       summary: List rules
+      security:
+        - ApiKey: []
       responses:
         "200":
           description: Rules
@@ -146,6 +162,8 @@ paths:
                       $ref: "#/components/schemas/Rule"
     post:
       summary: Create a rule
+      security:
+        - ApiKey: []
       requestBody:
         required: true
         content:
@@ -166,6 +184,8 @@ paths:
   /rules/{id}:
     get:
       summary: Get a rule
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -183,6 +203,8 @@ paths:
           description: Not found
     put:
       summary: Update a rule
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -204,6 +226,8 @@ paths:
                 $ref: "#/components/schemas/Rule"
     delete:
       summary: Delete a rule
+      security:
+        - ApiKey: []
       parameters:
         - in: path
           name: id
@@ -221,7 +245,6 @@ paths:
                   status:
                     type: string
                     example: deleted
-components:
   schemas:
     Device:
       type: object

@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws";
 
-export function setupWs({ server, bus, mode = "redis", logger }) {
+export function setupWs({ server, bus, mode = "redis", logger, apiKeys = [] }) {
   const wss = new WebSocketServer({ server, path: "/ws" });
   const clients = new Set();
 
@@ -8,6 +8,15 @@ export function setupWs({ server, bus, mode = "redis", logger }) {
     const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
     const filterIds = url.searchParams.get("devices");
     const deviceSet = filterIds ? new Set(filterIds.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+    if (apiKeys.length) {
+      const qsKey = url.searchParams.get("api_key");
+      const headerKey = req.headers["x-api-key"] || (req.headers["sec-websocket-protocol"] || "").replace(/Bearer\s+/i, "");
+      const ok = apiKeys.includes(String(qsKey)) || apiKeys.includes(String(headerKey));
+      if (!ok) {
+        socket.close(4401, "unauthorized");
+        return;
+      }
+    }
 
     clients.add({ socket, devices: deviceSet });
     socket.send(JSON.stringify({ type: "hello", mode }));
