@@ -19,9 +19,9 @@
 - [ip] 前端自动化与回归  
   - 已接入 Playwright + 首个 E2E（设备卡片/参数化动作/意图解析）并在 CI 中启动，后续补充更多场景或组件单测（RTL/Vitest）。  
   - 注：本地受端口限制测试可能失败，优先在 CI/容器内执行。
-- [next] LLM 解析增强  
-  - 提供 Prompt/规则混合的意图解析（指令模板 + 兜底规则），输出动作候选及置信度。  
-  - 支持对话态/房间过滤，增加失败回退提示。
+- [done] LLM 解析增强  
+  - 基于关键词/房间/能力的多候选解析，输出动作候选及置信度；支持 messages fallback。  
+  - 后续可接入 Prompt/规则混合与真实 LLM，以现有结构为兜底。
 - [todo] API/WS 文档与 SDK  
   - 生成 OpenAPI/AsyncAPI，前端/LLM 侧使用统一 SDK（typescript-fetch 或自行封装）。  
   - 在 AGENTS 中补充示例调用与错误码。

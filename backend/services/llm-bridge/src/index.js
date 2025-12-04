@@ -61,12 +61,13 @@ export function buildApp(options = {}) {
   });
 
   app.post("/v1/intent", async (req, reply) => {
-    const { input, devices = [] } = req.body || {};
-    if (!input || typeof input !== "string") {
+    const { input, messages = [], devices = [] } = req.body || {};
+    const text = input || extractLastUser(messages);
+    if (!text) {
       return reply.code(400).send({ error: "input_required" });
     }
-    const intent = parseIntent(input, devices);
-    return reply.send({ intent });
+    const { intent, candidates } = parseIntent({ input: text, messages, devices });
+    return reply.send({ intent, candidates });
   });
 
   app.setErrorHandler((err, _req, reply) => {
@@ -81,27 +82,35 @@ function buildEcho(messages) {
   return lastUser?.content ? `Echo: ${lastUser.content}` : "Hello from llm-bridge stub.";
 }
 
-export function parseIntent(input, devices = []) {
-  const text = input.toLowerCase();
+export function parseIntent({ input, messages = [], devices = [] }) {
+  const text = (input || extractLastUser(messages) || "").toLowerCase();
   const action = detectAction(text);
   const params = detectParams(text);
-  const device = matchDevice(text, devices);
-  const confidence = action ? (device ? 0.9 : 0.6) : 0.2;
-  const summary = buildSummary({ action, device, params });
-  return {
-    action: action || "unknown",
-    deviceId: device?.id,
-    params,
-    confidence,
-    summary
-  };
+  const room = detectRoom(text);
+  const scored = scoreDevices({ text, devices, room, action });
+
+  const candidates = (scored.length ? scored : [{ device: null, score: 0.2, reason: "no_device_match" }]).map((item) => {
+    const confidence = clamp(item.score, 0, 1);
+    const summary = buildSummary({ action, device: item.device, params, room, reason: item.reason });
+    return {
+      action: action || "unknown",
+      deviceId: item.device?.id,
+      params,
+      confidence,
+      room,
+      summary
+    };
+  });
+
+  const intent = { ...candidates[0] };
+  return { intent, candidates };
 }
 
 function detectAction(text) {
-  if (/温度|temperature|摄氏|度/.test(text)) return "set_temperature";
+  if (/调.*亮度|brightness|%/.test(text)) return "set_brightness";
+  if (/温度|temperature|摄氏|(?<!亮)度/.test(text)) return "set_temperature";
   if (/turn\s*on|打开|开(灯|关|一下)?/.test(text)) return "turn_on";
   if (/turn\s*off|关(灯|掉|一下)?/.test(text)) return "turn_off";
-  if (/调.*亮度|brightness|%/.test(text)) return "set_brightness";
   if (/暖气|加热|heat/.test(text)) return "set_hvac_mode";
   if (/制冷|cool/.test(text)) return "set_hvac_mode";
   return null;
@@ -122,12 +131,36 @@ function detectParams(text) {
   return params;
 }
 
-function matchDevice(text, devices) {
-  const matched = devices.find((d) => {
+function detectRoom(text) {
+  if (/客厅|living/.test(text)) return "living_room";
+  if (/卧室|bedroom/.test(text)) return "bedroom";
+  if (/书房|study/.test(text)) return "study";
+  if (/厨房|kitchen/.test(text)) return "kitchen";
+  return null;
+}
+
+function scoreDevices({ text, devices, room, action }) {
+  const scores = [];
+  for (const d of devices || []) {
+    let score = 0.2;
+    const reason = [];
     const name = (d.name || "").toLowerCase();
-    return name && text.includes(name);
-  });
-  return matched || devices[0];
+    if (name && text.includes(name)) {
+      score += 0.5;
+      reason.push("name");
+    }
+    const placementRoom = d.placement?.room;
+    if (room && placementRoom && placementRoom.toLowerCase().includes(room.replace("_", ""))) {
+      score += 0.2;
+      reason.push("room");
+    }
+    if (action && d.capabilities?.some((c) => c.action === action)) {
+      score += 0.2;
+      reason.push("capability");
+    }
+    scores.push({ device: d, score, reason: reason.join(",") });
+  }
+  return scores.sort((a, b) => b.score - a.score);
 }
 
 function clamp(n, min, max) {
@@ -135,15 +168,23 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-function buildSummary({ action, device, params }) {
+function buildSummary({ action, device, params, room, reason }) {
   const parts = [];
   if (action) parts.push(`action=${action}`);
   if (device) parts.push(`device=${device.id}`);
+  if (room) parts.push(`room=${room}`);
   const paramStr = Object.entries(params || {})
     .map(([k, v]) => `${k}:${v}`)
     .join(",");
   if (paramStr) parts.push(`params=${paramStr}`);
+  if (reason) parts.push(`reason=${reason}`);
   return parts.join(" | ") || "no_intent";
+}
+
+function extractLastUser(messages) {
+  if (!Array.isArray(messages)) return null;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  return lastUser?.content || null;
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
