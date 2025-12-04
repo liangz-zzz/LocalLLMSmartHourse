@@ -14,6 +14,9 @@ export function loadConfig() {
     apiKeys: (process.env.API_KEYS || process.env.API_KEY || "")
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean)
+      .filter(Boolean),
+    jwtSecret: process.env.JWT_SECRET || "",
+    jwtAudience: process.env.JWT_AUD || process.env.JWT_AUDIENCE,
+    jwtIssuer: process.env.JWT_ISS || process.env.JWT_ISSUER
   };
 }

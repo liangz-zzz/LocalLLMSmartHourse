@@ -46,3 +46,23 @@ test("API key is enforced when configured", async () => {
 
   await app.close();
 });
+
+test("JWT is accepted when configured", async () => {
+  const jwtSecret = "supersecret";
+  const app = buildServer({
+    store: new FakeStore(),
+    logger: console,
+    config: { mode: "mock", apiKeys: [], jwtSecret },
+    bus: new FakeBus(),
+    actionStore: null,
+    ruleStore: null
+  });
+  await app.listen({ port: 0 });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const token = await app.jwt.sign({ sub: "tester" });
+
+  const res = await fetch(`${base}/devices`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(res.status, 200);
+
+  await app.close();
+});

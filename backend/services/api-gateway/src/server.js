@@ -1,17 +1,34 @@
 import Fastify from "fastify";
+import jwt from "@fastify/jwt";
 
 export function buildServer({ store, logger, config, bus, actionStore, ruleStore }) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
+  if (config.jwtSecret) {
+    app.register(jwt, {
+      secret: config.jwtSecret,
+      verify: {
+        aud: config.jwtAudience || undefined,
+        iss: config.jwtIssuer || undefined
+      }
+    });
+  }
 
   const authGuard = async (req, reply) => {
-    if (!apiKeys.length) return;
     const headerKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace(/Bearer\s+/i, "");
     const qsKey = req.query?.api_key;
-    const ok = apiKeys.includes(String(headerKey)) || apiKeys.includes(String(qsKey));
-    if (!ok) {
-      return reply.code(401).send({ error: "unauthorized" });
+    const apiKeyOk = apiKeys.length && (apiKeys.includes(String(headerKey)) || apiKeys.includes(String(qsKey)));
+    if (apiKeyOk) return;
+
+    if (config.jwtSecret) {
+      try {
+        await req.jwtVerify();
+        return;
+      } catch (err) {
+        logger?.warn("JWT verify failed", err.message);
+      }
     }
+    return reply.code(401).send({ error: "unauthorized" });
   };
 
   const validateActionParams = (device, action, params) => {
