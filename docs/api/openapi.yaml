@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: LocalLLMSmartHouse Gateway API
+  version: 0.1.0
+  description: REST surface of the API Gateway. WebSocket updates at `/ws` (not modeled here).
+servers:
+  - url: http://localhost:4000
+    description: Local dev (compose)
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /devices:
+    get:
+      summary: List devices
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+                  count:
+                    type: integer
+  /devices/{id}:
+    get:
+      summary: Get a device
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "404":
+          description: Not found
+  /devices/{id}/actions:
+    get:
+      summary: List action results for a device
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Action results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ActionResult"
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        "404":
+          description: Device not found
+    post:
+      summary: Enqueue an action for a device
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                params:
+                  type: object
+      responses:
+        "200":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+        "400":
+          description: Invalid params or action not supported
+        "404":
+          description: Device not found
+        "503":
+          description: Bus unavailable
+  /rules:
+    get:
+      summary: List rules
+      responses:
+        "200":
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Rule"
+    post:
+      summary: Create a rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Rule"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "400":
+          description: Invalid rule
+        "503":
+          description: Rule store unavailable
+  /rules/{id}:
+    get:
+      summary: Get a rule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "404":
+          description: Not found
+    put:
+      summary: Update a rule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Rule"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+    delete:
+      summary: Delete a rule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+components:
+  schemas:
+    Device:
+      type: object
+      required:
+        - id
+        - name
+        - placement
+        - protocol
+        - bindings
+        - traits
+        - capabilities
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        placement:
+          $ref: "#/components/schemas/Placement"
+        protocol:
+          type: string
+          enum: [zigbee, wifi, bluetooth_mesh, matter, virtual]
+        bindings:
+          type: object
+        traits:
+          type: object
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        semantics:
+          type: object
+    Placement:
+      type: object
+      properties:
+        room:
+          type: string
+        zone:
+          type: string
+        floor:
+          type: string
+        mount:
+          type: string
+        description:
+          type: string
+    Capability:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        description:
+          type: string
+        parameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityParameter"
+    CapabilityParameter:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [boolean, number, string, enum]
+        minimum:
+          type: number
+        maximum:
+          type: number
+        enum:
+          type: array
+          items:
+            type: string
+        required:
+          type: boolean
+    ActionResult:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+        transport:
+          type: string
+        reason:
+          type: string
+        params:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+    Rule:
+      type: object
+      required: [id, when, then]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        when:
+          type: object
+          properties:
+            deviceId:
+              type: string
+            traitPath:
+              type: string
+            equals:
+              description: Value to compare at traitPath
+              oneOf:
+                - type: string
+                - type: number
+                - type: boolean
+        then:
+          type: object
+          properties:
+            action:
+              type: string
+            params:
+              type: object
+        enabled:
+          type: boolean
