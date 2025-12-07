@@ -10,15 +10,24 @@ export class Logger {
   }
 
   info(...args) {
-    if (this.shouldLog("info")) console.log("[info]", ...args);
+    if (this.shouldLog("info")) this.log("info", args);
   }
   warn(...args) {
-    if (this.shouldLog("warn")) console.warn("[warn]", ...args);
+    if (this.shouldLog("warn")) this.log("warn", args);
   }
   error(...args) {
-    if (this.shouldLog("error")) console.error("[error]", ...args);
+    if (this.shouldLog("error")) this.log("error", args);
   }
   debug(...args) {
-    if (this.shouldLog("debug")) console.log("[debug]", ...args);
+    if (this.shouldLog("debug")) this.log("debug", args);
+  }
+
+  log(level, args) {
+    const ts = Date.now();
+    if (args.length === 1 && typeof args[0] === "object") {
+      console.log(JSON.stringify({ level, ts, ...args[0] }));
+    } else {
+      console.log(JSON.stringify({ level, ts, msg: args }));
+    }
   }
 }

@@ -10,11 +10,19 @@ function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
   const current = levels.includes(level) ? level : "info";
   const should = (lvl) => levels.indexOf(lvl) <= levels.indexOf(current);
+  const log = (lvl, msg, meta) => {
+    if (!should(lvl)) return;
+    const payload = typeof msg === "string" ? { msg } : { ...msg };
+    const line = JSON.stringify({ level: lvl, ts: Date.now(), ...payload, ...(meta || {}) });
+    if (lvl === "error") console.error(line);
+    else if (lvl === "warn") console.warn(line);
+    else console.log(line);
+  };
   return {
-    info: (...args) => should("info") && console.log("[info]", ...args),
-    warn: (...args) => should("warn") && console.warn("[warn]", ...args),
-    error: (...args) => should("error") && console.error("[error]", ...args),
-    debug: (...args) => should("debug") && console.log("[debug]", ...args)
+    info: (msg, meta) => log("info", msg, meta),
+    warn: (msg, meta) => log("warn", msg, meta),
+    error: (msg, meta) => log("error", msg, meta),
+    debug: (msg, meta) => log("debug", msg, meta)
   };
 }
 

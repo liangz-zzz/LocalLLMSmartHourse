@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import Redis from "ioredis";
 import { PrismaClient } from "@prisma/client";
 import { evaluateRules } from "./rules.js";
-import { incCounter, snapshot } from "./metrics.js";
+import { incCounter, snapshot, asPrometheus } from "./metrics.js";
 import http from "http";
 
 const redisUrl = process.env.REDIS_URL || "redis://redis:6379";
@@ -100,6 +100,13 @@ main().catch((err) => {
 
 function createMetricsServer(port) {
   const server = http.createServer((_req, res) => {
+    const url = new URL(_req.url || "/", "http://localhost");
+    const format = url.searchParams.get("format");
+    if (format === "prom") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(asPrometheus("rules_engine"));
+      return;
+    }
     const snap = snapshot();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(snap));

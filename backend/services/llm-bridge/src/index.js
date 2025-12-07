@@ -80,7 +80,12 @@ export function buildApp(options = {}) {
     return reply.send({ intent, candidates });
   });
 
-  app.get("/metrics", async (_req, reply) => {
+  app.get("/metrics", async (req, reply) => {
+    const format = req.query?.format;
+    if (format === "prom") {
+      reply.header("Content-Type", "text/plain");
+      return reply.send(metrics.asPrometheus("llm_bridge"));
+    }
     reply.send(metrics.snapshot());
   });
 
@@ -225,7 +230,12 @@ function buildMetrics() {
     count: (name) => {
       counters[name] = (counters[name] || 0) + 1;
     },
-    snapshot: () => ({ counters: { ...counters } })
+    snapshot: () => ({ counters: { ...counters } }),
+    asPrometheus: (ns) => {
+      return Object.entries(counters)
+        .map(([k, v]) => `${ns}_${k} ${v}`)
+        .join("\n");
+    }
   };
 }
 

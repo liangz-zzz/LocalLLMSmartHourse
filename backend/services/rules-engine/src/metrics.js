@@ -12,3 +12,19 @@ export function snapshot() {
 export function reset() {
   counters = {};
 }
+
+export function asPrometheus(namespace = "rules_engine") {
+  return Object.entries(counters)
+    .map(([key, value]) => {
+      const [name, labelJson] = key.split(":");
+      const labels = JSON.parse(labelJson || "{}");
+      const labelStr =
+        Object.keys(labels).length === 0
+          ? ""
+          : `{${Object.entries(labels)
+              .map(([k, v]) => `${k}="${v}"`)
+              .join(",")}}`;
+      return `${namespace}_${name}${labelStr} ${value}`;
+    })
+    .join("\n");
+}
