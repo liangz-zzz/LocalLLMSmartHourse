@@ -2,6 +2,8 @@ import fs from "fs/promises";
 import Redis from "ioredis";
 import { PrismaClient } from "@prisma/client";
 import { evaluateRules } from "./rules.js";
+import { incCounter, snapshot } from "./metrics.js";
+import http from "http";
 
 const redisUrl = process.env.REDIS_URL || "redis://redis:6379";
 const updatesChannel = process.env.REDIS_UPDATES_CHANNEL || "device:updates";
@@ -76,6 +78,7 @@ async function main() {
         pub.publish(actionsChannel, JSON.stringify(action));
       });
       if (matched.length) {
+        incCounter("rules_matched", { count: matched.length });
         logger.info("Rule matched", matched, "for", event.id);
       }
     } catch (err) {
@@ -84,9 +87,24 @@ async function main() {
   });
 
   logger.info("Rules engine listening on", updatesChannel, "->", actionsChannel);
+
+  // metrics endpoint
+  const metricsPort = Number(process.env.METRICS_PORT || 9100);
+  createMetricsServer(metricsPort);
 }
 
 main().catch((err) => {
   logger.error("Rules engine failed", err);
   process.exit(1);
 });
+
+function createMetricsServer(port) {
+  const server = http.createServer((_req, res) => {
+    const snap = snapshot();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(snap));
+  });
+  server.listen(port, () => {
+    logger.info("Metrics server listening on", port);
+  });
+}

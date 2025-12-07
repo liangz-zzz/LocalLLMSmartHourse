@@ -6,6 +6,7 @@ export function buildApp(options = {}) {
   const forwardEnabled = Boolean(forwardBase);
   const rateLimitPerMin = Number(process.env.RATE_LIMIT_PER_MIN || 60);
   const limiter = buildLimiter(rateLimitPerMin);
+  const metrics = buildMetrics();
 
   const app = Fastify({ logger: false });
 
@@ -14,6 +15,7 @@ export function buildApp(options = {}) {
   app.post("/v1/chat/completions", async (req, reply) => {
     if (!limiter.ok(req)) return reply.code(429).send({ error: "rate_limited" });
     const { messages = [], model = "local-echo" } = req.body || {};
+    metrics.count("chat_requests");
 
     if (forwardEnabled) {
       try {
@@ -29,12 +31,15 @@ export function buildApp(options = {}) {
         if (!upstream.ok) {
           const text = await upstream.text();
           app.log?.warn?.("Upstream LLM error", upstream.status, text);
+          metrics.count("chat_upstream_error");
         } else {
           const data = await upstream.json();
+          metrics.count("chat_upstream_ok");
           return reply.send(data);
         }
       } catch (err) {
         app.log?.warn?.("Upstream LLM call failed, falling back to echo", err);
+        metrics.count("chat_upstream_fail");
       }
     }
 
@@ -66,12 +71,17 @@ export function buildApp(options = {}) {
   app.post("/v1/intent", async (req, reply) => {
     if (!limiter.ok(req)) return reply.code(429).send({ error: "rate_limited" });
     const { input, messages = [], devices = [] } = req.body || {};
+    metrics.count("intent_requests");
     const text = input || extractLastUser(messages);
     if (!text) {
       return reply.code(400).send({ error: "input_required" });
     }
     const { intent, candidates } = parseIntent({ input: text, messages, devices });
     return reply.send({ intent, candidates });
+  });
+
+  app.get("/metrics", async (_req, reply) => {
+    reply.send(metrics.snapshot());
   });
 
   app.setErrorHandler((err, _req, reply) => {
@@ -207,6 +217,16 @@ function buildLimiter(limitPerMin) {
     return bucket[key] <= limitPerMin;
   };
   return { ok };
+}
+
+function buildMetrics() {
+  const counters = {};
+  return {
+    count: (name) => {
+      counters[name] = (counters[name] || 0) + 1;
+    },
+    snapshot: () => ({ counters: { ...counters } })
+  };
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
