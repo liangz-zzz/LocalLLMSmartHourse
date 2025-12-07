@@ -118,8 +118,10 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
       id: req.params.id,
       action,
       params: params || {},
-      ts: Date.now()
+      ts: Date.now(),
+      actor: getActor(req)
     });
+    logger?.info("action.enqueued", { id: req.params.id, action, actor: getActor(req) });
     return { status: "queued" };
   });
 
@@ -138,6 +140,7 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
       return reply.code(400).send({ error: "invalid_rule", reason: validation.reason || "id required" });
     }
     const created = await ruleStore.create({ id, name, when, then, enabled });
+    logger?.info("rule.created", { id, actor: getActor(req) });
     return created;
   });
 
@@ -156,12 +159,14 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
       return reply.code(400).send({ error: "invalid_rule", reason: validation.reason });
     }
     const updated = await ruleStore.update(req.params.id, { name, when, then, enabled });
+    logger?.info("rule.updated", { id: req.params.id, actor: getActor(req) });
     return updated;
   });
 
   app.delete("/rules/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
     await ruleStore.delete(req.params.id);
+    logger?.info("rule.deleted", { id: req.params.id, actor: getActor(req) });
     return { status: "deleted" };
   });
 
@@ -171,4 +176,12 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
   });
 
   return app;
+}
+
+function getActor(req) {
+  const headerKey = req?.headers?.["x-api-key"];
+  const bearer = req?.headers?.authorization;
+  const qsKey = req?.query?.api_key;
+  const jwtSub = req?.user?.sub;
+  return jwtSub || bearer || headerKey || qsKey || "anonymous";
 }

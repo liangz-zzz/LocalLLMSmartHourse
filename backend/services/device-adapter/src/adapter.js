@@ -49,7 +49,7 @@ export class DeviceAdapter {
     if (!preferHa && hasZ2M) {
       const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
       const payload = buildZ2MSetPayload(action);
-      this.logger.info("Publishing action to MQTT", topic, payload);
+      this.logger.info("Publishing action to MQTT", topic, payload, { actor: action.actor });
       this.client.publish(topic, JSON.stringify(payload));
       await this.store.publishActionResult?.(
         buildActionResult({ deviceId: device.id, action: action.action, status: 'ok', transport: 'mqtt', params: action.params })

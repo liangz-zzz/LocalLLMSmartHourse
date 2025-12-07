@@ -22,12 +22,12 @@
 - [done] LLM 解析增强  
   - 基于关键词/房间/能力的多候选解析，输出动作候选及置信度；支持 messages fallback。  
   - 后续可接入 Prompt/规则混合与真实 LLM，以现有结构为兜底。
-- [todo] API/WS 文档与 SDK  
-  - 生成 OpenAPI/AsyncAPI，前端/LLM 侧使用统一 SDK（typescript-fetch 或自行封装）。  
-  - 在 AGENTS 中补充示例调用与错误码。
-- [todo] 安全与鉴权  
-  - API/WS 支持 API Key/JWT，llm-bridge 限流/签名校验；规则/动作审计（谁下发）。  
-  - 前端接入登录占位（stub）。
-- [todo] 运维与观测  
-  - 增加基础日志/metrics（JSON line + Prometheus stub），本地 docker-compose 替换占位命令为服务启动。  
-  - 提供 mqtt/redis/db 观测脚本或 dashboard 雏形。
+- [done] API/WS 文档与 SDK  
+  - 提供 OpenAPI（REST 设备/动作/规则）与 API 概览；前端 SDK `lib/api-client.ts` 可复用。  
+  - WS/LLM 入口在 docs/api/README 中记录。
+- [done] 安全与鉴权  
+  - API/WS 支持 API Key 与 JWT 双模式；llm-bridge 限流；动作/规则写审计日志含 actor。  
+  - 后续可补前端登录占位。
+- [done] 运维与观测  
+  - 网关/适配器结构化日志；llm-bridge `/metrics`（JSON/Prometheus），rules-engine `/metrics`（JSON/Prometheus），动作/规则日志含 actor。  
+  - 后续可扩展 Prometheus exporter/报警与 docker-compose 启动实际服务。
