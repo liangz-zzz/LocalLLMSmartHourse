@@ -10,5 +10,8 @@
   - `npm install`（首次在 `backend/tools` 目录）后运行
   - `node backend/tools/mqtt-dump.js --url mqtt://localhost:1883 --topic zigbee2mqtt/#`
   - `MQTT_URL=mqtt://mqtt:1883 MQTT_TOPIC=zigbee2mqtt/living_room/# node backend/tools/mqtt-dump.js`
+- `intent-run.js`: 拉取网关设备列表 → 调用 llm-bridge `/v1/intent` →（可选）下发动作到网关。默认 dry-run，不会真的控制设备：
+  - `node backend/tools/intent-run.js --text "打开烧水壶"`（只打印解析结果）
+  - `node backend/tools/intent-run.js --text "打开烧水壶" --execute`（实际下发动作，请确保负载安全）
 
 如新增工具，请在此列出用途与用法。***

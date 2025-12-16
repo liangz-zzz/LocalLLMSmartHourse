@@ -15,6 +15,9 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
   }
 
   const authGuard = async (req, reply) => {
+    // If neither API keys nor JWT are configured, allow anonymous access (dev/default).
+    if (!apiKeys.length && !config.jwtSecret) return;
+
     const headerKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace(/Bearer\s+/i, "");
     const qsKey = req.query?.api_key;
     const apiKeyOk = apiKeys.length && (apiKeys.includes(String(headerKey)) || apiKeys.includes(String(qsKey)));

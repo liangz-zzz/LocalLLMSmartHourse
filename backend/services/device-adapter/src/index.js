@@ -24,6 +24,7 @@ async function main() {
     mode: config.mode,
     mqttUrl: config.mqttUrl,
     mockDataDir: config.mockDataDir,
+    deviceConfigPath: config.deviceConfigPath,
     store,
     logger,
     haBaseUrl: config.haBaseUrl,

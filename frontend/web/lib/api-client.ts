@@ -19,6 +19,7 @@ export type Device = {
   placement?: { room?: string; zone?: string; description?: string };
   traits?: Record<string, any>;
   capabilities?: Capability[];
+  semantics?: Record<string, any>;
 };
 
 export type ActionResult = {
@@ -51,9 +52,9 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const ApiClient = {
   listDevices: () => jsonFetch<{ items: Device[]; count: number }>("/devices"),
-  getDevice: (id: string) => jsonFetch<Device>(`/devices/${id}`),
+  getDevice: (id: string) => jsonFetch<Device>(`/devices/${encodeURIComponent(id)}`),
   sendAction: (id: string, action: string, params?: Record<string, any>) =>
-    jsonFetch<{ status: string }>(`/devices/${id}/actions`, {
+    jsonFetch<{ status: string }>(`/devices/${encodeURIComponent(id)}/actions`, {
       method: "POST",
       body: JSON.stringify({ action, params })
     }),
@@ -62,7 +63,7 @@ export const ApiClient = {
     if (opts?.limit) search.set("limit", String(opts.limit));
     if (opts?.offset) search.set("offset", String(opts.offset));
     const suffix = search.toString() ? `?${search.toString()}` : "";
-    return jsonFetch<{ items: ActionResult[]; limit: number; offset: number }>(`/devices/${id}/actions${suffix}`);
+    return jsonFetch<{ items: ActionResult[]; limit: number; offset: number }>(`/devices/${encodeURIComponent(id)}/actions${suffix}`);
   },
   listRules: () => jsonFetch<{ items: any[] }>("/rules"),
   createRule: (rule: any) =>

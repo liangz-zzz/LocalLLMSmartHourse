@@ -66,3 +66,21 @@ test("parseIntent can use messages fallback", () => {
   assert.equal(intent.action, "set_brightness");
   assert.equal(intent.params.brightness, 40);
 });
+
+test("parseIntent can match device by semantics aliases", () => {
+  const { intent } = parseIntent({
+    input: "打开烧水壶",
+    devices: [
+      {
+        id: "kettle_plug",
+        name: "烧水壶插座",
+        placement: { room: "kitchen" },
+        semantics: { aliases: ["烧水壶", "水壶"] },
+        capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+      },
+      { id: "light1", name: "客厅灯", placement: { room: "living_room" }, capabilities: [{ action: "turn_on" }] }
+    ]
+  });
+  assert.equal(intent.deviceId, "kettle_plug");
+  assert.equal(intent.action, "turn_on");
+});

@@ -32,12 +32,13 @@
 {
   "summary": "客厅主灯，常用于观影前调暗 30%",
   "tags": ["ambient", "living_room", "dimmable"],
+  "aliases": ["主灯", "客厅主灯"],
   "preferred_scenes": ["movie", "evening_relax"],
   "constraints": ["avoid_full_brightness_after_23"],
   "owner_notes": "观影时设 20~30% 亮度，睡前关灯"
 }
 ```
-- 与 placement 互补，提供 LLM 更丰富的上下文。
+- 与 placement 互补，提供 LLM 更丰富的上下文；`aliases` 用于同义词/别名匹配（语音/口语更友好）。
 
 ## 常见能力与状态片段
 - `switch`: state `on|off`

@@ -20,6 +20,7 @@ type Device = {
   placement?: { room?: string; zone?: string; description?: string };
   traits?: Record<string, any>;
   capabilities?: Capability[];
+  semantics?: Record<string, any>;
 };
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -75,7 +76,7 @@ export default function Home() {
   const handleAction = async (device: Device, action: string) => {
     setActionStatus((prev) => ({ ...prev, [device.id]: "sending..." }));
     try {
-      const resp = await fetch(`/api/devices/${device.id}/actions`, {
+      const resp = await fetch(`/api/devices/${encodeURIComponent(device.id)}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action })
@@ -179,7 +180,7 @@ export default function Home() {
     });
     setActionStatus((prev) => ({ ...prev, [device.id]: "sending..." }));
     try {
-      const resp = await fetch(`/api/devices/${device.id}/actions`, {
+      const resp = await fetch(`/api/devices/${encodeURIComponent(device.id)}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: capability.action, params })
@@ -226,7 +227,13 @@ export default function Home() {
     try {
       const payload = {
         input: intentInput.trim(),
-        devices: deviceList.map((d) => ({ id: d.id, name: d.name, capabilities: d.capabilities }))
+        devices: deviceList.map((d) => ({
+          id: d.id,
+          name: d.name,
+          placement: d.placement,
+          semantics: d.semantics,
+          capabilities: d.capabilities
+        }))
       };
       const resp = await fetch("/api/intent", {
         method: "POST",
@@ -257,7 +264,7 @@ export default function Home() {
     }
     setIntentStatus("执行中...");
     try {
-      const resp = await fetch(`/api/devices/${device.id}/actions`, {
+      const resp = await fetch(`/api/devices/${encodeURIComponent(device.id)}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: intentResult.action, params: intentResult.params })

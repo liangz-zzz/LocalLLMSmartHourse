@@ -143,8 +143,12 @@
     "semantics": {
       "type": "object",
       "properties": {
+        "summary": { "type": "string" },
         "tags": { "type": "array", "items": { "type": "string" } },
+        "aliases": { "type": "array", "items": { "type": "string" } },
         "preferred_scenes": { "type": "array", "items": { "type": "string" } },
+        "constraints": { "type": "array", "items": { "type": "string" } },
+        "owner_notes": { "type": "string" },
         "description": { "type": "string" },
         "vendor": { "type": "string" },
         "model": { "type": "string" }

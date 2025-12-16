@@ -1,0 +1,23 @@
+{
+  "devices": [
+    {
+      "id": "kettle_plug",
+      "name": "烧水壶插座",
+      "placement": {
+        "room": "kitchen",
+        "zone": "counter",
+        "mount": "wall",
+        "description": "厨房台面电热水壶的智能插座"
+      },
+      "capabilities": [
+        { "action": "turn_on", "description": "打开插座供电（开始烧水）" },
+        { "action": "turn_off", "description": "关闭插座供电（停止烧水）" }
+      ],
+      "semantics": {
+        "tags": ["plug", "kettle", "kitchen"],
+        "aliases": ["烧水壶", "水壶", "电热水壶", "开水壶"],
+        "description": "控制电热水壶供电的智能插座"
+      }
+    }
+  ]
+}

@@ -91,8 +91,12 @@ const capabilitySchema = z.object({
 });
 
 const semanticsSchema = z.object({
+  summary: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  aliases: z.array(z.string()).optional(),
   preferred_scenes: z.array(z.string()).optional(),
+  constraints: z.array(z.string()).optional(),
+  owner_notes: z.string().optional(),
   description: z.string().optional(),
   vendor: z.string().optional(),
   model: z.string().optional()

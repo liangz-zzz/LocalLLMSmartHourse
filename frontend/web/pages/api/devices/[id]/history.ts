@@ -9,7 +9,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const params = new URLSearchParams();
     if (limit) params.set("limit", String(limit));
     if (offset) params.set("offset", String(offset));
-    const resp = await fetch(`${base}/devices/${id}/actions?${params.toString()}`);
+    const resp = await fetch(`${base}/devices/${encodeURIComponent(id)}/actions?${params.toString()}`);
     const data = await resp.json();
     res.status(resp.status).json(data);
   } catch (err) {

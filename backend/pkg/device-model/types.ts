@@ -88,8 +88,12 @@ export interface Capability {
 }
 
 export interface Semantics {
+  summary?: string;
   tags?: string[];
+  aliases?: string[];
   preferred_scenes?: string[];
+  constraints?: string[];
+  owner_notes?: string;
   description?: string;
   vendor?: string;
   model?: string;

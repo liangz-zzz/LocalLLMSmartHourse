@@ -11,7 +11,7 @@
 - 首期协议：Zigbee via zigbee2mqtt，辅以 HA service call 作为兜底。
 - 绑定：保持 `bindings.zigbee2mqtt.topic` 与 `bindings.ha_entity_id`，便于多协议共存。
 - 状态缓存：Redis；事件源：MQTT 订阅 `zigbee2mqtt/#`，落库 Postgres。
-- 位置信息：解析/维护 `placement` 与 `semantics`，供 LLM 使用。
+- 位置信息：解析/维护 `placement` 与 `semantics`，供 LLM 使用；可通过 `devices.config.json` 覆盖（见下）。
 - HA 映射：支持 turn_on/off、set_brightness、set_cover_position/tilt、set_temperature、set_hvac_mode、set_fan_mode、set_color_temp；无可用通路时返回错误 reason。
 
 测试
@@ -19,6 +19,7 @@
 
 工具/样例
 - `mock-adapter.js`: 离线将 `mock-data/zigbee2mqtt` 的示例 payload 归一化为设备模型，用于无设备时的 dry-run。
+- `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以 `id`（通常等于 zigbee2mqtt 的 `friendly_name`）为键；可用 `DEVICE_CONFIG_PATH` 指定路径（默认 `./devices.config.json`）。
 
 运行与测试
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。

@@ -29,10 +29,10 @@ export default function DevicePage() {
   useEffect(() => {
     if (!id || Array.isArray(id)) return;
     const load = async () => {
-      const dRes = await fetch(`/api/devices/${id}`);
+      const dRes = await fetch(`/api/devices/${encodeURIComponent(id)}`);
       const d = await dRes.json();
       setDevice(d);
-      const hRes = await fetch(`/api/devices/${id}/history?limit=10`);
+      const hRes = await fetch(`/api/devices/${encodeURIComponent(id)}/history?limit=10`);
       const h = await hRes.json();
       setHistory(h.items || []);
     };
@@ -54,7 +54,7 @@ export default function DevicePage() {
           return;
         }
       }
-      const resp = await fetch(`/api/devices/${id}/actions`, {
+      const resp = await fetch(`/api/devices/${encodeURIComponent(id)}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)

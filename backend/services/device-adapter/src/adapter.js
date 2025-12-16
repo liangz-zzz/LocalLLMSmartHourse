@@ -3,21 +3,25 @@ import path from "path";
 import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
 import { buildActionResult } from "./action-results.js";
+import { applyDeviceOverrides, loadDeviceOverrides } from "./device-config.js";
 
 export class DeviceAdapter {
-  constructor({ mode, mqttUrl, store, mockDataDir, logger, haBaseUrl, haToken, actionTransport }) {
+  constructor({ mode, mqttUrl, store, mockDataDir, deviceConfigPath, logger, haBaseUrl, haToken, actionTransport }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
     this.store = store;
     this.mockDataDir = mockDataDir;
+    this.deviceConfigPath = deviceConfigPath;
     this.logger = logger;
     this.client = null;
     this.haBaseUrl = haBaseUrl;
     this.haToken = haToken;
     this.actionTransport = actionTransport || "auto";
+    this.deviceOverrides = new Map();
   }
 
   async start() {
+    this.deviceOverrides = await loadDeviceOverrides(this.deviceConfigPath, this.logger);
     if (this.mode === "offline") {
       this.logger.info("Starting adapter in offline mode (mock data)");
       return this.loadMockData();
@@ -97,7 +101,8 @@ export class DeviceAdapter {
     const devicePath = path.join(new URL(this.mockDataDir).pathname, "device.json");
     const statePath = path.join(new URL(this.mockDataDir).pathname, "state.json");
     const [device, state] = await Promise.all([readJson(devicePath), readJson(statePath)]);
-    const normalized = normalizeZigbee2Mqtt({ device, state });
+    const base = normalizeZigbee2Mqtt({ device, state, placement: this.deviceOverrides.get(device?.friendly_name)?.placement });
+    const normalized = applyDeviceOverrides({ base, existing: null, override: this.deviceOverrides.get(base.id) });
     await this.store.upsert(normalized);
     this.logger.info("Loaded mock device", normalized.id);
   }
@@ -126,7 +131,11 @@ export class DeviceAdapter {
               this.logger.info("Received device list", devices.length);
               // we only store bindings now; state will come from per-device topics
               for (const dev of devices) {
-                const normalized = normalizeZigbee2Mqtt({ device: dev, state: {} });
+                const id = dev?.friendly_name || dev?.ieee_address || "unknown_device";
+                const existing = await this.store.get(id);
+                const override = this.deviceOverrides.get(id);
+                const base = normalizeZigbee2Mqtt({ device: dev, state: {}, placement: override?.placement || existing?.placement });
+                const normalized = applyDeviceOverrides({ base, existing, override });
                 await this.store.upsert(normalized);
               }
             }
@@ -139,7 +148,9 @@ export class DeviceAdapter {
             const state = parseJson(payload);
             const existing = await this.store.get(friendly);
             const deviceMeta = existing?.bindings?.zigbee2mqtt || { friendly_name: friendly };
-            const normalized = normalizeZigbee2Mqtt({ device: deviceMeta, state });
+            const override = this.deviceOverrides.get(friendly);
+            const base = normalizeZigbee2Mqtt({ device: deviceMeta, state, placement: override?.placement || existing?.placement });
+            const normalized = applyDeviceOverrides({ base, existing, override });
             await this.store.upsert(normalized);
             this.logger.debug("Updated state", friendly);
           }

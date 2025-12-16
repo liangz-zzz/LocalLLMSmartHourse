@@ -102,7 +102,7 @@ function buildEcho(messages) {
 }
 
 export function parseIntent({ input, messages = [], devices = [] }) {
-  const text = (input || extractLastUser(messages) || "").toLowerCase();
+  const text = normalizeText(input || extractLastUser(messages) || "");
   const action = detectAction(text);
   const params = detectParams(text);
   const room = detectRoom(text);
@@ -128,6 +128,8 @@ export function parseIntent({ input, messages = [], devices = [] }) {
 function detectAction(text) {
   if (/调.*亮度|brightness|%/.test(text)) return "set_brightness";
   if (/温度|temperature|摄氏|(?<!亮)度/.test(text)) return "set_temperature";
+  if (/停止烧水|别烧水|不要烧水|停(止)?烧水|停止加热/.test(text)) return "turn_off";
+  if (/烧水|煮水|开水|热水|加热水壶/.test(text)) return "turn_on";
   if (/turn\s*on|打开|开(灯|关|一下)?/.test(text)) return "turn_on";
   if (/turn\s*off|关(灯|掉|一下)?/.test(text)) return "turn_off";
   if (/暖气|加热|heat/.test(text)) return "set_hvac_mode";
@@ -163,18 +165,37 @@ function scoreDevices({ text, devices, room, action }) {
   for (const d of devices || []) {
     let score = 0.2;
     const reason = [];
-    const name = (d.name || "").toLowerCase();
+    const id = normalizeText(d.id);
+    const name = normalizeText(d.name);
+    const aliases = Array.isArray(d.semantics?.aliases) ? d.semantics.aliases.map(normalizeText).filter(Boolean) : [];
+    const tags = Array.isArray(d.semantics?.tags) ? d.semantics.tags.map(normalizeText).filter(Boolean) : [];
+
+    if (id && text.includes(id)) {
+      score += 0.6;
+      reason.push("id");
+    }
     if (name && text.includes(name)) {
-      score += 0.5;
+      score += 0.6;
       reason.push("name");
     }
-    const placementRoom = d.placement?.room;
-    if (room && placementRoom && placementRoom.toLowerCase().includes(room.replace("_", ""))) {
-      score += 0.2;
+    if (aliases.some((a) => a && text.includes(a))) {
+      score += 0.7;
+      reason.push("alias");
+    }
+    if (tags.some((t) => t && text.includes(t))) {
+      score += 0.25;
+      reason.push("tag");
+    }
+
+    const placementRoomKey = normalizeRoom(d.placement?.room);
+    const roomKey = normalizeRoom(room);
+    if (roomKey && placementRoomKey && placementRoomKey.includes(roomKey)) {
+      score += 0.3;
       reason.push("room");
     }
+
     if (action && d.capabilities?.some((c) => c.action === action)) {
-      score += 0.2;
+      score += 0.25;
       reason.push("capability");
     }
     scores.push({ device: d, score, reason: reason.join(",") });
@@ -204,6 +225,20 @@ function extractLastUser(messages) {
   if (!Array.isArray(messages)) return null;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   return lastUser?.content || null;
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeRoom(value) {
+  if (!value) return "";
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "");
 }
 
 function buildLimiter(limitPerMin) {
