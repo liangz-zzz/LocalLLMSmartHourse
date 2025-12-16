@@ -24,7 +24,7 @@ export function buildApp(options = {}) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: forwardApiKey ? `Bearer ${forwardApiKey}` : undefined
+            ...(forwardApiKey ? { Authorization: `Bearer ${forwardApiKey}` } : {})
           },
           body: JSON.stringify({ ...req.body, model })
         });
@@ -70,14 +70,25 @@ export function buildApp(options = {}) {
 
   app.post("/v1/intent", async (req, reply) => {
     if (!limiter.ok(req)) return reply.code(429).send({ error: "rate_limited" });
-    const { input, messages = [], devices = [] } = req.body || {};
+    const { input, messages = [], devices = [], model, strategy } = req.body || {};
     metrics.count("intent_requests");
     const text = input || extractLastUser(messages);
     if (!text) {
       return reply.code(400).send({ error: "input_required" });
     }
-    const { intent, candidates } = parseIntent({ input: text, messages, devices });
-    return reply.send({ intent, candidates });
+    const result = await resolveIntent({
+      input: text,
+      messages,
+      devices,
+      model,
+      strategy,
+      forwardEnabled,
+      forwardBase,
+      forwardApiKey,
+      metrics,
+      logger: app.log
+    });
+    return reply.send(result);
   });
 
   app.get("/metrics", async (req, reply) => {
@@ -225,6 +236,193 @@ function extractLastUser(messages) {
   if (!Array.isArray(messages)) return null;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   return lastUser?.content || null;
+}
+
+async function resolveIntent({
+  input,
+  messages,
+  devices,
+  model,
+  strategy,
+  forwardEnabled,
+  forwardBase,
+  forwardApiKey,
+  metrics,
+  logger
+}) {
+  const ruleResult = parseIntent({ input, messages, devices });
+
+  const configuredStrategy = String(strategy || process.env.INTENT_STRATEGY || "").toLowerCase().trim();
+  const defaultStrategy = forwardEnabled ? "hybrid" : "rules";
+  const useStrategy = (configuredStrategy || defaultStrategy).replace(/_/g, "-");
+
+  if (!forwardEnabled || useStrategy === "rules") return ruleResult;
+
+  const threshold = clamp(Number(process.env.INTENT_RULE_CONFIDENCE_THRESHOLD || 0.85), 0, 1);
+  const ruleIntent = ruleResult.intent || {};
+  const ruleConf = typeof ruleIntent.confidence === "number" ? ruleIntent.confidence : 0;
+  const ruleOk = Boolean(ruleIntent.deviceId) && ruleIntent.action && ruleIntent.action !== "unknown" && ruleConf >= threshold;
+  if (useStrategy === "hybrid" && ruleOk) return ruleResult;
+
+  try {
+    const llmIntent = await parseIntentWithUpstream({
+      input,
+      devices,
+      model,
+      forwardBase,
+      forwardApiKey
+    });
+    metrics?.count?.("intent_upstream_ok");
+    const enriched = {
+      ...llmIntent,
+      summary: [llmIntent.summary, "source=llm"].filter(Boolean).join(" | ")
+    };
+    const candidates = [
+      enriched,
+      ...(Array.isArray(ruleResult.candidates) ? ruleResult.candidates.map((c) => ({ ...c, summary: [c.summary, "source=rules"].filter(Boolean).join(" | ") })) : [])
+    ].slice(0, 5);
+    return { intent: enriched, candidates };
+  } catch (err) {
+    logger?.warn?.("Intent upstream failed, falling back to rules", err?.message || String(err));
+    metrics?.count?.("intent_upstream_fail");
+    return ruleResult;
+  }
+}
+
+async function parseIntentWithUpstream({ input, devices, model, forwardBase, forwardApiKey }) {
+  const intentModel = model || process.env.INTENT_MODEL || "deepseek-chat";
+  const promptDevices = compactDevicesForPrompt(devices);
+
+  const system = [
+    "You are a smart home intent parser.",
+    "Return ONLY valid JSON (no markdown, no code fences).",
+    "Pick ONE best matching device and ONE action from that device's capabilities.",
+    "Use action names exactly as listed in capabilities (e.g. turn_on, turn_off, set_brightness).",
+    "If you cannot decide, use {\"action\":\"unknown\",\"deviceId\":null,\"params\":{},\"confidence\":0.2}.",
+    "confidence must be a number 0..1."
+  ].join("\n");
+
+  const user = JSON.stringify(
+    {
+      input,
+      devices: promptDevices,
+      output_schema: {
+        action: "string",
+        deviceId: "string|null",
+        params: "object",
+        confidence: "number 0..1",
+        room: "string|null (optional)",
+        summary: "string (optional)"
+      }
+    },
+    null,
+    2
+  );
+
+  const data = await callUpstreamChatCompletions({
+    forwardBase,
+    forwardApiKey,
+    body: {
+      model: intentModel,
+      temperature: 0,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ]
+    }
+  });
+
+  const content = data?.choices?.[0]?.message?.content || "";
+  const parsed = safeJsonParse(extractJson(content));
+  const intent = normalizeIntentOutput(parsed);
+
+  // Validate against provided devices/capabilities to avoid unsafe hallucinations
+  const device = (devices || []).find((d) => d?.id === intent.deviceId);
+  if (intent.action !== "unknown") {
+    if (!device || !Array.isArray(device.capabilities) || !device.capabilities.some((c) => c.action === intent.action)) {
+      return {
+        action: "unknown",
+        deviceId: null,
+        params: {},
+        confidence: 0.2,
+        room: null,
+        summary: "upstream_invalid_device_or_action"
+      };
+    }
+  }
+
+  return {
+    action: intent.action,
+    deviceId: intent.deviceId,
+    params: intent.params || {},
+    confidence: clamp(intent.confidence, 0, 1),
+    room: intent.room || null,
+    summary: intent.summary || "upstream_intent"
+  };
+}
+
+async function callUpstreamChatCompletions({ forwardBase, forwardApiKey, body }) {
+  const target = `${String(forwardBase).replace(/\/$/, "")}/v1/chat/completions`;
+  const res = await fetch(target, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(forwardApiKey ? { Authorization: `Bearer ${forwardApiKey}` } : {})
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`upstream ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+function compactDevicesForPrompt(devices) {
+  const list = Array.isArray(devices) ? devices : [];
+  const max = Number(process.env.INTENT_MAX_DEVICES || 50);
+  return list.slice(0, Math.max(1, max)).map((d) => ({
+    id: d.id,
+    name: d.name,
+    placement: d.placement,
+    semantics: d.semantics,
+    capabilities: Array.isArray(d.capabilities)
+      ? d.capabilities.map((c) => ({ action: c.action, parameters: c.parameters || [] }))
+      : []
+  }));
+}
+
+function extractJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced) return fenced[1].trim();
+  const firstObj = raw.indexOf("{");
+  const lastObj = raw.lastIndexOf("}");
+  if (firstObj !== -1 && lastObj !== -1 && lastObj > firstObj) return raw.slice(firstObj, lastObj + 1).trim();
+  const firstArr = raw.indexOf("[");
+  const lastArr = raw.lastIndexOf("]");
+  if (firstArr !== -1 && lastArr !== -1 && lastArr > firstArr) return raw.slice(firstArr, lastArr + 1).trim();
+  return raw;
+}
+
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_e) {
+    return null;
+  }
+}
+
+function normalizeIntentOutput(obj) {
+  const o = obj && typeof obj === "object" ? obj : {};
+  const action = typeof o.action === "string" ? o.action : "unknown";
+  const deviceId = typeof o.deviceId === "string" && o.deviceId.trim() ? o.deviceId : null;
+  const params = o.params && typeof o.params === "object" && !Array.isArray(o.params) ? o.params : {};
+  const confidence = typeof o.confidence === "number" ? o.confidence : 0.2;
+  const room = typeof o.room === "string" ? o.room : null;
+  const summary = typeof o.summary === "string" ? o.summary : "";
+  return { action, deviceId, params, confidence, room, summary };
 }
 
 function normalizeText(value) {

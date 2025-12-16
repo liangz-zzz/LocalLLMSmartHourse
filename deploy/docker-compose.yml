@@ -141,8 +141,11 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ:-Asia/Shanghai}
-      - LLM_API_BASE=${LLM_API_BASE:-http://llm-bridge:5000/v1}
       - LLM_API_KEY=${LLM_API_KEY:-dummy-key}
+      - UPSTREAM_API_BASE=${UPSTREAM_API_BASE:-}
+      - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-}
+      - INTENT_STRATEGY=${INTENT_STRATEGY:-hybrid}
+      - INTENT_MODEL=${INTENT_MODEL:-deepseek-chat}
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     volumes:
       - ../backend/services/llm-bridge:/app

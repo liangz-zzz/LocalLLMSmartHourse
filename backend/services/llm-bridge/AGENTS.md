@@ -13,7 +13,10 @@
 当前实现
 - 占位回显服务：`POST /v1/chat/completions` 返回最新 user 消息的 echo；`/health`。
 - 支持透明代理：设置 `UPSTREAM_API_BASE`（可选 `UPSTREAM_API_KEY`）时会转发到兼容 OpenAI 的上游；失败时自动回退到 echo。
-- 意图解析：`POST /v1/intent` 将自然语言解析为推荐动作（`action/deviceId/params/confidence/room/candidates`），基于关键词 + 房间/能力匹配；支持 messages fallback（取最后一条 user）。
+- 意图解析：`POST /v1/intent` 将自然语言解析为推荐动作（`action/deviceId/params/confidence/room/candidates`），默认 `INTENT_STRATEGY=hybrid`（规则优先，低置信度/缺设备时调用上游 LLM；失败回退规则）。可显式设置：
+  - `INTENT_STRATEGY=rules|upstream|hybrid`
+  - `INTENT_MODEL`（默认 `deepseek-chat`）
+  - `INTENT_RULE_CONFIDENCE_THRESHOLD`（默认 0.85）
 - 限流：`RATE_LIMIT_PER_MIN`（默认 60）内存滑窗；超限返回 429。
 - 观测：`/metrics` 返回简单计数（chat/intent 请求与上游命中/错误）。
 - 运行：`docker compose -f deploy/docker-compose.yml run --rm llm-bridge npm install`，`npm run dev`（PORT 默认 5000）。

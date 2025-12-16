@@ -10,3 +10,4 @@
 用法
 - 本地 compose：默认 `http://localhost:4000`，WS `ws://localhost:4001/ws`。
 - 规则/动作需要 Redis/DB 已启动；LLM Bridge 默认端口 `5000`，`/metrics` 默认开启。
+- LLM 上游（如 DeepSeek）：在 `.env` 配置 `UPSTREAM_API_BASE`（例如 `https://api.deepseek.com`）和 `LLM_API_KEY`（或 `UPSTREAM_API_KEY`），并设置 `INTENT_STRATEGY=hybrid|upstream` 让 `/v1/intent` 使用上游 LLM（失败会回退规则）。

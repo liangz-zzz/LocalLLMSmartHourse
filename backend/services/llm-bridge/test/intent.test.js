@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import Fastify from "fastify";
 import { buildApp, parseIntent } from "../src/index.js";
 
 const devices = [
@@ -39,6 +40,100 @@ test("intent route returns structured intent", async () => {
   assert.equal(body.intent.deviceId, "light_living");
   assert.equal(body.intent.action, "turn_on");
   await app.close();
+});
+
+test("intent route can use upstream LLM when configured", async () => {
+  let calls = 0;
+  const upstream = Fastify({ logger: false });
+  upstream.post("/v1/chat/completions", async (_req, reply) => {
+    calls += 1;
+    return reply.send({
+      id: "upstream",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              action: "turn_on",
+              deviceId: "kettle_plug",
+              params: {},
+              confidence: 0.9,
+              summary: "from_upstream"
+            })
+          },
+          finish_reason: "stop"
+        }
+      ]
+    });
+  });
+  await upstream.listen({ port: 0 });
+  const upstreamPort = upstream.server.address().port;
+
+  const app = buildApp({ forwardBase: `http://127.0.0.1:${upstreamPort}` });
+  await app.listen({ port: 0 });
+  const port = app.server.address().port;
+
+  const res = await fetch(`http://127.0.0.1:${port}/v1/intent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      input: "打开烧水壶",
+      strategy: "upstream",
+      devices: [
+        {
+          id: "kettle_plug",
+          name: "烧水壶插座",
+          semantics: { aliases: ["烧水壶"] },
+          capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+        }
+      ]
+    })
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.intent.deviceId, "kettle_plug");
+  assert.equal(body.intent.action, "turn_on");
+  assert.ok(calls > 0, "upstream should be called");
+
+  await app.close();
+  await upstream.close();
+});
+
+test("hybrid strategy does not call upstream on high-confidence rule match", async () => {
+  let calls = 0;
+  const upstream = Fastify({ logger: false });
+  upstream.post("/v1/chat/completions", async (_req, reply) => {
+    calls += 1;
+    return reply.send({
+      id: "upstream",
+      choices: [{ index: 0, message: { role: "assistant", content: "{\"action\":\"unknown\"}" }, finish_reason: "stop" }]
+    });
+  });
+  await upstream.listen({ port: 0 });
+  const upstreamPort = upstream.server.address().port;
+
+  const app = buildApp({ forwardBase: `http://127.0.0.1:${upstreamPort}` });
+  await app.listen({ port: 0 });
+  const port = app.server.address().port;
+
+  const res = await fetch(`http://127.0.0.1:${port}/v1/intent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      input: "把客厅灯调到30%",
+      strategy: "hybrid",
+      devices: [{ id: "light_living", name: "客厅灯", capabilities: [{ action: "turn_on" }, { action: "set_brightness" }] }]
+    })
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.intent.deviceId, "light_living");
+  assert.equal(body.intent.action, "set_brightness");
+  assert.equal(calls, 0, "upstream should NOT be called");
+
+  await app.close();
+  await upstream.close();
 });
 
 test("parseIntent picks room-matching device when names absent", () => {
