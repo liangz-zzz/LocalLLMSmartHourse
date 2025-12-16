@@ -1,0 +1,56 @@
+services:
+  api-gateway:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm ci"
+          until (echo > /dev/tcp/db/5432) >/dev/null 2>&1; do echo "[api-gateway] waiting for db:5432"; sleep 1; done
+          su node -c "cd /app && npm run prisma:generate && npm run prisma:push"
+          exec su node -c "cd /app && npm run dev"
+
+  device-adapter:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm ci"
+          until (echo > /dev/tcp/mqtt/1883) >/dev/null 2>&1; do echo "[device-adapter] waiting for mqtt:1883"; sleep 1; done
+          exec su node -c "cd /app && MODE=mqtt npm run dev"
+
+  llm-bridge:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm ci"
+          exec su node -c "cd /app && npm run dev"
+
+  rules-engine:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm ci"
+          until (echo > /dev/tcp/redis/6379) >/dev/null 2>&1; do echo "[rules-engine] waiting for redis:6379"; sleep 1; done
+          exec su node -c "cd /app && npm run dev"

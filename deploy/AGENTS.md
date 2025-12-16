@@ -18,6 +18,10 @@
 2) `docker compose -f deploy/docker-compose.yml up -d --build`
 3) 首次启动会在 `deploy/homeassistant`、`deploy/zigbee2mqtt` 等目录生成配置
 
+## 一键启动（推荐给“直接跑起来”场景）
+- 自动启动 Node 服务：`./deploy/dev-up.sh`（等价于 `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.autostart.yml up -d --build`）
+- 说明：默认 compose 里的业务容器保持 `sleep infinity` 便于 devcontainer；`docker-compose.autostart.yml` 作为覆盖文件会在容器启动时执行 `npm ci`/初始化并 `npm run dev`（为解决 node_modules 权限问题，该覆盖文件用 root 做一次 chown 后再切回 node 用户运行）。
+
 说明：Postgres/Redis 默认映射 `15432` / `16379` 避免与宿主已有实例冲突，若需要其它端口或完全关闭映射可在 `.env` 调整或移除 `ports`。
 
 ## 开发容器（简化模式）
