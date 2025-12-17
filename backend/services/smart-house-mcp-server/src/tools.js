@@ -297,13 +297,16 @@ async function fetchJson(url, init = {}) {
 
 function asJsonResult(obj) {
   return {
-    content: [{ type: "text", text: JSON.stringify(obj, null, 2) }]
+    content: [{ type: "text", text: JSON.stringify(obj, null, 2) }],
+    structuredContent: obj
   };
 }
 
 function asError(code, message) {
+  const payload = { error: code, message };
   return {
-    content: [{ type: "text", text: JSON.stringify({ error: code, message }, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
     isError: true
   };
 }
