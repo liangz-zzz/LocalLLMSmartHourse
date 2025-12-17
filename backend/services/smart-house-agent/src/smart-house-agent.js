@@ -71,6 +71,12 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     ];
 
     const toolCalls = [];
+    const toolCallKeys = new Set();
+    const toolCache = new Map();
+    const facts = {
+      devicesList: null,
+      deviceStates: new Map()
+    };
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const completion = await llm.chat({ messages, model: config.agentModel });
@@ -94,10 +100,31 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           if (!name) continue;
 
           const safeArgs = enforcePolicy({ name, args, allowWrite: false });
-          toolCalls.push({ name, args: safeArgs });
-          const result = await mcp.callTool(name, safeArgs);
+          const key = `${name}:${stableStringify(safeArgs)}`;
+
+          if (!toolCallKeys.has(key)) {
+            toolCallKeys.add(key);
+            toolCalls.push({ name, args: safeArgs });
+          }
+
+          let result;
+          if (toolCache.has(key)) {
+            result = toolCache.get(key);
+          } else {
+            result = await mcp.callTool(name, safeArgs);
+            toolCache.set(key, result);
+          }
+
+          captureFacts({ name, args: safeArgs, result, facts });
           messages.push({ role: "system", content: toolResultMessage({ name, result }) });
         }
+        messages.push({
+          role: "system",
+          content: JSON.stringify({
+            tool_round_complete: true,
+            instruction: "Use the tool_result facts above. Do not repeat identical tool calls in this turn. If enough, respond with type=final."
+          })
+        });
         continue;
       }
 
@@ -170,6 +197,14 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       });
     }
 
+    const factAnswer = buildFallbackAnswer({ input: trimmed, facts });
+    if (factAnswer) {
+      appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+      appendMessage(session, { role: "assistant", content: factAnswer }, config.maxMessages);
+      await sessionStore.save(session);
+      return { traceId, sessionId: session.id, type: "answer", message: factAnswer, toolCalls };
+    }
+
     const fallback = "我需要更多信息才能继续。你能补充一下你希望控制的设备或房间吗？";
     appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
     appendMessage(session, { role: "assistant", content: fallback }, config.maxMessages);
@@ -185,6 +220,7 @@ function buildSystemPrompt({ toolsText }) {
     "You are Smart House Agent.",
     "You MUST use tools to get facts about devices/state/capabilities. Do not assume.",
     "You MUST output ONLY valid JSON (no markdown, no extra text).",
+    "Tool results arrive as system JSON messages: {\"tool_result\":{\"name\":\"...\",\"result\":{...}}}.",
     "",
     "Available MCP tools:",
     toolsText,
@@ -197,7 +233,8 @@ function buildSystemPrompt({ toolsText }) {
     "- If the user asks about current state, call devices.state/devices.get first.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
     "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",
-    "- If unclear, return plan.type=clarify and ask a concise clarifying question in assistant."
+    "- If unclear, return plan.type=clarify and ask a concise clarifying question in assistant.",
+    "- Do NOT call the same tool with identical arguments more than once per turn."
   ].join("\n");
 }
 
@@ -211,7 +248,7 @@ function buildContextPrompt({ session }) {
 }
 
 function toolResultMessage({ name, result }) {
-  return `TOOL_RESULT name=${name} json=${JSON.stringify(result)}`;
+  return JSON.stringify({ tool_result: { name, result } });
 }
 
 function parseJsonObject(text) {
@@ -306,4 +343,76 @@ function decideExecutionMode({ config, planType }) {
   if (planType === "clarify") return false;
   if (planType === "propose") return false;
   return true;
+}
+
+function captureFacts({ name, args, result, facts }) {
+  if (!facts) return;
+  if (name === "devices.list") {
+    facts.devicesList = result;
+  }
+  if (name === "devices.state") {
+    const id = String(args?.id || "").trim();
+    if (id) facts.deviceStates.set(id, result);
+  }
+}
+
+function buildFallbackAnswer({ input, facts }) {
+  if (!facts?.deviceStates || facts.deviceStates.size === 0) return null;
+
+  const text = String(input || "").trim();
+  const preferredId = inferPreferredDeviceId({ text, facts });
+  const stateObj = preferredId ? facts.deviceStates.get(preferredId) : facts.deviceStates.values().next().value;
+  const deviceId = preferredId || stateObj?.id;
+  const switchState = stateObj?.traits?.switch?.state;
+  if (!deviceId || !switchState) return null;
+
+  const on = String(switchState).toLowerCase() === "on";
+  if (/烧|煮|开水|热水/.test(text)) {
+    return on
+      ? `从系统可观测到：${deviceId} 正在供电（开）。这通常表示水壶在加热/可能正在烧水；若要判断“水是否已开/温度”，需要功率/温度等传感器。`
+      : `从系统可观测到：${deviceId} 当前未供电（关），所以应该没有在烧水。`;
+  }
+
+  return `从系统可观测到：${deviceId} 当前开关状态为 ${on ? "开" : "关"}。`;
+}
+
+function inferPreferredDeviceId({ text, facts }) {
+  const list = facts?.devicesList?.items;
+  if (!Array.isArray(list) || list.length === 0) return null;
+
+  // If only one device has a state, prefer it.
+  if (facts.deviceStates.size === 1) return [...facts.deviceStates.keys()][0];
+
+  const q = normalize(text);
+  for (const d of list) {
+    const id = normalize(d?.id);
+    const name = normalize(d?.name);
+    const aliases = Array.isArray(d?.semantics?.aliases) ? d.semantics.aliases.map(normalize) : [];
+    if ((id && q.includes(id)) || (name && q.includes(name)) || aliases.some((a) => a && q.includes(a))) {
+      if (facts.deviceStates.has(d.id)) return d.id;
+    }
+  }
+  return null;
+}
+
+function stableStringify(value) {
+  return JSON.stringify(sortDeep(value));
+}
+
+function sortDeep(value) {
+  if (Array.isArray(value)) return value.map(sortDeep);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k of Object.keys(value).sort()) {
+      out[k] = sortDeep(value[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function normalize(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase();
 }
