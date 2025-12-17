@@ -139,10 +139,12 @@ export function parseIntent({ input, messages = [], devices = [] }) {
 function detectAction(text) {
   if (/调.*亮度|brightness|%/.test(text)) return "set_brightness";
   if (/温度|temperature|摄氏|(?<!亮)度/.test(text)) return "set_temperature";
+  // Explicit stop/off should win over "boil water" keywords.
   if (/停止烧水|别烧水|不要烧水|停(止)?烧水|停止加热/.test(text)) return "turn_off";
+  if (/断电|关闭|关掉|关上|关机|关一下|关了/.test(text)) return "turn_off";
+  if (/turn\s*off|(?<!开)关(灯|掉|一下|闭|上)?/.test(text)) return "turn_off";
   if (/烧水|煮水|开水|热水|加热水壶/.test(text)) return "turn_on";
   if (/turn\s*on|打开|开(灯|关|一下)?/.test(text)) return "turn_on";
-  if (/turn\s*off|关(灯|掉|一下)?/.test(text)) return "turn_off";
   if (/暖气|加热|heat/.test(text)) return "set_hvac_mode";
   if (/制冷|cool/.test(text)) return "set_hvac_mode";
   return null;

@@ -179,3 +179,19 @@ test("parseIntent can match device by semantics aliases", () => {
   assert.equal(intent.deviceId, "kettle_plug");
   assert.equal(intent.action, "turn_on");
 });
+
+test("parseIntent detects kettle off when user says close/off", () => {
+  const { intent } = parseIntent({
+    input: "关闭烧水壶",
+    devices: [
+      {
+        id: "kettle_plug",
+        name: "烧水壶插座",
+        semantics: { aliases: ["烧水壶"] },
+        capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+      }
+    ]
+  });
+  assert.equal(intent.deviceId, "kettle_plug");
+  assert.equal(intent.action, "turn_off");
+});
