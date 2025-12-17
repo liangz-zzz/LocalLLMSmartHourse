@@ -86,6 +86,30 @@ test("agent dedupes repeated tool calls with identical args", async () => {
   assert.equal(out.toolCalls.filter((c) => c.name === "devices.state").length, 1, "toolCalls should be deduped");
 });
 
+test("agent returns llm_no_final with tool results when model never finalizes", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "devices.state": async () => ({ id: "kettle_plug", traits: { switch: { state: "off" } } })
+  });
+
+  const responses = Array.from({ length: 8 }, () => ({
+    type: "tool_calls",
+    tool_calls: [{ name: "devices.state", arguments: { id: "kettle_plug" } }]
+  }));
+  const llm = makeLlmStub(responses);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const out = await agent.turn({ sessionId: "s_no_final", input: "热水在烧了么", confirm: false });
+
+  assert.equal(out.type, "error");
+  assert.equal(out.error, "llm_no_final");
+  assert.equal(out.iterations, 8);
+  assert.equal(mcp.calls.filter((c) => c.name === "devices.state").length, 1, "tool should be called once due to cache");
+  assert.equal(out.toolCalls.filter((c) => c.name === "devices.state").length, 1);
+  assert.equal(out.toolResults.length, 1);
+  assert.equal(out.toolResults[0].name, "devices.state");
+});
+
 test("agent proposes actions then executes on confirmation", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({

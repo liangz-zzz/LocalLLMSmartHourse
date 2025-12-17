@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 const MAX_ITERATIONS = 8;
 const WRITE_TOOLS = new Set(["devices.invoke", "actions.batch_invoke"]);
+const MAX_TOOL_CALLS_PER_TURN = 16;
 
 export function createAgent({ config, logger, sessionStore, mcp, llm }) {
   let toolCatalogTextPromise = null;
@@ -73,10 +74,6 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCalls = [];
     const toolCallKeys = new Set();
     const toolCache = new Map();
-    const facts = {
-      devicesList: null,
-      deviceStates: new Map()
-    };
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const completion = await llm.chat({ messages, model: config.agentModel });
@@ -103,6 +100,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           const key = `${name}:${stableStringify(safeArgs)}`;
 
           if (!toolCallKeys.has(key)) {
+            if (toolCalls.length >= MAX_TOOL_CALLS_PER_TURN) break;
             toolCallKeys.add(key);
             toolCalls.push({ name, args: safeArgs });
           }
@@ -115,7 +113,6 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             toolCache.set(key, result);
           }
 
-          captureFacts({ name, args: safeArgs, result, facts });
           messages.push({ role: "system", content: toolResultMessage({ name, result }) });
         }
         messages.push({
@@ -197,19 +194,25 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       });
     }
 
-    const factAnswer = buildFallbackAnswer({ input: trimmed, facts });
-    if (factAnswer) {
-      appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
-      appendMessage(session, { role: "assistant", content: factAnswer }, config.maxMessages);
-      await sessionStore.save(session);
-      return { traceId, sessionId: session.id, type: "answer", message: factAnswer, toolCalls };
-    }
+    const toolResults = toolCalls.map((c) => {
+      const key = `${c.name}:${stableStringify(c.args)}`;
+      return { name: c.name, args: c.args, result: toolCache.get(key) };
+    });
 
-    const fallback = "我需要更多信息才能继续。你能补充一下你希望控制的设备或房间吗？";
+    const fallback = `LLM 在 ${MAX_ITERATIONS} 轮内未产出最终结果（final）。这是当前真实状态：模型未完成决策；已执行工具调用与结果已返回。`;
     appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
     appendMessage(session, { role: "assistant", content: fallback }, config.maxMessages);
     await sessionStore.save(session);
-    return { traceId, sessionId: session.id, type: "error", message: fallback, toolCalls };
+    return {
+      traceId,
+      sessionId: session.id,
+      type: "error",
+      error: "llm_no_final",
+      message: fallback,
+      iterations: MAX_ITERATIONS,
+      toolCalls,
+      toolResults
+    };
   }
 
   return { turn };
@@ -345,56 +348,6 @@ function decideExecutionMode({ config, planType }) {
   return true;
 }
 
-function captureFacts({ name, args, result, facts }) {
-  if (!facts) return;
-  if (name === "devices.list") {
-    facts.devicesList = result;
-  }
-  if (name === "devices.state") {
-    const id = String(args?.id || "").trim();
-    if (id) facts.deviceStates.set(id, result);
-  }
-}
-
-function buildFallbackAnswer({ input, facts }) {
-  if (!facts?.deviceStates || facts.deviceStates.size === 0) return null;
-
-  const text = String(input || "").trim();
-  const preferredId = inferPreferredDeviceId({ text, facts });
-  const stateObj = preferredId ? facts.deviceStates.get(preferredId) : facts.deviceStates.values().next().value;
-  const deviceId = preferredId || stateObj?.id;
-  const switchState = stateObj?.traits?.switch?.state;
-  if (!deviceId || !switchState) return null;
-
-  const on = String(switchState).toLowerCase() === "on";
-  if (/烧|煮|开水|热水/.test(text)) {
-    return on
-      ? `从系统可观测到：${deviceId} 正在供电（开）。这通常表示水壶在加热/可能正在烧水；若要判断“水是否已开/温度”，需要功率/温度等传感器。`
-      : `从系统可观测到：${deviceId} 当前未供电（关），所以应该没有在烧水。`;
-  }
-
-  return `从系统可观测到：${deviceId} 当前开关状态为 ${on ? "开" : "关"}。`;
-}
-
-function inferPreferredDeviceId({ text, facts }) {
-  const list = facts?.devicesList?.items;
-  if (!Array.isArray(list) || list.length === 0) return null;
-
-  // If only one device has a state, prefer it.
-  if (facts.deviceStates.size === 1) return [...facts.deviceStates.keys()][0];
-
-  const q = normalize(text);
-  for (const d of list) {
-    const id = normalize(d?.id);
-    const name = normalize(d?.name);
-    const aliases = Array.isArray(d?.semantics?.aliases) ? d.semantics.aliases.map(normalize) : [];
-    if ((id && q.includes(id)) || (name && q.includes(name)) || aliases.some((a) => a && q.includes(a))) {
-      if (facts.deviceStates.has(d.id)) return d.id;
-    }
-  }
-  return null;
-}
-
 function stableStringify(value) {
   return JSON.stringify(sortDeep(value));
 }
@@ -409,10 +362,4 @@ function sortDeep(value) {
     return out;
   }
   return value;
-}
-
-function normalize(v) {
-  return String(v || "")
-    .trim()
-    .toLowerCase();
 }
