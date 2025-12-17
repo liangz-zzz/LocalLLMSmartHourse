@@ -6,6 +6,7 @@
 - `device-model.md`: 统一设备模型、Schema、样例与位置/语义字段说明。
 - `api/openapi.yaml`: API Gateway REST 接口定义（设备、动作、规则、健康）。
 - `api/README.md`: API/WS/LLM 入口概览与地址。
+- `feature/smart_house_agent/README.md`: 智能家居 Agent（MCP 工具调用）需求与设计文档索引。
 
 写作规范
 - 使用 Markdown，尽量短小精悍，包含决策/权衡。
