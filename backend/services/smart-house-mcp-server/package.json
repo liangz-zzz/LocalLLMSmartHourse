@@ -1,0 +1,17 @@
+{
+  "name": "smart-house-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+

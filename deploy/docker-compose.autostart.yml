@@ -41,6 +41,20 @@ services:
           su node -c "cd /app && npm ci"
           exec su node -c "cd /app && npm run dev"
 
+  smart-house-mcp-server:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm ci"
+          until curl -fsS --max-time 2 http://api-gateway:4000/health >/dev/null 2>&1; do echo "[smart-house-mcp-server] waiting for api-gateway:4000"; sleep 1; done
+          exec su node -c "cd /app && npm run dev"
+
   rules-engine:
     user: "0:0"
     command:

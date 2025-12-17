@@ -11,6 +11,7 @@
 - `device-adapter`: 统一设备模型与底层实体的适配占位容器
 - `rules-engine`: 规则/联动占位容器
 - `llm-bridge`: OpenAI 协议到自建 LLM API 的桥接占位容器
+- `smart-house-mcp-server`: MCP 工具服务器（对接 Agent/LLM，代理 api-gateway 的设备/状态/控制能力）
 - `traefik`: 可选反向代理，需添加 `traefik/traefik.yml` 与证书
 
 ## 运行
