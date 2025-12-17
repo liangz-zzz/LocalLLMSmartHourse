@@ -13,7 +13,7 @@
 
 运行
 - 环境变量：
-  - `PORT`（默认 6000）
+  - `PORT`（默认 6100；避免 6000 被 fetch “bad ports” 阻断）
   - `LLM_API_BASE`（默认 `http://llm-bridge:5000/v1`）
   - `LLM_API_KEY`（可选；透传给上游）
   - `AGENT_MODEL`（默认 `deepseek-chat`）

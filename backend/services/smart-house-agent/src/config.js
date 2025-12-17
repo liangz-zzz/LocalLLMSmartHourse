@@ -7,7 +7,8 @@ export function loadConfig() {
   const sessionTtlMs = num("SESSION_TTL_MS", 60 * 60 * 1000);
   const maxMessages = num("SESSION_MAX_MESSAGES", 30);
   return {
-    port: num("PORT", 6000),
+    // Avoid 6000 (blocked by WHATWG "bad ports" in fetch implementations, e.g., X11).
+    port: num("PORT", 6100),
     llmApiBase: (process.env.LLM_API_BASE || "http://llm-bridge:5000/v1").replace(/\/$/, ""),
     llmApiKey: process.env.LLM_API_KEY || "",
     agentModel: process.env.AGENT_MODEL || "deepseek-chat",

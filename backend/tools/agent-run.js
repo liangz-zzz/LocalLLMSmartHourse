@@ -15,16 +15,23 @@ if (!input.trim()) {
   process.exit(1);
 }
 
-const agentBase = (args.agent || process.env.AGENT_HTTP_BASE || "http://localhost:6000").replace(/\/$/, "");
+const agentBase = (args.agent || process.env.AGENT_HTTP_BASE || "http://localhost:6100").replace(/\/$/, "");
 const sessionId = String(args.session || args.sessionId || "demo").trim();
 const confirm = Boolean(args.confirm);
 
 async function main() {
-  const res = await fetch(`${agentBase}/v1/agent/turn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input, sessionId, confirm })
-  });
+  let res;
+  try {
+    res = await fetch(`${agentBase}/v1/agent/turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input, sessionId, confirm })
+    });
+  } catch (err) {
+    const cause = err?.cause?.message || err?.cause?.code || err?.cause || null;
+    console.error(`Fetch failed: ${err?.message || String(err)}${cause ? ` (cause: ${cause})` : ""}`);
+    process.exit(2);
+  }
   const text = await res.text().catch(() => "");
   if (!res.ok) {
     console.error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
@@ -65,4 +72,3 @@ function parseArgs(argv) {
   }
   return out;
 }
-

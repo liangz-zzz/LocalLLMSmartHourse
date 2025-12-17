@@ -21,8 +21,8 @@ echo "[wait] llm-bridge http://localhost:5000/health"
 until curl -fsS --max-time 2 http://localhost:5000/health >/dev/null 2>&1; do sleep 1; done
 echo "[wait] smart-house-mcp-server http://localhost:7000/health"
 until curl -fsS --max-time 2 http://localhost:7000/health >/dev/null 2>&1; do sleep 1; done
-echo "[wait] smart-house-agent http://localhost:6000/health"
-until curl -fsS --max-time 2 http://localhost:6000/health >/dev/null 2>&1; do sleep 1; done
+echo "[wait] smart-house-agent http://localhost:6100/health"
+until curl -fsS --max-time 2 http://localhost:6100/health >/dev/null 2>&1; do sleep 1; done
 
 cat <<'EOF'
 OK.
@@ -32,7 +32,7 @@ Next:
   node backend/tools/intent-run.js --text "打开烧水壶"
   node backend/tools/intent-run.js --text "打开烧水壶" --execute
   curl -fsS http://localhost:7000/health
-  curl -sS -X POST http://localhost:6000/v1/agent/turn \
+  curl -sS -X POST http://localhost:6100/v1/agent/turn \
     -H 'Content-Type: application/json' \
     -d '{"input":"水在烧了么","sessionId":"demo"}' | python -m json.tool
 EOF
