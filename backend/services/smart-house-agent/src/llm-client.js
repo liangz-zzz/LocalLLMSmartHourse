@@ -13,6 +13,7 @@ export function createLlmClient({ config, logger }) {
       body: JSON.stringify({
         model: model || config.agentModel,
         messages,
+        response_format: { type: "json_object" },
         temperature,
         max_tokens: maxTokens
       })
@@ -28,4 +29,3 @@ export function createLlmClient({ config, logger }) {
 
   return { chat };
 }
-
