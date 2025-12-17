@@ -15,10 +15,11 @@
   - `PORT`（默认 7000）
   - `API_GATEWAY_BASE`（默认 `http://api-gateway:4000`）
   - `API_GATEWAY_API_KEY`（可选，用于调用受保护的 API Gateway）
+  - `DRY_RUN_DEFAULT`（默认 true；除非显式 `dryRun=false + confirm=true`，否则不下发真实控制）
+  - `MCP_SESSION_TTL_MS`（默认 3600000；MCP session 过期清理，避免内存无限增长）
 - 本地（容器）：
   - `npm ci`
   - `npm run dev`
 
 测试
 - `npm test`（包含工具 schema/校验逻辑的基础测试；集成测试可在 compose 中跑）
-
