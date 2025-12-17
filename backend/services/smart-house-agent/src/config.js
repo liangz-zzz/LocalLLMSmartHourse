@@ -14,7 +14,7 @@ export function loadConfig() {
     mcpUrl: (process.env.MCP_URL || "http://smart-house-mcp-server:7000/mcp").replace(/\/$/, ""),
     redisUrl: (process.env.REDIS_URL || "").trim(),
     sessionTtlMs,
-    maxMessages
+    maxMessages,
+    executionMode: String(process.env.AGENT_EXECUTION_MODE || "auto").trim().toLowerCase()
   };
 }
-

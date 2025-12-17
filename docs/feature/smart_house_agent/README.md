@@ -20,4 +20,4 @@
 - 直接调用 Agent：
   - `curl -sS -X POST http://localhost:6000/v1/agent/turn -H 'Content-Type: application/json' -d '{"input":"水在烧了么","sessionId":"demo"}' | python -m json.tool`
   - `node backend/tools/agent-run.js --text "关闭烧水壶" --session demo`
-  - `node backend/tools/agent-run.js --text "确认" --session demo --confirm`
+  - 如返回 `type=propose`：`node backend/tools/agent-run.js --text "确认" --session demo --confirm`

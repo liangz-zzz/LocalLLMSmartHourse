@@ -42,7 +42,8 @@ function makeMcpStub(impl = {}) {
 const baseConfig = {
   agentModel: "test-model",
   maxMessages: 30,
-  sessionTtlMs: 60_000
+  sessionTtlMs: 60_000,
+  executionMode: "auto"
 };
 
 test("agent can answer a state query via tool_calls", async () => {
@@ -97,3 +98,28 @@ test("agent proposes actions then executes on confirmation", async () => {
   assert.equal(llm.calls.length, 1, "LLM should not be called during confirmation execution");
 });
 
+test("agent auto-executes when plan.type=execute", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "actions.batch_invoke": async (args) => {
+      if (args.dryRun) return { results: [{ ok: true }] };
+      assert.equal(args.confirm, true);
+      assert.equal(args.dryRun, false);
+      return { results: [{ ok: true }] };
+    }
+  });
+  const llm = makeLlmStub([
+    {
+      type: "final",
+      assistant: "已为你打开烧水壶插座。",
+      plan: { planId: "p2", type: "execute", actions: [{ deviceId: "kettle_plug", action: "turn_on", params: {} }] }
+    }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const out = await agent.turn({ sessionId: "s3", input: "打开烧水壶", confirm: false });
+
+  assert.equal(out.type, "executed");
+  assert.equal(out.planId, "p2");
+  assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute");
+});

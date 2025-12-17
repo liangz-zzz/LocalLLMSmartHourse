@@ -196,6 +196,7 @@ services:
       - LLM_API_BASE=${LLM_API_BASE:-http://llm-bridge:5000/v1}
       - LLM_API_KEY=${LLM_API_KEY:-dummy-key}
       - AGENT_MODEL=${AGENT_MODEL:-deepseek-chat}
+      - AGENT_EXECUTION_MODE=${AGENT_EXECUTION_MODE:-auto}
       - MCP_URL=${MCP_URL:-http://smart-house-mcp-server:7000/mcp}
       - REDIS_URL=${AGENT_REDIS_URL:-redis://redis:6379}
       - SESSION_TTL_MS=${SESSION_TTL_MS:-3600000}

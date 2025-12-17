@@ -104,21 +104,56 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       if (parsed.type === "final") {
         const assistant = String(parsed.assistant || parsed.response || "").trim();
         const plan = isPlainObject(parsed.plan) ? parsed.plan : null;
+        const planType = normalizePlanType(plan?.type || parsed.planType || parsed.kind);
         const proposed = Array.isArray(plan?.actions) ? plan.actions : Array.isArray(parsed.actions) ? parsed.actions : [];
         const actions = normalizeActions(proposed);
 
         if (actions.length) {
           const planId = String(plan?.planId || parsed.planId || randomUUID()).trim();
-          session.state.pending = { planId, actions, createdAt: Date.now() };
-          await sessionStore.save(session);
-          const base =
-            assistant ||
-            `我将执行 ${actions.length} 个动作。`;
-          const msg = withConfirmationHint(base);
+          const shouldExecute = decideExecutionMode({ config, planType });
+
+          if (!shouldExecute) {
+            session.state.pending = { planId, actions, createdAt: Date.now() };
+            await sessionStore.save(session);
+            const base =
+              assistant ||
+              `我将执行 ${actions.length} 个动作。`;
+            const msg = withConfirmationHint(base);
+            appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+            appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+            await sessionStore.save(session);
+            return { traceId, sessionId: session.id, type: "propose", planId, actions, message: msg, toolCalls };
+          }
+
+          // Preflight validation (capabilities, device existence) without triggering idempotency on real execution.
+          const dryrun = await mcp.callTool("actions.batch_invoke", {
+            dryRun: true,
+            requestId: `${planId}:dryrun`,
+            actions
+          });
+
+          const dryrunOk = Array.isArray(dryrun?.results) && dryrun.results.every((r) => r?.ok);
+          if (!dryrunOk) {
+            const msg =
+              assistant ||
+              "我无法确定要执行的动作是否都可用（设备不存在/能力不支持/参数不完整）。你能确认一下要控制的设备或动作吗？";
+            appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+            appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+            await sessionStore.save(session);
+            return { traceId, sessionId: session.id, type: "clarify", planId, actions, message: msg, toolCalls, dryrun };
+          }
+
+          const exec = await mcp.callTool("actions.batch_invoke", {
+            dryRun: false,
+            confirm: true,
+            requestId: planId,
+            actions
+          });
+          const msg = summarizeBatch(exec);
           appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
           appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
           await sessionStore.save(session);
-          return { traceId, sessionId: session.id, type: "propose", planId, actions, message: msg, toolCalls };
+          return { traceId, sessionId: session.id, type: "executed", planId, actions, result: exec, message: msg, toolCalls };
         }
 
         const msg = assistant || "好的。";
@@ -156,11 +191,12 @@ function buildSystemPrompt({ toolsText }) {
     "",
     "Output formats:",
     '1) Tool calls: {"type":"tool_calls","tool_calls":[{"name":"devices.list","arguments":{}}]}',
-    '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|propose|clarify","actions":[{"deviceId":"...","action":"turn_on|turn_off|...","params":{}}]}}',
+    '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|execute|propose|clarify","actions":[{"deviceId":"...","action":"turn_on|turn_off|...","params":{}}]}}',
     "",
     "Rules:",
     "- If the user asks about current state, call devices.state/devices.get first.",
-    "- If you propose any write actions, put them in plan.actions; do NOT execute them now.",
+    "- For clear control commands, return plan.type=execute with plan.actions.",
+    "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",
     "- If unclear, return plan.type=clarify and ask a concise clarifying question in assistant."
   ].join("\n");
 }
@@ -251,4 +287,23 @@ function withConfirmationHint(text) {
   if (!t) return "请回复“确认”开始执行，或回复“取消”。";
   if (/(确认|取消)/.test(t)) return t;
   return `${t}\n\n请回复“确认”开始执行，或回复“取消”。`;
+}
+
+function normalizePlanType(t) {
+  const v = String(t || "").trim().toLowerCase();
+  if (!v) return "";
+  if (v === "exec" || v === "run") return "execute";
+  if (v === "ask" || v === "question") return "clarify";
+  if (v === "answer") return "query";
+  return v;
+}
+
+function decideExecutionMode({ config, planType }) {
+  const mode = String(config?.executionMode || "auto").trim().toLowerCase();
+  if (mode === "always_confirm") return false;
+  if (mode === "always_execute") return true;
+
+  if (planType === "clarify") return false;
+  if (planType === "propose") return false;
+  return true;
 }

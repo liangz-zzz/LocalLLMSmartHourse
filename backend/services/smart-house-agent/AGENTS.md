@@ -19,6 +19,7 @@
   - `AGENT_MODEL`（默认 `deepseek-chat`）
   - `MCP_URL`（默认 `http://smart-house-mcp-server:7000/mcp`）
   - `REDIS_URL`（可选；如提供则用于会话存储）
+  - `AGENT_EXECUTION_MODE`（默认 `auto`；`auto`=默认执行、仅不确定时澄清/确认；`always_confirm`=所有写操作都需确认）
   - `SESSION_TTL_MS`（默认 3600000）
   - `SESSION_MAX_MESSAGES`（默认 30）
 - 本地（容器）：
@@ -27,4 +28,3 @@
 
 测试
 - `npm test`
-
