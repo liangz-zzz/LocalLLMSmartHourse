@@ -15,3 +15,9 @@
 - `docs/feature/smart_house_agent/requirements.md`：需求（功能/非功能/安全/体验/验收方向）
 - `docs/feature/smart_house_agent/design.md`：设计（架构/数据流/工具体系/会话记忆/安全门禁/可观测性/演进）
 
+快速验证（开发环境）
+- 启动：`./deploy/dev-up.sh`
+- 直接调用 Agent：
+  - `curl -sS -X POST http://localhost:6000/v1/agent/turn -H 'Content-Type: application/json' -d '{"input":"水在烧了么","sessionId":"demo"}' | python -m json.tool`
+  - `node backend/tools/agent-run.js --text "关闭烧水壶" --session demo`
+  - `node backend/tools/agent-run.js --text "确认" --session demo --confirm`

@@ -12,6 +12,7 @@
 - `rules-engine`: 规则/联动占位容器
 - `llm-bridge`: OpenAI 协议到自建 LLM API 的桥接占位容器
 - `smart-house-mcp-server`: MCP 工具服务器（对接 Agent/LLM，代理 api-gateway 的设备/状态/控制能力）
+- `smart-house-agent`: 智能家居大脑入口（对话/规划/确认/执行；通过 MCP 调用工具，通过 llm-bridge 调用模型）
 - `traefik`: 可选反向代理，需添加 `traefik/traefik.yml` 与证书
 
 ## 运行
