@@ -49,6 +49,19 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         appendMessage(session, { role: "assistant", content: text }, config.maxMessages);
         await sessionStore.save(session);
 
+        if (isToolError(exec) || !Array.isArray(exec?.results)) {
+          return {
+            traceId,
+            sessionId: session.id,
+            type: "error",
+            error: isToolError(exec) ? exec.error : "batch_invoke_failed",
+            planId: pending.planId,
+            actions: pending.actions,
+            result: exec,
+            message: text
+          };
+        }
+
         return {
           traceId,
           sessionId: session.id,
@@ -177,6 +190,21 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
           appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
           await sessionStore.save(session);
+
+          if (isToolError(exec) || !Array.isArray(exec?.results)) {
+            return {
+              traceId,
+              sessionId: session.id,
+              type: "error",
+              error: isToolError(exec) ? exec.error : "batch_invoke_failed",
+              planId,
+              actions,
+              result: exec,
+              message: msg,
+              toolCalls
+            };
+          }
+
           return { traceId, sessionId: session.id, type: "executed", planId, actions, result: exec, message: msg, toolCalls };
         }
 
@@ -314,8 +342,12 @@ function looksLikeCancel(text) {
 }
 
 function summarizeBatch(exec) {
+  if (isToolError(exec)) {
+    const msg = String(exec?.message || "").trim();
+    return msg ? `执行失败（${exec.error}）：${msg}` : `执行失败（${exec.error}）。`;
+  }
   const results = exec?.results;
-  if (!Array.isArray(results)) return "已提交执行。";
+  if (!Array.isArray(results)) return "执行失败：上游未返回批量执行结果（results）。";
   const ok = results.filter((r) => r?.ok).length;
   const fail = results.length - ok;
   if (!fail) return `已提交执行（${ok}/${results.length} 成功入队）。`;
@@ -336,6 +368,10 @@ function normalizePlanType(t) {
   if (v === "ask" || v === "question") return "clarify";
   if (v === "answer") return "query";
   return v;
+}
+
+function isToolError(v) {
+  return v && typeof v === "object" && !Array.isArray(v) && typeof v.error === "string";
 }
 
 function decideExecutionMode({ config, planType }) {

@@ -167,3 +167,59 @@ test("agent auto-executes when plan.type=execute", async () => {
   assert.equal(out.planId, "p2");
   assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute");
 });
+
+test("agent surfaces batch_invoke errors during confirmation (no optimistic success)", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "actions.batch_invoke": async (args) => {
+      assert.equal(args.confirm, true);
+      assert.equal(args.dryRun, false);
+      return { error: "tool_execution_failed", message: "upstream 500: boom" };
+    }
+  });
+  const llm = makeLlmStub([
+    {
+      type: "final",
+      assistant: "我将关闭烧水壶插座。请确认。",
+      plan: { planId: "p_err1", type: "propose", actions: [{ deviceId: "kettle_plug", action: "turn_off", params: {} }] }
+    }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const propose = await agent.turn({ sessionId: "s_err1", input: "关闭烧水壶", confirm: false });
+  assert.equal(propose.type, "propose");
+
+  const exec = await agent.turn({ sessionId: "s_err1", input: "确认", confirm: false });
+  assert.equal(exec.type, "error");
+  assert.equal(exec.error, "tool_execution_failed");
+  assert.match(exec.message, /执行失败/);
+  assert.ok(!/已提交执行。$/.test(exec.message));
+  assert.equal(llm.calls.length, 1, "LLM should not be called during confirmation execution");
+});
+
+test("agent surfaces batch_invoke errors during auto-execution (no optimistic success)", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "actions.batch_invoke": async (args) => {
+      if (args.dryRun) return { results: [{ ok: true }] };
+      assert.equal(args.confirm, true);
+      assert.equal(args.dryRun, false);
+      return { error: "tool_execution_failed", message: "upstream 502: bad gateway" };
+    }
+  });
+  const llm = makeLlmStub([
+    {
+      type: "final",
+      assistant: "已为你关闭烧水壶插座。",
+      plan: { planId: "p_err2", type: "execute", actions: [{ deviceId: "kettle_plug", action: "turn_off", params: {} }] }
+    }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const out = await agent.turn({ sessionId: "s_err2", input: "关闭烧水壶", confirm: false });
+
+  assert.equal(out.type, "error");
+  assert.equal(out.error, "tool_execution_failed");
+  assert.match(out.message, /执行失败/);
+  assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute attempt");
+});
