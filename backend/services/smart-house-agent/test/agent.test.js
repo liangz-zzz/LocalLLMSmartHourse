@@ -223,3 +223,28 @@ test("agent surfaces batch_invoke errors during auto-execution (no optimistic su
   assert.match(out.message, /执行失败/);
   assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute attempt");
 });
+
+test("agent ignores optimistic assistant text when dryrun fails", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "actions.batch_invoke": async (args) => {
+      assert.equal(args.dryRun, true);
+      return { error: "tool_execution_failed", message: "upstream 404: {\"error\":\"not_found\"}" };
+    }
+  });
+  const llm = makeLlmStub([
+    {
+      type: "final",
+      assistant: "好的，已为您关闭热水器。",
+      plan: { planId: "p_dryfail", type: "execute", actions: [{ deviceId: "water_heater_001", action: "turn_off", params: {} }] }
+    }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const out = await agent.turn({ sessionId: "s_dryfail", input: "关闭热水器", confirm: false });
+
+  assert.equal(out.type, "clarify");
+  assert.match(out.message, /无法执行/);
+  assert.ok(!out.message.includes("已为您关闭热水器"));
+  assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 1, "only dryrun should run");
+});

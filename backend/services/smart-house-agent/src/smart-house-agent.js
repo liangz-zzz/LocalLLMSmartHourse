@@ -172,7 +172,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           const dryrunOk = Array.isArray(dryrun?.results) && dryrun.results.every((r) => r?.ok);
           if (!dryrunOk) {
             const msg =
-              assistant ||
+              summarizeDryrunFailure({ dryrun, actions }) ||
               "我无法确定要执行的动作是否都可用（设备不存在/能力不支持/参数不完整）。你能确认一下要控制的设备或动作吗？";
             appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
             appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
@@ -372,6 +372,27 @@ function normalizePlanType(t) {
 
 function isToolError(v) {
   return v && typeof v === "object" && !Array.isArray(v) && typeof v.error === "string";
+}
+
+function summarizeDryrunFailure({ dryrun, actions }) {
+  if (isToolError(dryrun)) {
+    const ids = Array.from(new Set((actions || []).map((a) => a?.deviceId).filter(Boolean)));
+    const target = ids.length ? `设备 ${ids.join(", ")} ` : "";
+    const detail = String(dryrun?.message || "").trim() || dryrun.error;
+    return `无法执行：${target}${detail}。请确认要控制的设备/动作是否正确。`;
+  }
+
+  const results = dryrun?.results;
+  if (!Array.isArray(results)) return null;
+  const failures = results.filter((r) => !r?.ok);
+  if (!failures.length) return null;
+
+  const first = failures[0];
+  const where = [first?.deviceId, first?.action].filter(Boolean).join(" ");
+  const err = first?.result?.error || first?.error;
+  const msg = first?.result?.message || first?.message;
+  const detail = [err, msg].filter(Boolean).join("：");
+  return `无法执行：${where || "动作校验失败"}${detail ? `（${detail}）` : ""}。请确认要控制的设备/动作是否正确。`;
 }
 
 function decideExecutionMode({ config, planType }) {
