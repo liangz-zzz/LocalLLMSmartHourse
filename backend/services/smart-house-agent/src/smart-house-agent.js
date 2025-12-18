@@ -88,6 +88,42 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCallKeys = new Set();
     const toolCache = new Map();
 
+    // Strategy A: Always preload the full device list so the model can ground
+    // deviceId selection and avoid hallucinating non-existent ids.
+    {
+      const name = "devices.list";
+      const args = {};
+      const safeArgs = enforcePolicy({ name, args, allowWrite: false });
+      const key = `${name}:${stableStringify(safeArgs)}`;
+      toolCallKeys.add(key);
+      toolCalls.push({ name, args: safeArgs });
+
+      let result;
+      try {
+        result = await mcp.callTool(name, safeArgs);
+      } catch (err) {
+        result = { error: "tool_execution_failed", message: err?.message || String(err) };
+      }
+      toolCache.set(key, result);
+      messages.push({ role: "system", content: toolResultMessage({ name, result }) });
+      messages.push({
+        role: "system",
+        content: JSON.stringify({
+          device_inventory_loaded: true,
+          instruction:
+            "Use ONLY deviceId values present in the devices.list result above. Never invent device ids. If no device matches the user request, ask a clarifying question (plan.type=clarify)."
+        })
+      });
+
+      if (isToolError(result)) {
+        const msg = `无法获取设备列表（${result.error}）：${String(result.message || "").trim() || "unknown error"}。`;
+        appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+        appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+        await sessionStore.save(session);
+        return { traceId, sessionId: session.id, type: "error", error: "devices_list_failed", message: msg, toolCalls };
+      }
+    }
+
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const completion = await llm.chat({ messages, model: config.agentModel });
       const content = completion?.choices?.[0]?.message?.content || "";
@@ -252,6 +288,7 @@ function buildSystemPrompt({ toolsText }) {
     "You MUST use tools to get facts about devices/state/capabilities. Do not assume.",
     "You MUST output ONLY valid JSON (no markdown, no extra text).",
     "Tool results arrive as system JSON messages: {\"tool_result\":{\"name\":\"...\",\"result\":{...}}}.",
+    "At the start of each turn, you will receive a devices.list tool_result containing the available devices and their ids. Treat it as the source of truth.",
     "",
     "Available MCP tools:",
     toolsText,
@@ -261,6 +298,7 @@ function buildSystemPrompt({ toolsText }) {
     '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|execute|propose|clarify","actions":[{"deviceId":"...","action":"turn_on|turn_off|...","params":{}}]}}',
     "",
     "Rules:",
+    "- NEVER invent device ids. deviceId must come from devices.list (or devices.get). If no match, ask a clarifying question.",
     "- If the user asks about current state, call devices.state/devices.get first.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
     "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",

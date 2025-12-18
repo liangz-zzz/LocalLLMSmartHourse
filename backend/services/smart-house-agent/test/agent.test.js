@@ -33,6 +33,7 @@ function makeMcpStub(impl = {}) {
     }),
     callTool: async (name, args) => {
       calls.push({ name, args });
+      if (name === "devices.list" && !impl[name]) return { items: [], count: 0 };
       if (impl[name]) return impl[name](args);
       throw new Error(`Unhandled tool: ${name}`);
     }
@@ -61,8 +62,9 @@ test("agent can answer a state query via tool_calls", async () => {
 
   assert.equal(out.type, "answer");
   assert.equal(out.message, "烧水壶正在供电（开）。");
-  assert.equal(mcp.calls[0].name, "devices.state");
-  assert.equal(mcp.calls.length, 1);
+  assert.equal(mcp.calls[0].name, "devices.list");
+  assert.equal(mcp.calls[1].name, "devices.state");
+  assert.equal(mcp.calls.length, 2);
   assert.equal(llm.calls.length, 2);
 });
 
@@ -106,8 +108,9 @@ test("agent returns llm_no_final with tool results when model never finalizes", 
   assert.equal(out.iterations, 8);
   assert.equal(mcp.calls.filter((c) => c.name === "devices.state").length, 1, "tool should be called once due to cache");
   assert.equal(out.toolCalls.filter((c) => c.name === "devices.state").length, 1);
-  assert.equal(out.toolResults.length, 1);
-  assert.equal(out.toolResults[0].name, "devices.state");
+  assert.equal(out.toolResults.length, 2);
+  assert.ok(out.toolResults.some((r) => r.name === "devices.list"));
+  assert.ok(out.toolResults.some((r) => r.name === "devices.state"));
 });
 
 test("agent proposes actions then executes on confirmation", async () => {
@@ -166,6 +169,7 @@ test("agent auto-executes when plan.type=execute", async () => {
   assert.equal(out.type, "executed");
   assert.equal(out.planId, "p2");
   assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute");
+  assert.equal(mcp.calls.filter((c) => c.name === "devices.list").length, 1, "bootstrap devices.list");
 });
 
 test("agent surfaces batch_invoke errors during confirmation (no optimistic success)", async () => {
