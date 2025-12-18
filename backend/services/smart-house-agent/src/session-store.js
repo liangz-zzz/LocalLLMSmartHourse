@@ -74,7 +74,9 @@ function newSession(id) {
     messages: [],
     state: {
       lastDeviceId: null,
+      lastDeviceName: null,
       lastRoom: null,
+      lastExecution: null,
       pending: null
     }
   };
@@ -88,8 +90,13 @@ function normalizeSession({ data, sessionId, maxMessages }) {
   if (!Array.isArray(session.messages)) session.messages = [];
   session.messages = session.messages.slice(-maxMessages);
   if (!session.state || typeof session.state !== "object") {
-    session.state = { lastDeviceId: null, lastRoom: null, pending: null };
+    session.state = { lastDeviceId: null, lastDeviceName: null, lastRoom: null, lastExecution: null, pending: null };
+  } else {
+    if (session.state.lastDeviceId === undefined) session.state.lastDeviceId = null;
+    if (session.state.lastDeviceName === undefined) session.state.lastDeviceName = null;
+    if (session.state.lastRoom === undefined) session.state.lastRoom = null;
+    if (session.state.lastExecution === undefined) session.state.lastExecution = null;
+    if (session.state.pending === undefined) session.state.pending = null;
   }
   return session;
 }
-
