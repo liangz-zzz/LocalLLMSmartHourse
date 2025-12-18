@@ -33,6 +33,7 @@ function makeMcpStub(impl = {}) {
     }),
     callTool: async (name, args) => {
       calls.push({ name, args });
+      if (name === "devices.list" && !impl[name]) return { items: [], count: 0 };
       if (impl[name]) return impl[name](args);
       throw new Error(`Unhandled tool: ${name}`);
     }
@@ -49,6 +50,10 @@ const baseConfig = {
 test("agent can answer a state query via tool_calls", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [{ id: "kettle_plug", name: "烧水壶插座", placement: { room: "kitchen" } }],
+      count: 1
+    }),
     "devices.state": async () => ({ id: "kettle_plug", traits: { switch: { state: "on" } } })
   });
   const llm = makeLlmStub([
@@ -61,14 +66,54 @@ test("agent can answer a state query via tool_calls", async () => {
 
   assert.equal(out.type, "answer");
   assert.equal(out.message, "烧水壶正在供电（开）。");
-  assert.equal(mcp.calls[0].name, "devices.state");
-  assert.equal(mcp.calls.length, 1);
+  assert.equal(mcp.calls[0].name, "devices.list");
+  assert.equal(mcp.calls[1].name, "devices.state");
+  assert.equal(mcp.calls.length, 2);
   assert.equal(llm.calls.length, 2);
+});
+
+test("agent persists lastDevice and exposes it in CONTEXT_JSON for follow-ups", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [{ id: "kettle_plug", name: "烧水壶插座", placement: { room: "kitchen" } }],
+      count: 1
+    }),
+    "devices.state": async () => ({ id: "kettle_plug", traits: { switch: { state: "on" } } })
+  });
+  const llm = makeLlmStub([
+    { type: "tool_calls", tool_calls: [{ name: "devices.state", arguments: { id: "kettle_plug" } }] },
+    { type: "final", assistant: "烧水壶正在供电（开）。", plan: { type: "query", actions: [] } },
+    { type: "final", assistant: "好的。", plan: { type: "query", actions: [] } }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  await agent.turn({ sessionId: "s_mem", input: "水在烧了么", confirm: false });
+
+  const stored = await sessionStore.getOrCreate("s_mem");
+  assert.equal(stored.state.lastDeviceId, "kettle_plug");
+  assert.equal(stored.state.lastDeviceName, "烧水壶插座");
+  assert.equal(stored.state.lastRoom, "kitchen");
+
+  await agent.turn({ sessionId: "s_mem", input: "好了，可以关了", confirm: false });
+  assert.equal(llm.calls.length, 3);
+
+  const secondTurnMessages = llm.calls[2];
+  const ctxMsg = secondTurnMessages.find((m) => m.role === "system" && String(m.content || "").startsWith("CONTEXT_JSON="));
+  assert.ok(ctxMsg, "CONTEXT_JSON should be present");
+  const ctx = JSON.parse(String(ctxMsg.content).slice("CONTEXT_JSON=".length));
+  assert.equal(ctx.lastDevice.id, "kettle_plug");
+  assert.equal(ctx.lastDevice.name, "烧水壶插座");
+  assert.equal(ctx.lastDevice.room, "kitchen");
 });
 
 test("agent dedupes repeated tool calls with identical args", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [{ id: "kettle_plug", name: "烧水壶插座", placement: { room: "kitchen" } }],
+      count: 1
+    }),
     "devices.state": async () => ({ id: "kettle_plug", traits: { switch: { state: "off" } } })
   });
   const llm = makeLlmStub([
@@ -89,6 +134,10 @@ test("agent dedupes repeated tool calls with identical args", async () => {
 test("agent returns llm_no_final with tool results when model never finalizes", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [{ id: "kettle_plug", name: "烧水壶插座", placement: { room: "kitchen" } }],
+      count: 1
+    }),
     "devices.state": async () => ({ id: "kettle_plug", traits: { switch: { state: "off" } } })
   });
 
@@ -106,8 +155,9 @@ test("agent returns llm_no_final with tool results when model never finalizes", 
   assert.equal(out.iterations, 8);
   assert.equal(mcp.calls.filter((c) => c.name === "devices.state").length, 1, "tool should be called once due to cache");
   assert.equal(out.toolCalls.filter((c) => c.name === "devices.state").length, 1);
-  assert.equal(out.toolResults.length, 1);
-  assert.equal(out.toolResults[0].name, "devices.state");
+  assert.equal(out.toolResults.length, 2);
+  assert.ok(out.toolResults.some((r) => r.name === "devices.list"));
+  assert.ok(out.toolResults.some((r) => r.name === "devices.state"));
 });
 
 test("agent proposes actions then executes on confirmation", async () => {
@@ -166,6 +216,7 @@ test("agent auto-executes when plan.type=execute", async () => {
   assert.equal(out.type, "executed");
   assert.equal(out.planId, "p2");
   assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 2, "dryrun + execute");
+  assert.equal(mcp.calls.filter((c) => c.name === "devices.list").length, 1, "bootstrap devices.list");
 });
 
 test("agent surfaces batch_invoke errors during confirmation (no optimistic success)", async () => {

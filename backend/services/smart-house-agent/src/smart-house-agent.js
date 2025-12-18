@@ -45,6 +45,8 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         });
 
         const text = summarizeBatch(exec);
+        rememberExecution(session, { planId: pending.planId, actions: pending.actions, ok: !isToolError(exec), message: text });
+        rememberLastDevice(session, { deviceId: pending.actions?.[0]?.deviceId });
         appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
         appendMessage(session, { role: "assistant", content: text }, config.maxMessages);
         await sessionStore.save(session);
@@ -87,6 +89,44 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCalls = [];
     const toolCallKeys = new Set();
     const toolCache = new Map();
+    let deviceInventory = null;
+
+    // Strategy A: Always preload the full device list so the model can ground
+    // deviceId selection and avoid hallucinating non-existent ids.
+    {
+      const name = "devices.list";
+      const args = {};
+      const safeArgs = enforcePolicy({ name, args, allowWrite: false });
+      const key = `${name}:${stableStringify(safeArgs)}`;
+      toolCallKeys.add(key);
+      toolCalls.push({ name, args: safeArgs });
+
+      let result;
+      try {
+        result = await mcp.callTool(name, safeArgs);
+      } catch (err) {
+        result = { error: "tool_execution_failed", message: err?.message || String(err) };
+      }
+      deviceInventory = !isToolError(result) ? result : null;
+      toolCache.set(key, result);
+      messages.push({ role: "system", content: toolResultMessage({ name, result }) });
+      messages.push({
+        role: "system",
+        content: JSON.stringify({
+          device_inventory_loaded: true,
+          instruction:
+            "Use ONLY deviceId values present in the devices.list result above. Never invent device ids. If no device matches the user request, ask a clarifying question (plan.type=clarify)."
+        })
+      });
+
+      if (isToolError(result)) {
+        const msg = `无法获取设备列表（${result.error}）：${String(result.message || "").trim() || "unknown error"}。`;
+        appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+        appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+        await sessionStore.save(session);
+        return { traceId, sessionId: session.id, type: "error", error: "devices_list_failed", message: msg, toolCalls };
+      }
+    }
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const completion = await llm.chat({ messages, model: config.agentModel });
@@ -126,6 +166,17 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             toolCache.set(key, result);
           }
 
+          if (!isToolError(result)) {
+            if (name === "devices.get" || name === "devices.state") {
+              const id = String(safeArgs?.id || result?.id || "").trim();
+              rememberLastDevice(session, { deviceId: id, inventory: deviceInventory, from: name });
+            }
+            if (name === "devices.invoke") {
+              const id = String(safeArgs?.deviceId || "").trim();
+              rememberLastDevice(session, { deviceId: id, inventory: deviceInventory, from: name });
+            }
+          }
+
           messages.push({ role: "system", content: toolResultMessage({ name, result }) });
         }
         messages.push({
@@ -151,6 +202,12 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
 
           if (!shouldExecute) {
             session.state.pending = { planId, actions, createdAt: Date.now() };
+            rememberLastDevice(session, {
+              deviceId: actions?.[0]?.deviceId,
+              inventory: deviceInventory,
+              requireInventory: true,
+              from: "plan"
+            });
             await sessionStore.save(session);
             const base =
               assistant ||
@@ -176,6 +233,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
               "我无法确定要执行的动作是否都可用（设备不存在/能力不支持/参数不完整）。你能确认一下要控制的设备或动作吗？";
             appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
             appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+            rememberExecution(session, { planId, actions, ok: false, message: msg });
             await sessionStore.save(session);
             return { traceId, sessionId: session.id, type: "clarify", planId, actions, message: msg, toolCalls, dryrun };
           }
@@ -187,6 +245,13 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             actions
           });
           const msg = summarizeBatch(exec);
+          rememberExecution(session, { planId, actions, ok: !isToolError(exec), message: msg });
+          rememberLastDevice(session, {
+            deviceId: actions?.[0]?.deviceId,
+            inventory: deviceInventory,
+            requireInventory: true,
+            from: "execute"
+          });
           appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
           appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
           await sessionStore.save(session);
@@ -252,6 +317,7 @@ function buildSystemPrompt({ toolsText }) {
     "You MUST use tools to get facts about devices/state/capabilities. Do not assume.",
     "You MUST output ONLY valid JSON (no markdown, no extra text).",
     "Tool results arrive as system JSON messages: {\"tool_result\":{\"name\":\"...\",\"result\":{...}}}.",
+    "At the start of each turn, you will receive a devices.list tool_result containing the available devices and their ids. Treat it as the source of truth.",
     "",
     "Available MCP tools:",
     toolsText,
@@ -261,6 +327,8 @@ function buildSystemPrompt({ toolsText }) {
     '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|execute|propose|clarify","actions":[{"deviceId":"...","action":"turn_on|turn_off|...","params":{}}]}}',
     "",
     "Rules:",
+    "- NEVER invent device ids. deviceId must come from devices.list (or devices.get). If no match, ask a clarifying question.",
+    '- If the user refers implicitly (e.g., "好了，可以关了") and CONTEXT_JSON.lastDevice.id is set, treat that as the target device.',
     "- If the user asks about current state, call devices.state/devices.get first.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
     "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",
@@ -271,8 +339,14 @@ function buildSystemPrompt({ toolsText }) {
 
 function buildContextPrompt({ session }) {
   const pending = session.state?.pending ? { planId: session.state.pending.planId, actions: session.state.pending.actions } : null;
+  const lastDevice =
+    session.state?.lastDeviceId || session.state?.lastDeviceName || session.state?.lastRoom
+      ? { id: session.state?.lastDeviceId || null, name: session.state?.lastDeviceName || null, room: session.state?.lastRoom || null }
+      : null;
   const ctx = {
     sessionId: session.id,
+    lastDevice,
+    lastExecution: session.state?.lastExecution || null,
     pending
   };
   return `CONTEXT_JSON=${JSON.stringify(ctx)}`;
@@ -372,6 +446,38 @@ function normalizePlanType(t) {
 
 function isToolError(v) {
   return v && typeof v === "object" && !Array.isArray(v) && typeof v.error === "string";
+}
+
+function rememberLastDevice(session, { deviceId, inventory, requireInventory } = {}) {
+  const id = String(deviceId || "").trim();
+  if (!id) return;
+
+  const device = findDeviceInInventory(inventory, id);
+  if (requireInventory && inventory && !device) return;
+
+  if (!session.state || typeof session.state !== "object") session.state = {};
+  session.state.lastDeviceId = id;
+  if (device) {
+    session.state.lastDeviceName = device.name || session.state.lastDeviceName || null;
+    session.state.lastRoom = device.placement?.room || session.state.lastRoom || null;
+  }
+}
+
+function rememberExecution(session, { planId, actions, ok, message } = {}) {
+  if (!session.state || typeof session.state !== "object") session.state = {};
+  session.state.lastExecution = {
+    planId: planId ? String(planId) : null,
+    ok: Boolean(ok),
+    actions: Array.isArray(actions) ? actions : [],
+    message: String(message || "").trim() || null,
+    ts: Date.now()
+  };
+}
+
+function findDeviceInInventory(inventory, id) {
+  const list = inventory?.items;
+  if (!Array.isArray(list)) return null;
+  return list.find((d) => d && typeof d === "object" && d.id === id) || null;
 }
 
 function summarizeDryrunFailure({ dryrun, actions }) {
