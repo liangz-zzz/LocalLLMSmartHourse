@@ -154,6 +154,61 @@ services:
       - "5000:5000"
     command: ["sleep", "infinity"]
 
+  smart-house-mcp-server:
+    build:
+      context: ../backend/services/smart-house-mcp-server
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/smart-house-mcp-server:dev
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PORT=${MCP_SERVER_PORT:-7000}
+      - API_GATEWAY_BASE=${API_GATEWAY_BASE:-http://api-gateway:4000}
+      - API_GATEWAY_API_KEY=${API_GATEWAY_API_KEY:-}
+      - DRY_RUN_DEFAULT=${MCP_DRY_RUN_DEFAULT:-true}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/smart-house-mcp-server:/app
+      - smart_house_mcp_server_node_modules:/app/node_modules
+    ports:
+      - "${MCP_SERVER_PORT:-7000}:7000"
+    command: ["sleep", "infinity"]
+
+  smart-house-agent:
+    build:
+      context: ../backend/services/smart-house-agent
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/smart-house-agent:dev
+    restart: unless-stopped
+    depends_on:
+      - llm-bridge
+      - smart-house-mcp-server
+      - redis
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PORT=${AGENT_PORT:-6100}
+      - LLM_API_BASE=${LLM_API_BASE:-http://llm-bridge:5000/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-dummy-key}
+      - AGENT_MODEL=${AGENT_MODEL:-deepseek-chat}
+      - AGENT_EXECUTION_MODE=${AGENT_EXECUTION_MODE:-auto}
+      - MCP_URL=${MCP_URL:-http://smart-house-mcp-server:7000/mcp}
+      - REDIS_URL=${AGENT_REDIS_URL:-redis://redis:6379}
+      - SESSION_TTL_MS=${SESSION_TTL_MS:-3600000}
+      - SESSION_MAX_MESSAGES=${SESSION_MAX_MESSAGES:-30}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/smart-house-agent:/app
+      - smart_house_agent_node_modules:/app/node_modules
+    ports:
+      - "${AGENT_PORT:-6100}:6100"
+    command: ["sleep", "infinity"]
+
   traefik:
     image: traefik:v3.1
     profiles: ["edge"]
@@ -178,3 +233,5 @@ volumes:
   device_adapter_node_modules:
   rules_engine_node_modules:
   llm_bridge_node_modules:
+  smart_house_mcp_server_node_modules:
+  smart_house_agent_node_modules:

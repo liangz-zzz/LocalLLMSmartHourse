@@ -45,4 +45,6 @@
 - 新协议：新增 adapter，扩展 `bindings` 映射，不破坏上层 API。
 - 新服务：在对应目录创建子文件夹与 `AGENTS.md`，更新 `deploy/docker-compose.yml`。
 - 文档：新增设计文档时在 `docs/` 创建文件并在此处引用。
+- 重要设计文档索引：
+  - `docs/feature/smart_house_agent/README.md`（Smart House Agent：MCP 工具调用 + 会话/安全/规划执行）
 - Dev 容器：见 `.devcontainer/AGENTS.md`，默认附着 `api-gateway` 服务，命令保持 `sleep infinity` 供开发者启动自定义任务。 
