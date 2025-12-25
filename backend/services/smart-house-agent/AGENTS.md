@@ -9,6 +9,7 @@
 约定
 - 工具调用只走 MCP（`smart-house-mcp-server`），不要直接访问 `api-gateway`（除非作为工具的实现细节）。
 - 永远不要相信模型“猜测的状态/能力”：需要事实时先调用 `devices.*` 工具。
+- 每轮会加载 `devices.list` + `scenes.list`，计划支持 `type=scene`（`sceneId` 必须来自 `scenes.list`）。
 - 写操作默认不执行：必须显式确认（`confirm=true` 或识别为用户确认语句）才会真实下发。
 
 运行

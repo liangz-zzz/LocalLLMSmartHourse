@@ -20,6 +20,7 @@ test("buildTools returns expected tool names", () => {
   const tools = buildTools();
   const names = new Set(tools.map((t) => t.name));
   assert.ok(names.has("devices.list"));
+  assert.ok(names.has("scenes.list"));
   assert.ok(names.has("devices.get"));
   assert.ok(names.has("devices.state"));
   assert.ok(names.has("devices.invoke"));
@@ -104,4 +105,3 @@ test("devices.invoke can enqueue when confirm=true and dryRun=false", async () =
 
   global.fetch = originalFetch;
 });
-

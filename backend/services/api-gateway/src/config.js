@@ -1,5 +1,9 @@
+import path from "node:path";
+
 export function loadConfig() {
   const defaultMode = process.env.MODE ? process.env.MODE : "redis"; // prefer redis when services are up
+  const configDir = String(process.env.CONFIG_DIR || "").trim();
+  const scenesPath = String(process.env.SCENES_PATH || "").trim() || (configDir ? path.join(configDir, "scenes.json") : "./scenes.json");
   return {
     port: Number(process.env.PORT || 4000),
     mode: defaultMode, // mock | redis
@@ -11,6 +15,8 @@ export function loadConfig() {
     databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome",
     actionResultsPersist: process.env.ACTION_RESULTS_PERSIST !== "false",
     logLevel: process.env.LOG_LEVEL || "info",
+    configDir: configDir || undefined,
+    scenesPath,
     apiKeys: (process.env.API_KEYS || process.env.API_KEY || "")
       .split(",")
       .map((s) => s.trim())

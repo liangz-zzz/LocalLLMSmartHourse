@@ -1,11 +1,15 @@
+import path from "node:path";
+
 export function loadConfig() {
   const mode = process.env.MODE || "offline"; // offline | mqtt
   const storage = process.env.STORAGE || (mode === "mqtt" ? "redis" : "memory");
+  const configDir = String(process.env.CONFIG_DIR || "").trim();
+  const defaultDeviceConfigPath = configDir ? path.join(configDir, "devices.config.json") : "./devices.config.json";
   return {
     mode,
     mqttUrl: process.env.MQTT_URL || "mqtt://localhost:1883",
     mockDataDir: new URL("../mock-data/zigbee2mqtt", import.meta.url),
-    deviceConfigPath: process.env.DEVICE_CONFIG_PATH || process.env.DEVICES_CONFIG_PATH || "./devices.config.json",
+    deviceConfigPath: process.env.DEVICE_CONFIG_PATH || process.env.DEVICES_CONFIG_PATH || defaultDeviceConfigPath,
     logLevel: process.env.LOG_LEVEL || "info",
     storage, // memory | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",

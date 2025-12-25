@@ -1,8 +1,8 @@
 # AGENTS – Smart House MCP Server
 
 职责：以 MCP（Model Context Protocol）形式暴露“智能家居工具（tools）”，供 `smart-house-agent` 调用。该服务本身不做 LLM 推理，只做确定性封装与安全校验：
-- 读取：设备列表/详情/状态/最近动作回执
-- 写入：设备动作下发（严格校验 capabilities/参数；支持 dry-run/确认门禁）
+- 读取：设备列表/详情/状态/最近动作回执、场景列表
+- 写入：设备动作下发与场景执行（`actions.batch_invoke` 支持 `type=scene` 与 `wait_for`；严格校验 capabilities/参数；支持 dry-run/确认门禁）
 - 审计：为每次工具调用生成 `traceId/requestId` 并记录（后续可写入 DB/日志系统）
 
 约定

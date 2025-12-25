@@ -1,7 +1,8 @@
 import Fastify from "fastify";
 import jwt from "@fastify/jwt";
+import { SceneStoreError } from "./scene-store.js";
 
-export function buildServer({ store, logger, config, bus, actionStore, ruleStore }) {
+export function buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore }) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
   if (config.jwtSecret) {
@@ -128,6 +129,77 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     return { status: "queued" };
   });
 
+  // Scene management (file-backed)
+  app.get("/scenes", { preHandler: authGuard }, async (_req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    try {
+      const list = await sceneStore.list();
+      const items = list.map((scene) => ({ id: scene.id, name: scene.name, description: scene.description }));
+      return { items, count: items.length };
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.get("/scenes/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    try {
+      const scene = await sceneStore.get(req.params.id);
+      if (!scene) return reply.code(404).send({ error: "scene_not_found" });
+      return scene;
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.get("/scenes/:id/expanded", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    try {
+      const steps = await sceneStore.expand(req.params.id);
+      return { id: req.params.id, steps, count: steps.length };
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.post("/scenes", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    try {
+      const created = await sceneStore.create(req.body || {});
+      logger?.info("scene.created", { id: created?.id, actor: getActor(req) });
+      return created;
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.put("/scenes/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    const payload = req.body || {};
+    if (payload?.id && payload.id !== req.params.id) {
+      return reply.code(400).send({ error: "scene_id_mismatch" });
+    }
+    try {
+      const updated = await sceneStore.update(req.params.id, payload);
+      logger?.info("scene.updated", { id: req.params.id, actor: getActor(req) });
+      return updated;
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.delete("/scenes/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    const cascade = req.query?.cascade === "true" || req.query?.cascade === "1";
+    try {
+      const result = await sceneStore.delete(req.params.id, { cascade });
+      logger?.info("scene.deleted", { id: req.params.id, cascade, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
   // Rule management (requires DB)
   app.get("/rules", { preHandler: authGuard }, async (_req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
@@ -187,4 +259,24 @@ function getActor(req) {
   const qsKey = req?.query?.api_key;
   const jwtSub = req?.user?.sub;
   return jwtSub || bearer || headerKey || qsKey || "anonymous";
+}
+
+function handleSceneError(err, reply, logger) {
+  if (err instanceof SceneStoreError) {
+    if (err.code === "scene_not_found") {
+      return reply.code(404).send({ error: "scene_not_found" });
+    }
+    if (err.code === "scene_exists") {
+      return reply.code(409).send({ error: "scene_exists" });
+    }
+    if (err.code === "scene_has_dependents") {
+      return reply.code(409).send({ error: "scene_has_dependents", dependents: err.dependents || [] });
+    }
+    if (err.code === "invalid_scene") {
+      return reply.code(400).send({ error: "invalid_scene", reason: err.message, details: err.details || [] });
+    }
+    logger?.warn?.("Scene store error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "scene_store_error", message: err.message });
+  }
+  throw err;
 }

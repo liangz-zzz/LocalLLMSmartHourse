@@ -25,6 +25,7 @@ function makeMcpStub(impl = {}) {
     listTools: async () => ({
       tools: [
         { name: "devices.list", description: "list", inputSchema: { type: "object" } },
+        { name: "scenes.list", description: "scenes", inputSchema: { type: "object" } },
         { name: "devices.get", description: "get", inputSchema: { type: "object" } },
         { name: "devices.state", description: "state", inputSchema: { type: "object" } },
         { name: "devices.invoke", description: "invoke", inputSchema: { type: "object" } },
@@ -34,6 +35,7 @@ function makeMcpStub(impl = {}) {
     callTool: async (name, args) => {
       calls.push({ name, args });
       if (name === "devices.list" && !impl[name]) return { items: [], count: 0 };
+      if (name === "scenes.list" && !impl[name]) return { items: [], count: 0 };
       if (impl[name]) return impl[name](args);
       throw new Error(`Unhandled tool: ${name}`);
     }
@@ -67,8 +69,9 @@ test("agent can answer a state query via tool_calls", async () => {
   assert.equal(out.type, "answer");
   assert.equal(out.message, "烧水壶正在供电（开）。");
   assert.equal(mcp.calls[0].name, "devices.list");
-  assert.equal(mcp.calls[1].name, "devices.state");
-  assert.equal(mcp.calls.length, 2);
+  assert.equal(mcp.calls[1].name, "scenes.list");
+  assert.equal(mcp.calls[2].name, "devices.state");
+  assert.equal(mcp.calls.length, 3);
   assert.equal(llm.calls.length, 2);
 });
 
@@ -155,8 +158,9 @@ test("agent returns llm_no_final with tool results when model never finalizes", 
   assert.equal(out.iterations, 8);
   assert.equal(mcp.calls.filter((c) => c.name === "devices.state").length, 1, "tool should be called once due to cache");
   assert.equal(out.toolCalls.filter((c) => c.name === "devices.state").length, 1);
-  assert.equal(out.toolResults.length, 2);
+  assert.equal(out.toolResults.length, 3);
   assert.ok(out.toolResults.some((r) => r.name === "devices.list"));
+  assert.ok(out.toolResults.some((r) => r.name === "scenes.list"));
   assert.ok(out.toolResults.some((r) => r.name === "devices.state"));
 });
 

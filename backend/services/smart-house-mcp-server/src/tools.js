@@ -23,6 +23,15 @@ const TOOLS = [
     }
   },
   {
+    name: "scenes.list",
+    description: "List scenes (id/name/description only).",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
     name: "devices.get",
     description: "Get a device by id.",
     inputSchema: {
@@ -75,11 +84,25 @@ const TOOLS = [
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["deviceId", "action"],
             properties: {
+              type: { type: "string", enum: ["device", "scene"] },
               deviceId: { type: "string" },
               action: { type: "string" },
-              params: { type: "object" }
+              params: { type: "object" },
+              sceneId: { type: "string" },
+              wait_for: {
+                type: "object",
+                additionalProperties: false,
+                required: ["traitPath", "operator", "value", "timeoutMs"],
+                properties: {
+                  traitPath: { type: "string" },
+                  operator: { type: "string", enum: ["eq", "neq", "gt", "gte", "lt", "lte"] },
+                  value: {},
+                  timeoutMs: { type: "number" },
+                  pollMs: { type: "number" },
+                  on_timeout: { type: "string", enum: ["abort"] }
+                }
+              }
             }
           }
         }
@@ -110,6 +133,7 @@ export async function callTool({ name, args, config }) {
   try {
     if (name === "system.health") return await systemHealth({ config });
     if (name === "devices.list") return await devicesList({ args, config });
+    if (name === "scenes.list") return await scenesList({ args, config });
     if (name === "devices.get") return await devicesGet({ args, config });
     if (name === "devices.state") return await devicesState({ args, config });
     if (name === "devices.invoke") return await devicesInvoke({ args, config });
@@ -161,6 +185,14 @@ async function devicesList({ args, config }) {
     });
   }
 
+  return asJsonResult({ items, count: items.length });
+}
+
+async function scenesList({ args, config }) {
+  const res = await fetchJson(`${config.apiGatewayBase}/scenes`, {
+    headers: authHeaders(config)
+  });
+  const items = Array.isArray(res?.items) ? res.items : [];
   return asJsonResult({ items, count: items.length });
 }
 
@@ -237,15 +269,57 @@ async function actionsBatchInvoke({ args, config }) {
   return withIdempotency(requestId, async () => {
     const results = [];
     for (const item of list) {
-      const deviceId = String(item?.deviceId || "").trim();
-      const action = String(item?.action || "").trim();
-      const params = isPlainObject(item?.params) ? item.params : {};
-      if (!deviceId || !action) {
-        results.push({ deviceId, action, ok: false, error: "invalid_action_item" });
+      const normalized = normalizeActionItem(item);
+      if (normalized.type === "scene") {
+        if (!normalized.sceneId) {
+          results.push({ type: "scene", sceneId: "", ok: false, error: "invalid_action_item" });
+          continue;
+        }
+        let expanded;
+        try {
+          expanded = await fetchExpandedScene(normalized.sceneId, config);
+        } catch (err) {
+          results.push({
+            type: "scene",
+            sceneId: normalized.sceneId,
+            ok: false,
+            error: "scene_expand_failed",
+            message: err?.message || String(err)
+          });
+          continue;
+        }
+        const steps = Array.isArray(expanded?.steps) ? expanded.steps : Array.isArray(expanded) ? expanded : [];
+        let sceneStepIndex = 0;
+        for (const step of steps) {
+          sceneStepIndex += 1;
+          const outcome = await handleDeviceStep({
+            step,
+            dryRun,
+            confirm,
+            requestId,
+            sceneId: normalized.sceneId,
+            stepIndex: sceneStepIndex,
+            results,
+            config
+          });
+          if (outcome?.abort) {
+            return outcome.abort;
+          }
+        }
         continue;
       }
-      const r = await devicesInvoke({ args: { deviceId, action, params, dryRun, confirm, requestId: requestId ? `${requestId}:${deviceId}:${action}` : "" }, config });
-      results.push({ deviceId, action, ok: !r.isError, result: extractJsonFromResult(r) });
+
+      const outcome = await handleDeviceStep({
+        step: normalized,
+        dryRun,
+        confirm,
+        requestId,
+        results,
+        config
+      });
+      if (outcome?.abort) {
+        return outcome.abort;
+      }
     }
     return asJsonResult({ requestId: requestId || undefined, dryRun, results });
   });
@@ -302,8 +376,8 @@ function asJsonResult(obj) {
   };
 }
 
-function asError(code, message) {
-  const payload = { error: code, message };
+function asError(code, message, extra) {
+  const payload = { error: code, message, ...(extra || {}) };
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
     structuredContent: payload,
@@ -319,6 +393,177 @@ function extractJsonFromResult(result) {
   } catch {
     return text;
   }
+}
+
+function normalizeActionItem(item) {
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "scene" || (!type && item?.sceneId)) {
+    return { type: "scene", sceneId: String(item?.sceneId || "").trim() };
+  }
+  return {
+    type: "device",
+    deviceId: String(item?.deviceId || "").trim(),
+    action: String(item?.action || "").trim(),
+    params: isPlainObject(item?.params) ? item.params : {},
+    wait_for: isPlainObject(item?.wait_for) ? item.wait_for : null
+  };
+}
+
+async function handleDeviceStep({ step, dryRun, confirm, requestId, sceneId, stepIndex, results, config }) {
+  const deviceId = String(step?.deviceId || "").trim();
+  const action = String(step?.action || "").trim();
+  const params = isPlainObject(step?.params) ? step.params : {};
+  const waitFor = isPlainObject(step?.wait_for) ? step.wait_for : null;
+
+  if (!deviceId || !action) {
+    results.push({ deviceId, action, ok: false, error: "invalid_action_item" });
+    return null;
+  }
+
+  if (waitFor) {
+    const validation = validateWaitForArgs(waitFor);
+    if (!validation.ok) {
+      results.push({ deviceId, action, ok: false, error: "invalid_wait_for", message: validation.reason });
+      return null;
+    }
+  }
+
+  const r = await devicesInvoke({
+    args: {
+      deviceId,
+      action,
+      params,
+      dryRun,
+      confirm,
+      requestId: requestId ? `${requestId}:${sceneId || "device"}:${stepIndex || 0}:${deviceId}:${action}` : ""
+    },
+    config
+  });
+  results.push({ deviceId, action, ok: !r.isError, result: extractJsonFromResult(r) });
+
+  if (!dryRun && !r.isError && waitFor) {
+    const waitResult = await waitForCondition({ deviceId, waitFor, config });
+    if (!waitResult.ok) {
+      const message = buildWaitTimeoutMessage({ sceneId, stepIndex, deviceId, waitFor });
+      return {
+        abort: asError("scene_wait_timeout", message, {
+          sceneId: sceneId || undefined,
+          stepIndex: stepIndex || undefined,
+          deviceId,
+          traitPath: waitFor.traitPath,
+          operator: waitFor.operator,
+          value: waitFor.value,
+          timeoutMs: waitFor.timeoutMs
+        })
+      };
+    }
+  }
+
+  return null;
+}
+
+async function fetchExpandedScene(sceneId, config) {
+  const url = `${config.apiGatewayBase}/scenes/${encodeURIComponent(sceneId)}/expanded`;
+  return fetchJson(url, { headers: authHeaders(config) });
+}
+
+function validateWaitForArgs(waitFor) {
+  if (!waitFor || typeof waitFor !== "object") {
+    return { ok: false, reason: "wait_for must be an object" };
+  }
+  if (typeof waitFor.traitPath !== "string" || !waitFor.traitPath.trim()) {
+    return { ok: false, reason: "wait_for.traitPath is required" };
+  }
+  if (typeof waitFor.operator !== "string" || !["eq", "neq", "gt", "gte", "lt", "lte"].includes(waitFor.operator)) {
+    return { ok: false, reason: "wait_for.operator is invalid" };
+  }
+  if (!Object.prototype.hasOwnProperty.call(waitFor, "value")) {
+    return { ok: false, reason: "wait_for.value is required" };
+  }
+  if (!Number.isFinite(waitFor.timeoutMs) || waitFor.timeoutMs <= 0) {
+    return { ok: false, reason: "wait_for.timeoutMs must be positive" };
+  }
+  if (waitFor.pollMs !== undefined && (!Number.isFinite(waitFor.pollMs) || waitFor.pollMs <= 0)) {
+    return { ok: false, reason: "wait_for.pollMs must be positive" };
+  }
+  if (waitFor.on_timeout !== undefined && waitFor.on_timeout !== "abort") {
+    return { ok: false, reason: "wait_for.on_timeout must be abort" };
+  }
+  return { ok: true };
+}
+
+async function waitForCondition({ deviceId, waitFor, config }) {
+  const timeoutMs = Number(waitFor.timeoutMs);
+  const pollMs = Number.isFinite(waitFor.pollMs) ? Number(waitFor.pollMs) : 500;
+  const deadline = Date.now() + timeoutMs;
+  let lastValue;
+
+  while (Date.now() <= deadline) {
+    const stateResult = await devicesState({ args: { id: deviceId }, config });
+    if (!stateResult?.isError) {
+      const state = extractJsonFromResult(stateResult);
+      lastValue = getPathValue(state, waitFor.traitPath);
+      if (compareValues(lastValue, waitFor.operator, waitFor.value)) {
+        return { ok: true, value: lastValue };
+      }
+    }
+    if (Date.now() + pollMs > deadline) break;
+    await sleep(pollMs);
+  }
+
+  return { ok: false, value: lastValue };
+}
+
+function buildWaitTimeoutMessage({ sceneId, stepIndex, deviceId, waitFor }) {
+  const label = sceneId ? `scene ${sceneId} step ${stepIndex || 1}` : `device ${deviceId}`;
+  const op = failureOperator(waitFor.operator);
+  return `${label}: device ${deviceId} ${waitFor.traitPath} ${op} ${formatValue(waitFor.value)} within ${waitFor.timeoutMs}ms`;
+}
+
+function failureOperator(operator) {
+  const map = {
+    eq: "!=",
+    neq: "==",
+    gt: "<=",
+    gte: "<",
+    lt: ">=",
+    lte: ">"
+  };
+  return map[operator] || "!=";
+}
+
+function formatValue(value) {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function getPathValue(obj, path) {
+  const parts = String(path || "").split(".").filter(Boolean);
+  let current = obj;
+  for (const part of parts) {
+    if (!current || typeof current !== "object" || !(part in current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+function compareValues(actual, operator, expected) {
+  if (operator === "eq") return actual === expected;
+  if (operator === "neq") return actual !== expected;
+  const a = Number(actual);
+  const b = Number(expected);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  if (operator === "gt") return a > b;
+  if (operator === "gte") return a >= b;
+  if (operator === "lt") return a < b;
+  if (operator === "lte") return a <= b;
+  return false;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isPlainObject(v) {

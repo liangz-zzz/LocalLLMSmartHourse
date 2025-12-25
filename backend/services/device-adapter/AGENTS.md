@@ -19,7 +19,7 @@
 
 工具/样例
 - `mock-adapter.js`: 离线将 `mock-data/zigbee2mqtt` 的示例 payload 归一化为设备模型，用于无设备时的 dry-run。
-- `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以 `id`（通常等于 zigbee2mqtt 的 `friendly_name`）为键；可用 `DEVICE_CONFIG_PATH` 指定路径（默认 `./devices.config.json`）。
+- `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以 `id`（通常等于 zigbee2mqtt 的 `friendly_name`）为键；可用 `DEVICE_CONFIG_PATH` 或 `CONFIG_DIR/devices.config.json` 指定路径（默认 `./devices.config.json`）。
 
 运行与测试
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。

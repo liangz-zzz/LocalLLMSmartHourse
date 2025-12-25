@@ -5,6 +5,7 @@ import { RedisBus } from "./bus.js";
 import { setupWs } from "./ws.js";
 import { ActionResultStore } from "./action-store.js";
 import { RuleStore } from "./rule-store.js";
+import { SceneStore } from "./scene-store.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -48,12 +49,14 @@ async function main() {
   let bus;
   let actionStore;
   let ruleStore;
+  let sceneStore;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
     }
     ruleStore = new RuleStore({ databaseUrl: config.databaseUrl });
   }
+  sceneStore = new SceneStore({ scenesPath: config.scenesPath, logger });
 
   if (config.mode === "redis") {
     bus = new RedisBus({
@@ -75,7 +78,7 @@ async function main() {
     }
   }
 
-  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore });
+  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger, apiKeys: config.apiKeys });

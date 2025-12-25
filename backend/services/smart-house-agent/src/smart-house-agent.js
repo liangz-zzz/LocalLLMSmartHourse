@@ -90,6 +90,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCallKeys = new Set();
     const toolCache = new Map();
     let deviceInventory = null;
+    let sceneInventory = null;
 
     // Strategy A: Always preload the full device list so the model can ground
     // deviceId selection and avoid hallucinating non-existent ids.
@@ -126,6 +127,34 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         await sessionStore.save(session);
         return { traceId, sessionId: session.id, type: "error", error: "devices_list_failed", message: msg, toolCalls };
       }
+    }
+
+    {
+      const name = "scenes.list";
+      const args = {};
+      const safeArgs = enforcePolicy({ name, args, allowWrite: false });
+      const key = `${name}:${stableStringify(safeArgs)}`;
+      toolCallKeys.add(key);
+      toolCalls.push({ name, args: safeArgs });
+
+      let result;
+      try {
+        result = await mcp.callTool(name, safeArgs);
+      } catch (err) {
+        result = { error: "tool_execution_failed", message: err?.message || String(err) };
+      }
+      sceneInventory = !isToolError(result) ? result : null;
+      toolCache.set(key, result);
+      messages.push({ role: "system", content: toolResultMessage({ name, result }) });
+      messages.push({
+        role: "system",
+        content: JSON.stringify({
+          scene_inventory_loaded: !isToolError(result),
+          instruction: isToolError(result)
+            ? "Scene list unavailable; do not propose scene actions."
+            : "Use ONLY sceneId values present in the scenes.list result above. If no scene matches, ask a clarifying question."
+        })
+      });
     }
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -317,17 +346,18 @@ function buildSystemPrompt({ toolsText }) {
     "You MUST use tools to get facts about devices/state/capabilities. Do not assume.",
     "You MUST output ONLY valid JSON (no markdown, no extra text).",
     "Tool results arrive as system JSON messages: {\"tool_result\":{\"name\":\"...\",\"result\":{...}}}.",
-    "At the start of each turn, you will receive a devices.list tool_result containing the available devices and their ids. Treat it as the source of truth.",
+    "At the start of each turn, you will receive devices.list and scenes.list tool_results containing the available ids. Treat them as the source of truth.",
     "",
     "Available MCP tools:",
     toolsText,
     "",
     "Output formats:",
     '1) Tool calls: {"type":"tool_calls","tool_calls":[{"name":"devices.list","arguments":{}}]}',
-    '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|execute|propose|clarify","actions":[{"deviceId":"...","action":"turn_on|turn_off|...","params":{}}]}}',
+    '2) Final: {"type":"final","assistant":"...","plan":{"planId":"...","type":"query|execute|propose|clarify","actions":[{"type":"device","deviceId":"...","action":"turn_on|turn_off|...","params":{}},{"type":"scene","sceneId":"..."}]}}',
     "",
     "Rules:",
     "- NEVER invent device ids. deviceId must come from devices.list (or devices.get). If no match, ask a clarifying question.",
+    "- NEVER invent scene ids. sceneId must come from scenes.list. If no match, ask a clarifying question.",
     '- If the user refers implicitly (e.g., "好了，可以关了") and CONTEXT_JSON.lastDevice.id is set, treat that as the target device.',
     "- If the user asks about current state, call devices.state/devices.get first.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
@@ -389,11 +419,20 @@ function appendMessage(session, msg, maxMessages) {
 function normalizeActions(list) {
   const out = [];
   for (const a of list || []) {
+    const type = String(a?.type || "").trim().toLowerCase();
+    if (type === "scene" || (!type && a?.sceneId)) {
+      const sceneId = String(a?.sceneId || a?.id || "").trim();
+      if (!sceneId) continue;
+      out.push({ type: "scene", sceneId });
+      continue;
+    }
+
     const deviceId = String(a?.deviceId || a?.id || "").trim();
     const action = String(a?.action || "").trim();
     const params = isPlainObject(a?.params) ? a.params : {};
+    const waitFor = isPlainObject(a?.wait_for) ? a.wait_for : null;
     if (!deviceId || !action) continue;
-    out.push({ deviceId, action, params });
+    out.push({ type: "device", deviceId, action, params, ...(waitFor ? { wait_for: waitFor } : {}) });
   }
   return out;
 }
@@ -482,8 +521,12 @@ function findDeviceInInventory(inventory, id) {
 
 function summarizeDryrunFailure({ dryrun, actions }) {
   if (isToolError(dryrun)) {
-    const ids = Array.from(new Set((actions || []).map((a) => a?.deviceId).filter(Boolean)));
-    const target = ids.length ? `设备 ${ids.join(", ")} ` : "";
+    const deviceIds = Array.from(new Set((actions || []).map((a) => a?.deviceId).filter(Boolean)));
+    const sceneIds = Array.from(new Set((actions || []).map((a) => a?.sceneId).filter(Boolean)));
+    const parts = [];
+    if (deviceIds.length) parts.push(`设备 ${deviceIds.join(", ")}`);
+    if (sceneIds.length) parts.push(`场景 ${sceneIds.join(", ")}`);
+    const target = parts.length ? `${parts.join(" ")} ` : "";
     const detail = String(dryrun?.message || "").trim() || dryrun.error;
     return `无法执行：${target}${detail}。请确认要控制的设备/动作是否正确。`;
   }
@@ -494,7 +537,8 @@ function summarizeDryrunFailure({ dryrun, actions }) {
   if (!failures.length) return null;
 
   const first = failures[0];
-  const where = [first?.deviceId, first?.action].filter(Boolean).join(" ");
+  const where =
+    first?.sceneId ? `场景 ${first.sceneId}` : [first?.deviceId, first?.action].filter(Boolean).join(" ");
   const err = first?.result?.error || first?.error;
   const msg = first?.result?.message || first?.message;
   const detail = [err, msg].filter(Boolean).join("：");
