@@ -1,0 +1,11 @@
+numpy>=1.26,<2.0
+PyYAML>=6.0.1
+requests>=2.31.0
+sounddevice>=0.4.6
+vosk>=0.3.45
+
+# VAD (offline, accurate)
+silero-vad>=6.2.0
+
+# STT (Whisper). Use a local model file path for fully-offline runtime.
+openai-whisper>=20231117

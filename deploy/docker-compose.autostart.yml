@@ -83,3 +83,17 @@ services:
           su node -c "cd /app && npm ci"
           until (echo > /dev/tcp/redis/6379) >/dev/null 2>&1; do echo "[rules-engine] waiting for redis:6379"; sleep 1; done
           exec su node -c "cd /app && npm run dev"
+
+  voice-satellite:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          if [ ! -f /app/config.yaml ]; then
+            echo "[voice-satellite] missing /app/config.yaml (copy config.example.yaml -> config.yaml and mount model files)"
+            exec sleep infinity
+          fi
+          exec /app/run.sh --config /app/config.yaml

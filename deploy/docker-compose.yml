@@ -209,6 +209,36 @@ services:
       - "${AGENT_PORT:-6100}:6100"
     command: ["sleep", "infinity"]
 
+  voice-satellite:
+    profiles: ["voice"]
+    build:
+      context: ../backend/services/voice-satellite
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/voice-satellite:dev
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+      - smart-house-agent
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - HOME=/home/app
+      - PULSE_SERVER=unix:/run/user/${LOCAL_UID:-1000}/pulse/native
+      - PULSE_COOKIE=/home/app/.config/pulse/cookie
+      - XDG_RUNTIME_DIR=/run/user/${LOCAL_UID:-1000}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    group_add:
+      - "audio"
+    volumes:
+      - ../backend/services/voice-satellite:/app
+      - /run/user/${LOCAL_UID:-1000}/pulse:/run/user/${LOCAL_UID:-1000}/pulse
+      - ${HOME:-/home/app}/.config/pulse:/home/app/.config/pulse:ro
+    # Linux ALSA device passthrough (optional). For PulseAudio/pipewire, additional config may be needed.
+    devices:
+      - "/dev/snd:/dev/snd"
+    command: ["sleep", "infinity"]
+
   traefik:
     image: traefik:v3.1
     profiles: ["edge"]

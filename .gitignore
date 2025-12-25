@@ -24,3 +24,6 @@ tmp/
 .next/
 playwright-report/
 test-results/
+
+# Resource
+backend/services/voice-satellite/models/*

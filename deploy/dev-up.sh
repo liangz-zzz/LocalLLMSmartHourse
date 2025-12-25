@@ -13,7 +13,7 @@ if [ -f "${ENV_FILE}" ]; then
   ENV_ARGS+=(--env-file "${ENV_FILE}")
 fi
 
-docker compose "${ENV_ARGS[@]}" -f "${COMPOSE_BASE}" -f "${COMPOSE_AUTOSTART}" up -d --build
+docker compose "${ENV_ARGS[@]}" -f "${COMPOSE_BASE}" -f "${COMPOSE_AUTOSTART}" --profile voice up -d --build
 
 echo "[wait] api-gateway http://localhost:4000/health"
 until curl -fsS --max-time 2 http://localhost:4000/health >/dev/null 2>&1; do sleep 1; done

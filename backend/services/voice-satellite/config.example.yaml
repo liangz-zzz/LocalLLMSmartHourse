@@ -1,0 +1,56 @@
+# Voice Satellite config (example)
+
+audio:
+  sample_rate: 16000
+  block_size: 512
+  input_device: null     # int index or substring of device name
+  output_device: null    # int index or substring of device name
+  input_backend: "sounddevice"  # sounddevice | pulse | auto
+  output_backend: "sounddevice" # sounddevice | pulse | auto
+  pulse_source: "default"       # PulseAudio source name (when input_backend=pulse)
+  beep:
+    enabled: true
+    frequency_hz: 880
+    duration_ms: 120
+    volume: 0.2
+
+wake:
+  phrases: ["老管家"]
+  vosk:
+    model_path: "/ABS/PATH/TO/vosk-model-small-cn-0.22"
+  cooldown_ms: 350
+  timeout_ms: 8000
+
+vad:
+  threshold: 0.55
+  end_silence_ms: 700
+  pre_roll_ms: 400
+  max_utterance_ms: 20000
+  min_utterance_ms: 300
+
+stt:
+  # Use a local Whisper model file to keep runtime offline, e.g. "/ABS/PATH/whisper-small.pt"
+  whisper_model: "/ABS/PATH/TO/whisper-small.pt"
+  language: "zh"
+  device: "cpu"  # "cpu" | "cuda"
+
+tts:
+  piper_bin: "piper"
+  model_path: "/ABS/PATH/TO/zh_CN-huayan-medium.onnx"
+  config_path: "/ABS/PATH/TO/zh_CN-huayan-medium.onnx.json"
+  speaker: null
+
+api_gateway:
+  base_url: "http://localhost:4000"
+  api_key: ""  # optional
+
+agent:
+  base_url: "http://localhost:6100"
+  timeout_s: 30
+  confirm_phrases: ["确认", "执行", "是", "好的", "可以"]
+  cancel_phrases: ["取消", "不要", "算了", "停止"]
+
+runtime:
+  # End the wake session if no new user utterance occurs within this window.
+  session_idle_timeout_ms: 30000
+  log_level: "info" # error | warn | info | debug

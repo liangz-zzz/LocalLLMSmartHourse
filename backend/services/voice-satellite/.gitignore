@@ -1,0 +1,5 @@
+config.yaml
+*.wav
+*.log
+__pycache__/
+
