@@ -20,6 +20,7 @@ Mic
   -> POST smart-house-agent /v1/agent/turn
   -> speech text (message + deterministic action summary)
   -> Piper TTS -> Speaker
+  -> （用户说“再见/拜拜”会结束会话，回到唤醒词监听）
 ```
 
 ## 与 Agent 的交互约定

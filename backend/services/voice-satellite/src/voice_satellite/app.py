@@ -340,6 +340,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     state = "IDLE"  # IDLE | LISTEN | SPEAK
     session_id: Optional[str] = None
     wake_started_at = 0.0
+    awaiting_first_utterance = False
     last_turn_at = 0.0
     ignore_until = 0.0
 
@@ -357,6 +358,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     confirm_set = {normalize_for_match(s) for s in cfg.agent.confirm_phrases}
     cancel_set = {normalize_for_match(s) for s in cfg.agent.cancel_phrases}
+    exit_set = {normalize_for_match(s) for s in cfg.agent.exit_phrases}
 
     try:
         while True:
@@ -369,6 +371,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     state = "IDLE"
                     session_id = None
                     wake.reset()
+                    awaiting_first_utterance = False
                 continue
 
             block = _resample_block(block, resampler)
@@ -382,6 +385,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     wake_started_at = now
                     last_turn_at = now
                     ignore_until = now + (cfg.wake.cooldown_ms / 1000.0)
+                    awaiting_first_utterance = True
                     prebuffer = []
                     utterance = []
                     speech_started = False
@@ -400,11 +404,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             if state == "LISTEN":
                 # give up if user doesn't speak after wake
-                if not speech_started and wake_started_at and (now - wake_started_at) * 1000 > cfg.wake.timeout_ms:
+                if (
+                    awaiting_first_utterance
+                    and not speech_started
+                    and wake_started_at
+                    and (now - wake_started_at) * 1000 > cfg.wake.timeout_ms
+                ):
                     logger.info({"msg": "wake.timeout", "session_id": session_id})
                     state = "IDLE"
                     session_id = None
                     wake.reset()
+                    awaiting_first_utterance = False
                     continue
 
                 # keep a short pre-roll buffer
@@ -421,6 +431,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if not speech_started:
                     if is_speech:
                         speech_started = True
+                        if awaiting_first_utterance:
+                            awaiting_first_utterance = False
                         utterance = [*prebuffer, block]
                         silence = 0
                         last_turn_at = now
@@ -469,6 +481,22 @@ def main(argv: Optional[List[str]] = None) -> int:
                 match = normalize_for_match(text_raw)
                 confirm = match in confirm_set
                 cancel = match in cancel_set
+                exit_requested = match in exit_set
+                if exit_requested:
+                    logger.info({"msg": "session.exit", "session_id": session_id, "text": text_raw})
+                    try:
+                        tts.say("好的，再见。")
+                    except Exception as e:
+                        logger.error({"msg": "tts.failed", "error": str(e)})
+                    state = "IDLE"
+                    session_id = None
+                    wake.reset()
+                    awaiting_first_utterance = False
+                    prebuffer = []
+                    utterance = []
+                    speech_started = False
+                    silence = 0
+                    continue
                 if cancel:
                     # Explicit cancel; send as-is (agent has cancel heuristics too).
                     confirm = False

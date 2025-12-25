@@ -9,7 +9,7 @@
 3. 对该句音频做 **Whisper STT** → 得到文本
 4. 调用 `POST http://localhost:6100/v1/agent/turn`
 5. 将 `out.message` 播报；若包含 `actions/result`，额外播报“执行了哪些设备/动作”（确定性模板）
-6. 在同一 `sessionId` 下继续多轮（直到超时回到 IDLE）
+6. 在同一 `sessionId` 下继续多轮（直到超时回到 IDLE 或用户说“再见/拜拜”）
 
 ## 快速开始（主机运行）
 

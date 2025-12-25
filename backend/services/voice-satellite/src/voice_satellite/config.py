@@ -75,6 +75,7 @@ class AgentConfig:
     timeout_s: int = 30
     confirm_phrases: list[str] = None  # type: ignore[assignment]
     cancel_phrases: list[str] = None  # type: ignore[assignment]
+    exit_phrases: list[str] = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,7 @@ def load_config(path: str) -> AppConfig:
         timeout_s=int(agent_raw.get("timeout_s") or 30),
         confirm_phrases=list(agent_raw.get("confirm_phrases") or ["确认", "执行", "是", "好的", "可以"]),
         cancel_phrases=list(agent_raw.get("cancel_phrases") or ["取消", "不要", "算了", "停止"]),
+        exit_phrases=list(agent_raw.get("exit_phrases") or ["再见", "拜拜"]),
     )
 
     runtime_raw = raw.get("runtime") or {}

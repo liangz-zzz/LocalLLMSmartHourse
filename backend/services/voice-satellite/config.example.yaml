@@ -49,6 +49,7 @@ agent:
   timeout_s: 30
   confirm_phrases: ["确认", "执行", "是", "好的", "可以"]
   cancel_phrases: ["取消", "不要", "算了", "停止"]
+  exit_phrases: ["再见", "拜拜"]
 
 runtime:
   # End the wake session if no new user utterance occurs within this window.
