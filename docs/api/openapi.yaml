@@ -12,6 +12,290 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+  schemas:
+    Device:
+      type: object
+      required:
+        - id
+        - name
+        - placement
+        - protocol
+        - bindings
+        - traits
+        - capabilities
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        placement:
+          $ref: "#/components/schemas/Placement"
+        protocol:
+          type: string
+          enum: [zigbee, wifi, bluetooth_mesh, matter, virtual]
+        bindings:
+          type: object
+        traits:
+          type: object
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        semantics:
+          type: object
+    Placement:
+      type: object
+      properties:
+        room:
+          type: string
+        zone:
+          type: string
+        floor:
+          type: string
+        mount:
+          type: string
+        description:
+          type: string
+    Capability:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        description:
+          type: string
+        parameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityParameter"
+    CapabilityParameter:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [boolean, number, string, enum]
+        minimum:
+          type: number
+        maximum:
+          type: number
+        enum:
+          type: array
+          items:
+            type: string
+        required:
+          type: boolean
+    ActionResult:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+        transport:
+          type: string
+        reason:
+          type: string
+        params:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+    Rule:
+      type: object
+      required: [id, when, then]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        when:
+          type: object
+          properties:
+            deviceId:
+              type: string
+            traitPath:
+              type: string
+            equals:
+              description: Value to compare at traitPath
+              oneOf:
+                - type: string
+                - type: number
+                - type: boolean
+        then:
+          type: object
+          properties:
+            action:
+              type: string
+            params:
+              type: object
+        enabled:
+          type: boolean
+    Point2D:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+    Point3D:
+      type: object
+      required: [x, y, z]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        z:
+          type: number
+    ModelTransform:
+      type: object
+      required: [matrix, translate]
+      properties:
+        matrix:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+          description: Row-major 2x2 matrix mapping 2D to 3D (x/z).
+        translate:
+          type: object
+          required: [x, z]
+          properties:
+            x:
+              type: number
+            z:
+              type: number
+    CalibrationPoints:
+      type: object
+      required: [image, model]
+      properties:
+        image:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/Point2D"
+        model:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/Point3D"
+    FloorplanAsset:
+      type: object
+      required: [assetId, url]
+      properties:
+        assetId:
+          type: string
+        url:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
+    FloorplanRoom:
+      type: object
+      required: [id, name, polygon]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        polygon:
+          type: array
+          minItems: 3
+          items:
+            $ref: "#/components/schemas/Point2D"
+    FloorplanDevice:
+      type: object
+      required: [deviceId, x, y]
+      properties:
+        deviceId:
+          type: string
+        x:
+          type: number
+        y:
+          type: number
+        height:
+          type: number
+        rotation:
+          type: number
+        scale:
+          type: number
+        roomId:
+          type: string
+    Floorplan:
+      type: object
+      required: [id, name, image, rooms, devices]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          $ref: "#/components/schemas/FloorplanAsset"
+        model:
+          $ref: "#/components/schemas/FloorplanAsset"
+        modelTransform:
+          $ref: "#/components/schemas/ModelTransform"
+        calibrationPoints:
+          $ref: "#/components/schemas/CalibrationPoints"
+        rooms:
+          type: array
+          items:
+            $ref: "#/components/schemas/FloorplanRoom"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/FloorplanDevice"
+    FloorplanSummary:
+      type: object
+      required: [id, name, image]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          $ref: "#/components/schemas/FloorplanAsset"
+        model:
+          $ref: "#/components/schemas/FloorplanAsset"
+        roomCount:
+          type: integer
+        deviceCount:
+          type: integer
+    AssetUploadResponse:
+      type: object
+      required: [assetId, url, kind]
+      properties:
+        assetId:
+          type: string
+        url:
+          type: string
+        kind:
+          type: string
+          enum: [floorplan_image, floorplan_model]
+        mime:
+          type: string
+        size:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
 paths:
   /health:
     get:
@@ -245,128 +529,147 @@ paths:
                   status:
                     type: string
                     example: deleted
-  schemas:
-    Device:
-      type: object
-      required:
-        - id
-        - name
-        - placement
-        - protocol
-        - bindings
-        - traits
-        - capabilities
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        placement:
-          $ref: "#/components/schemas/Placement"
-        protocol:
-          type: string
-          enum: [zigbee, wifi, bluetooth_mesh, matter, virtual]
-        bindings:
-          type: object
-        traits:
-          type: object
-        capabilities:
-          type: array
-          items:
-            $ref: "#/components/schemas/Capability"
-        semantics:
-          type: object
-    Placement:
-      type: object
-      properties:
-        room:
-          type: string
-        zone:
-          type: string
-        floor:
-          type: string
-        mount:
-          type: string
-        description:
-          type: string
-    Capability:
-      type: object
-      required: [action]
-      properties:
-        action:
-          type: string
-        description:
-          type: string
-        parameters:
-          type: array
-          items:
-            $ref: "#/components/schemas/CapabilityParameter"
-    CapabilityParameter:
-      type: object
-      required: [name, type]
-      properties:
-        name:
-          type: string
-        type:
-          type: string
-          enum: [boolean, number, string, enum]
-        minimum:
-          type: number
-        maximum:
-          type: number
-        enum:
-          type: array
-          items:
+  /floorplans:
+    get:
+      summary: List floorplans
+      security:
+        - ApiKey: []
+      responses:
+        "200":
+          description: Floorplan list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FloorplanSummary"
+                  count:
+                    type: integer
+    post:
+      summary: Create a floorplan
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Floorplan"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Floorplan"
+        "400":
+          description: Invalid floorplan
+        "409":
+          description: Floorplan already exists
+        "503":
+          description: Floorplan store unavailable
+  /floorplans/{id}:
+    get:
+      summary: Get a floorplan
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
             type: string
-        required:
-          type: boolean
-    ActionResult:
-      type: object
-      properties:
-        id:
-          type: string
-        deviceId:
-          type: string
-        action:
-          type: string
-        status:
-          type: string
-        transport:
-          type: string
-        reason:
-          type: string
-        params:
-          type: object
-        createdAt:
-          type: string
-          format: date-time
-    Rule:
-      type: object
-      required: [id, when, then]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        when:
-          type: object
-          properties:
-            deviceId:
-              type: string
-            traitPath:
-              type: string
-            equals:
-              description: Value to compare at traitPath
-              oneOf:
-                - type: string
-                - type: number
-                - type: boolean
-        then:
-          type: object
-          properties:
-            action:
-              type: string
-            params:
+      responses:
+        "200":
+          description: Floorplan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Floorplan"
+        "404":
+          description: Not found
+    put:
+      summary: Update a floorplan
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Floorplan"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Floorplan"
+        "400":
+          description: Invalid floorplan
+        "404":
+          description: Not found
+    delete:
+      summary: Delete a floorplan
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+        "404":
+          description: Not found
+  /assets:
+    post:
+      summary: Upload an asset
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
               type: object
-        enabled:
-          type: boolean
+              required: [kind, file]
+              properties:
+                kind:
+                  type: string
+                  enum: [floorplan_image, floorplan_model]
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetUploadResponse"
+        "400":
+          description: Invalid asset
+        "413":
+          description: Payload too large
+        "415":
+          description: Unsupported media type
