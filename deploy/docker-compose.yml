@@ -72,6 +72,11 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - PORT=${API_HTTP_PORT:-4000}
       - WS_PORT=${API_WS_PORT:-4001}
+      - CONFIG_DIR=${CONFIG_DIR:-/config}
+      - FLOORPLANS_PATH=${FLOORPLANS_PATH:-}
+      - ASSETS_DIR=${ASSETS_DIR:-}
+      - ASSET_MAX_IMAGE_MB=${ASSET_MAX_IMAGE_MB:-20}
+      - ASSET_MAX_MODEL_MB=${ASSET_MAX_MODEL_MB:-200}
       - MQTT_URL=${MQTT_SERVER:-mqtt://mqtt:1883}
       - POSTGRES_URL=postgres://${POSTGRES_USER:-smarthome}:${POSTGRES_PASSWORD:-smarthome}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-smarthome}
       - REDIS_URL=redis://redis:${REDIS_PORT:-6379}
@@ -81,6 +86,7 @@ services:
     volumes:
       - ../backend/services/api-gateway:/app
       - ../backend/prisma:/workspace/prisma
+      - ./data/config:/config
       - api_gateway_node_modules:/app/node_modules
     ports:
       - "${API_HTTP_PORT:-4000}:4000"

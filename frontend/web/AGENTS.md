@@ -15,11 +15,16 @@
 
 当前占位
 - `pages/index.tsx`：设备卡片 + 快捷开/关 + 参数化动作，意图解析→执行，右侧 llm-bridge 对话演示（echo/可代理上游），通过 Next API 代理调用网关；监听 WebSocket `/ws` 实时更新。
+- `pages/floorplan.tsx`：户型编辑与 3D 预览（2D 房间/设备编辑、三点校准、场景预览）。
 - `pages/api/devices.ts`：代理网关 `http://localhost:4000/devices`（可用 `API_HTTP_BASE` 覆盖）。
 - `pages/api/devices/[id]/actions.ts`：代理设备动作下发。
+- `pages/api/floorplans.ts`/`pages/api/floorplans/[id].ts`：代理户型 CRUD。
+- `pages/api/assets.ts`：代理资产上传；`pages/api/assets/[...path].ts` 代理资产访问。
+- `pages/api/scenes.ts`/`pages/api/scenes/[id]/expanded.ts`：代理场景列表与展开。
 - `pages/api/chat.ts`：代理 llm-bridge `/v1/chat/completions`（支持 `LLM_HTTP_BASE`/`LLM_API_KEY`）。
 - `pages/api/intent.ts`：代理 llm-bridge `/v1/intent`，返回解析后的动作。
 - `lib/api-client.ts`：轻量 API SDK（devices/actions/rules）供前端/集成复用，默认基址 `API_HTTP_BASE`/`NEXT_PUBLIC_API_HTTP_BASE`。
+- `public/vendor/three/*`：3D 预览所需的 three.js 模块（importmap + 动态加载）。
 
 环境变量
 - `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址（默认推断 `ws://<host>:4001/ws`），`NEXT_PUBLIC_WS_PORT` 覆盖端口。

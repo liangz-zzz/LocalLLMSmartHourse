@@ -36,4 +36,5 @@
 ## 约定
 - 协调器使用 `privileged: true` 以兼容更多 USB/串口；如果不需要可移除。
 - Compose 采用开发模式：挂载源码目录，`command: sleep infinity` 供 devcontainer 进入后运行自定义命令。
+- 镜像构建使用 `docker-compose.yml` 中的 `build.context` 作为构建根目录（如 `api-gateway` 指向 `backend/services/api-gateway`）；`deploy/dev-up.sh` 默认带 `--build`，因此会基于该上下文重建镜像。
 - 任何新增服务需更新此文件与根目录 `AGENTS.md`。

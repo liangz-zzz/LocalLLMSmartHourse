@@ -1,0 +1,79 @@
+import { expect, test } from "@playwright/test";
+
+const floorplanList = {
+  items: [
+    {
+      id: "floor1",
+      name: "一层",
+      image: { url: "/assets/floorplans/floor1.png", width: 100, height: 80 }
+    }
+  ],
+  count: 1
+};
+
+const floorplanDetail = {
+  id: "floor1",
+  name: "一层",
+  image: { url: "/assets/floorplans/floor1.png", width: 100, height: 80 },
+  rooms: [],
+  devices: [{ deviceId: "light1", x: 0.2, y: 0.2, height: 1, rotation: 0, scale: 1 }]
+};
+
+const devicesPayload = {
+  items: [
+    {
+      id: "light1",
+      name: "客厅灯",
+      placement: { room: "living_room" },
+      traits: { switch: { state: "off" } },
+      capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+    }
+  ]
+};
+
+const scenesPayload = {
+  items: [{ id: "scene1", name: "回家", description: "回家场景" }],
+  count: 1
+};
+
+const expandedScene = {
+  id: "scene1",
+  steps: [{ type: "device", deviceId: "light1", action: "turn_on", params: {} }],
+  count: 1
+};
+
+const tinyPngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAJk3nSAAAAAASUVORK5CYII=";
+
+test.describe("floorplan editor", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/floorplans", (route) => route.fulfill({ json: floorplanList }));
+    await page.route("**/api/floorplans/floor1", (route) => route.fulfill({ json: floorplanDetail }));
+    await page.route("**/api/devices", (route) => route.fulfill({ json: devicesPayload }));
+    await page.route("**/api/scenes", (route) => route.fulfill({ json: scenesPayload }));
+    await page.route("**/api/scenes/scene1/expanded", (route) => route.fulfill({ json: expandedScene }));
+    await page.route("**/api/assets/**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+        body: Buffer.from(tinyPngBase64, "base64")
+      })
+    );
+  });
+
+  test("loads floorplan and toggles modes", async ({ page }) => {
+    await page.goto("/floorplan");
+    await expect(page.getByTestId("floorplan-page")).toBeVisible();
+    await expect(page.getByText("一层")).toBeVisible();
+
+    await page.getByTestId("mode-devices").click();
+    await expect(page.getByText("选择设备")).toBeVisible();
+
+    await page.getByTestId("mode-rooms").click();
+    await expect(page.getByText("新建房间")).toBeVisible();
+
+    await page.getByTestId("mode-view").click();
+    await page.getByTestId("scene-select").selectOption("scene1");
+    await expect(page.getByText("开启")).toBeVisible();
+  });
+});

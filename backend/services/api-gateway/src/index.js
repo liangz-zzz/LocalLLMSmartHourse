@@ -6,6 +6,7 @@ import { setupWs } from "./ws.js";
 import { ActionResultStore } from "./action-store.js";
 import { RuleStore } from "./rule-store.js";
 import { SceneStore } from "./scene-store.js";
+import { FloorplanStore } from "./floorplan-store.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -50,6 +51,7 @@ async function main() {
   let actionStore;
   let ruleStore;
   let sceneStore;
+  let floorplanStore;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
@@ -57,6 +59,7 @@ async function main() {
     ruleStore = new RuleStore({ databaseUrl: config.databaseUrl });
   }
   sceneStore = new SceneStore({ scenesPath: config.scenesPath, logger });
+  floorplanStore = new FloorplanStore({ floorplansPath: config.floorplansPath, logger });
 
   if (config.mode === "redis") {
     bus = new RedisBus({
@@ -78,7 +81,7 @@ async function main() {
     }
   }
 
-  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore });
+  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger, apiKeys: config.apiKeys });

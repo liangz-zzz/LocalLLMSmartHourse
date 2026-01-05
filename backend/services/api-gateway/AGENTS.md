@@ -15,7 +15,7 @@
 - 动作参数校验：capability.parameters 支持 `required`/`enum`/`minimum`/`maximum`，REST/WS 会按定义校验并返回 reason。
 - 鉴权：可设置 `API_KEYS`（逗号分隔）启用 API Key 校验，HTTP 使用 `X-API-Key` 或 Bearer，WS 使用 `?api_key=` 或 `Sec-WebSocket-Protocol` 携带；也可配置 `JWT_SECRET`（可选 `JWT_AUD`/`JWT_ISS`）启用 JWT 校验（互为或条件）。
 - 场景文件：通过 `SCENES_PATH`（或 `CONFIG_DIR/scenes.json`）配置；与设备配置文件同目录便于管理。
-- 户型文件：通过 `FLOORPLANS_PATH`（或 `CONFIG_DIR/floorplans.json`）配置；资产目录使用 `ASSETS_DIR`（默认 `${CONFIG_DIR}/assets`）。
+- 户型文件：通过 `FLOORPLANS_PATH`（或 `CONFIG_DIR/floorplans.json`）配置；资产目录使用 `ASSETS_DIR`（默认 `${CONFIG_DIR}/assets`），上传限制由 `ASSET_MAX_IMAGE_MB`/`ASSET_MAX_MODEL_MB` 控制。
 
 运行/模式
 - 默认 `MODE=redis`（compose 场景下直接读适配器写入的 `device:*`）；如无 Redis 可切换 `MODE=mock` 使用 `src/fixtures/living_room_plug.json`。`MODE=db` 可直接从 Postgres 读取最新状态。
