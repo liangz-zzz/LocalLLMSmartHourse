@@ -481,7 +481,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 match = normalize_for_match(text_raw)
                 confirm = match in confirm_set
                 cancel = match in cancel_set
-                exit_requested = match in exit_set
+                exit_requested = match_short_phrase(match, exit_set, max_extra_chars=4)
                 if exit_requested:
                     logger.info({"msg": "session.exit", "session_id": session_id, "text": text_raw})
                     try:
@@ -527,6 +527,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 _re_space = re.compile(r"\\s+")
 _re_trim_punct = re.compile(r"^[\\s\\u3000\\.,!?，。！？、；;：:]+|[\\s\\u3000\\.,!?，。！？、；;：:]+$")
+_re_punct_any = re.compile(r"[\\u3000\\.,!?，。！？、；;：:]+")
 
 
 def clean_user_text(text: str) -> str:
@@ -540,6 +541,19 @@ def clean_user_text(text: str) -> str:
 def normalize_for_match(text: str) -> str:
     # For comparing short control utterances like "确认/取消".
     t = (text or "").strip()
-    t = _re_trim_punct.sub("", t)
+    t = _re_punct_any.sub("", t)
     t = _re_space.sub("", t)
     return t.lower()
+
+
+def match_short_phrase(text_normalized: str, phrases_normalized: set[str], *, max_extra_chars: int = 4) -> bool:
+    if not text_normalized:
+        return False
+    if text_normalized in phrases_normalized:
+        return True
+    for p in phrases_normalized:
+        if not p:
+            continue
+        if p in text_normalized and len(text_normalized) <= len(p) + max(0, int(max_extra_chars)):
+            return True
+    return False

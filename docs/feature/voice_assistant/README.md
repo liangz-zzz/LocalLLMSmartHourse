@@ -4,7 +4,7 @@
 
 ## 组件与职责
 
-- 唤醒词：Vosk（关键词/短语 grammar），唤醒词可配置，默认 `老管家`
+- 唤醒词：Vosk（关键词/短语 grammar），唤醒词可配置，默认 `你好，米奇`
 - 端点检测：silero-vad（更准的 VAD，用于一句话的开始/结束）
 - STT：Whisper（本地模型文件）
 - TTS：Piper（本地模型文件 + 本地二进制）
@@ -20,7 +20,7 @@ Mic
   -> POST smart-house-agent /v1/agent/turn
   -> speech text (message + deterministic action summary)
   -> Piper TTS -> Speaker
-  -> （用户说“再见/拜拜”会结束会话，回到唤醒词监听）
+  -> （用户说“再见/拜拜/退下”等退出词会结束会话，回到唤醒词监听）
 ```
 
 ## 与 Agent 的交互约定

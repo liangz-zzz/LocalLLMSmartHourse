@@ -10,7 +10,7 @@
 约定
 - 运行时不访问任何云服务；仅访问本机/局域网 HTTP（默认 `localhost`）。
 - 不增加二次 LLM 调用：语音播报的“执行内容”来自 agent 的 `actions/result` 结构化结果 + 本地设备名映射（`api-gateway /devices`）。
-- 唤醒词可配置，默认 `"老管家"`。
+- 唤醒词可配置，默认 `"你好，米奇"`。
 
 运行
 - 配置文件：`config.yaml`（参考 `config.example.yaml`），启动：

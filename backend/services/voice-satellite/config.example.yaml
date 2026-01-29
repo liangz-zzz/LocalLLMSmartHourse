@@ -15,7 +15,7 @@ audio:
     volume: 0.2
 
 wake:
-  phrases: ["老管家"]
+  phrases: ["你好，米奇"]
   vosk:
     model_path: "/ABS/PATH/TO/vosk-model-small-cn-0.22"
   cooldown_ms: 350
@@ -49,7 +49,7 @@ agent:
   timeout_s: 30
   confirm_phrases: ["确认", "执行", "是", "好的", "可以"]
   cancel_phrases: ["取消", "不要", "算了", "停止"]
-  exit_phrases: ["再见", "拜拜"]
+  exit_phrases: ["再见", "拜拜", "退下", "结束对话", "退出对话"]
 
 runtime:
   # End the wake session if no new user utterance occurs within this window.

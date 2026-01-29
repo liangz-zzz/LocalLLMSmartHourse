@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import List
 
@@ -11,8 +13,26 @@ from vosk import KaldiRecognizer, Model
 from .log import Logger
 
 
+_re_grammar_split = re.compile(r"[\s\u3000\.,!?，。！？、；;：:]+")
+
+
 def _norm(s: str) -> str:
-    return "".join(str(s or "").strip().split())
+    s = str(s or "").strip()
+    out: list[str] = []
+    for ch in s:
+        if ch.isspace():
+            continue
+        if unicodedata.category(ch).startswith("P"):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def _to_grammar_phrase(s: str) -> str:
+    # Vosk grammar phrases are space-delimited "words". For Chinese, punctuation like "，"
+    # should become a separator so "你好，米奇" can match "你好 米奇".
+    parts = [p for p in _re_grammar_split.split(str(s or "").strip()) if p]
+    return " ".join(parts)
 
 
 @dataclass
@@ -26,8 +46,22 @@ class VoskWakeWord:
         if not os.path.isdir(self.model_path):
             raise SystemExit(f"Vosk model_path not found (dir expected): {self.model_path}")
         self._model = Model(self.model_path)
-        self._grammar = json.dumps([p for p in self.phrases if str(p).strip()], ensure_ascii=False)
-        self._phrases = [_norm(p) for p in self.phrases if _norm(p)]
+        grammar_phrases: list[str] = []
+        seen_grammar: set[str] = set()
+        for p in self.phrases:
+            g = _to_grammar_phrase(p)
+            if g and g not in seen_grammar:
+                grammar_phrases.append(g)
+                seen_grammar.add(g)
+        self._grammar = json.dumps(grammar_phrases, ensure_ascii=False)
+
+        seen_phrases: set[str] = set()
+        self._phrases = []
+        for p in self.phrases:
+            n = _norm(p)
+            if n and n not in seen_phrases:
+                self._phrases.append(n)
+                seen_phrases.add(n)
         self._rec = KaldiRecognizer(self._model, float(self.sample_rate), self._grammar)
         self._rec.SetWords(False)
 
@@ -60,4 +94,3 @@ class VoskWakeWord:
                 self.logger and self.logger.debug({"msg": "wake.matched", "text": text, "phrase": p})
                 return True
         return False
-

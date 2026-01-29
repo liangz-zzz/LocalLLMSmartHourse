@@ -119,7 +119,7 @@ def load_config(path: str) -> AppConfig:
     )
 
     wake_raw = raw.get("wake") or {}
-    phrases = list(wake_raw.get("phrases") or ["老管家"])
+    phrases = list(wake_raw.get("phrases") or ["你好，米奇"])
     vosk_raw = wake_raw.get("vosk") or {}
     wake = WakeConfig(
         phrases=[str(p) for p in phrases if str(p).strip()],
@@ -162,7 +162,7 @@ def load_config(path: str) -> AppConfig:
         timeout_s=int(agent_raw.get("timeout_s") or 30),
         confirm_phrases=list(agent_raw.get("confirm_phrases") or ["确认", "执行", "是", "好的", "可以"]),
         cancel_phrases=list(agent_raw.get("cancel_phrases") or ["取消", "不要", "算了", "停止"]),
-        exit_phrases=list(agent_raw.get("exit_phrases") or ["再见", "拜拜"]),
+        exit_phrases=list(agent_raw.get("exit_phrases") or ["再见", "拜拜", "退下", "结束对话", "退出对话"]),
     )
 
     runtime_raw = raw.get("runtime") or {}
