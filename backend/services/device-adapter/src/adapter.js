@@ -4,9 +4,24 @@ import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
 import { buildActionResult } from "./action-results.js";
 import { applyDeviceOverrides, loadDeviceOverrides } from "./device-config.js";
+import { connectHaStateSubscription, fetchHaStates, normalizeHomeAssistantEntity, shouldIncludeHaEntity } from "./ha.js";
 
 export class DeviceAdapter {
-  constructor({ mode, mqttUrl, store, mockDataDir, deviceConfigPath, logger, haBaseUrl, haToken, actionTransport }) {
+  constructor({
+    mode,
+    mqttUrl,
+    store,
+    mockDataDir,
+    deviceConfigPath,
+    logger,
+    haBaseUrl,
+    haToken,
+    actionTransport,
+    haIncludeDomains,
+    haExcludeDomains,
+    haWsEnabled,
+    haPollIntervalMs
+  }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
     this.store = store;
@@ -17,6 +32,15 @@ export class DeviceAdapter {
     this.haBaseUrl = haBaseUrl;
     this.haToken = haToken;
     this.actionTransport = actionTransport || "auto";
+    this.haIncludeDomains = haIncludeDomains || ["switch", "light", "cover", "climate"];
+    this.haExcludeDomains = haExcludeDomains || [];
+    this.haWsEnabled = haWsEnabled !== false;
+    this.haPollIntervalMs = haPollIntervalMs || 0;
+    this.haPollTimer = null;
+    this.haWs = null;
+    this.haWsStop = null;
+    this.haStopping = false;
+    this.haReconnectAttempt = 0;
     this.deviceOverrides = new Map();
   }
 
@@ -26,11 +50,31 @@ export class DeviceAdapter {
       this.logger.info("Starting adapter in offline mode (mock data)");
       return this.loadMockData();
     }
-    this.logger.info("Starting adapter in mqtt mode", this.mqttUrl);
-    return this.startMqtt();
+    if (this.mode === "mqtt") {
+      this.logger.info("Starting adapter in mqtt mode", this.mqttUrl);
+      return this.startMqtt();
+    }
+    if (this.mode === "ha") {
+      this.logger.info("Starting adapter in Home Assistant mode", this.haBaseUrl);
+      return this.startHa();
+    }
+    throw new Error(`Unsupported mode: ${this.mode}`);
   }
 
   async stop() {
+    this.haStopping = true;
+    if (this.haPollTimer) {
+      clearInterval(this.haPollTimer);
+      this.haPollTimer = null;
+    }
+    if (this.haWsStop) {
+      try {
+        await this.haWsStop();
+      } finally {
+        this.haWsStop = null;
+        this.haWs = null;
+      }
+    }
     if (this.client) {
       await new Promise((resolve) => this.client.end(false, {}, resolve));
       this.client = null;
@@ -105,6 +149,95 @@ export class DeviceAdapter {
     const normalized = applyDeviceOverrides({ base, existing: null, override: this.deviceOverrides.get(base.id) });
     await this.store.upsert(normalized);
     this.logger.info("Loaded mock device", normalized.id);
+  }
+
+  async startHa() {
+    if (!this.haToken) {
+      throw new Error("HA_TOKEN is required for MODE=ha");
+    }
+
+    await this.syncHaOnce();
+
+    if (this.haWsEnabled) {
+      await this.connectHaWsWithRetry();
+    }
+
+    if (this.haPollIntervalMs > 0) {
+      this.haPollTimer = setInterval(() => {
+        this.syncHaOnce().catch((err) => this.logger.warn("HA poll failed", err?.message || String(err)));
+      }, this.haPollIntervalMs);
+    }
+  }
+
+  async syncHaOnce() {
+    const states = await fetchHaStates({ baseUrl: this.haBaseUrl, token: this.haToken });
+    const list = Array.isArray(states) ? states : [];
+    this.logger.info("Received HA states", list.length);
+    for (const st of list) {
+      const entityId = st?.entity_id;
+      if (!shouldIncludeHaEntity({ entityId, includeDomains: this.haIncludeDomains, excludeDomains: this.haExcludeDomains })) continue;
+      await this.upsertHaEntity(st);
+    }
+  }
+
+  async upsertHaEntity(state) {
+    const entityId = state?.entity_id;
+    if (!entityId) return;
+    const existing = await this.store.get(entityId);
+    const override = this.deviceOverrides.get(entityId);
+    const base = normalizeHomeAssistantEntity({
+      state,
+      placement: override?.placement || existing?.placement
+    });
+    const normalized = applyDeviceOverrides({ base, existing, override });
+    await this.store.upsert(normalized);
+  }
+
+  async connectHaWsWithRetry() {
+    while (!this.haStopping) {
+      try {
+        await this.connectHaWs();
+        this.haReconnectAttempt = 0;
+        return;
+      } catch (err) {
+        this.haReconnectAttempt += 1;
+        const delayMs = Math.min(30_000, 500 * Math.pow(2, Math.min(this.haReconnectAttempt, 6)));
+        this.logger.warn("HA websocket connect failed, will retry", { attempt: this.haReconnectAttempt, delayMs, error: err?.message || String(err) });
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+
+  async connectHaWs() {
+    if (this.haWsStop) {
+      await this.haWsStop();
+      this.haWsStop = null;
+      this.haWs = null;
+    }
+    this.haStopping = false;
+
+    const { ws, stop } = await connectHaStateSubscription({
+      baseUrl: this.haBaseUrl,
+      token: this.haToken,
+      logger: this.logger,
+      onStateChanged: async (newState) => {
+        try {
+          if (!newState?.entity_id) return;
+          if (!shouldIncludeHaEntity({ entityId: newState.entity_id, includeDomains: this.haIncludeDomains, excludeDomains: this.haExcludeDomains })) return;
+          await this.upsertHaEntity(newState);
+        } catch (err) {
+          this.logger.warn("Failed to handle HA state_changed", err?.message || String(err));
+        }
+      },
+      onDisconnected: async () => {
+        if (this.haStopping) return;
+        this.logger.warn("HA websocket disconnected, reconnecting");
+        await this.connectHaWsWithRetry();
+      }
+    });
+
+    this.haWs = ws;
+    this.haWsStop = stop;
   }
 
   startMqtt() {

@@ -29,7 +29,11 @@ async function main() {
     logger,
     haBaseUrl: config.haBaseUrl,
     haToken: config.haToken,
-    actionTransport: config.actionTransport
+    actionTransport: config.actionTransport,
+    haIncludeDomains: config.haIncludeDomains,
+    haExcludeDomains: config.haExcludeDomains,
+    haWsEnabled: config.haWsEnabled,
+    haPollIntervalMs: config.haPollIntervalMs
   });
 
   if (config.dbEnabled) {
@@ -58,8 +62,8 @@ async function main() {
   await adapter.start();
   logger.info(`Adapter ready (mode=${config.mode})`);
 
-  // keep process alive if mqtt mode
-  if (config.mode === "mqtt") {
+  // keep process alive for long-running modes
+  if (config.mode === "mqtt" || config.mode === "ha") {
     const shutdown = async () => {
       logger.info("Shutting down adapter");
       await adapter.stop();

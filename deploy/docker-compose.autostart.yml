@@ -25,8 +25,14 @@ services:
           mkdir -p /app/node_modules
           chown -R node:node /app/node_modules
           su node -c "cd /app && npm ci"
-          until (echo > /dev/tcp/mqtt/1883) >/dev/null 2>&1; do echo "[device-adapter] waiting for mqtt:1883"; sleep 1; done
-          exec su node -c "cd /app && MODE=mqtt npm run dev"
+          mode="${MODE:-mqtt}"
+          if [ "${mode}" = "mqtt" ]; then
+            until (echo > /dev/tcp/mqtt/1883) >/dev/null 2>&1; do echo "[device-adapter] waiting for mqtt:1883"; sleep 1; done
+          fi
+          if [ "${mode}" = "ha" ]; then
+            until (echo > /dev/tcp/homeassistant/8123) >/dev/null 2>&1; do echo "[device-adapter] waiting for homeassistant:8123"; sleep 1; done
+          fi
+          exec su node -c "cd /app && npm run dev"
 
   llm-bridge:
     user: "0:0"

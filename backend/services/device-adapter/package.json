@@ -12,7 +12,8 @@
   "dependencies": {
     "ioredis": "^5.4.2",
     "mqtt": "^5.10.1",
-    "@prisma/client": "^5.21.0"
+    "@prisma/client": "^5.21.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "prisma": "^5.21.0",
