@@ -133,10 +133,14 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - MQTT_URL=${MQTT_SERVER:-mqtt://mqtt:1883}
+      - CONFIG_DIR=${CONFIG_DIR:-/config}
+      - API_GATEWAY_BASE=${API_GATEWAY_BASE:-http://api-gateway:4000}
+      - API_GATEWAY_API_KEY=${API_GATEWAY_API_KEY:-}
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     volumes:
       - ../backend/services/rules-engine:/app
       - ../backend/prisma:/workspace/prisma
+      - ./data/config:/config
       - rules_engine_node_modules:/app/node_modules
     command: ["sleep", "infinity"]
 

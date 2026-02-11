@@ -6,6 +6,7 @@
 - `device-model.md`: 统一设备模型、Schema、样例与位置/语义字段说明。
 - `api/openapi.yaml`: API Gateway REST 接口定义（设备、动作、规则、健康）。
 - `api/README.md`: API/WS/LLM 入口概览与地址。
+- `feature/automation/README.md`: 自动化/规则（用户可配置联动：trigger/when/forMs/then，复用 Scene）。
 - `feature/floorplan_editor/README.md`: 户型编辑与 3D 预览（2D 编辑、三点校准、API 设计）。
 - `feature/smart_house_agent/README.md`: 智能家居 Agent（MCP 工具调用）需求与设计文档索引。
 - `feature/scene_integration/README.md`: 场景集成（JSON 场景配置、API/MCP/Agent 执行链路）文档索引。

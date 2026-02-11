@@ -1,0 +1,35 @@
+[
+  {
+    "id": "example_lr_to_br",
+    "name": "示例：客厅离开→卧室进入→久未返回",
+    "enabled": false,
+    "trigger": {
+      "type": "device",
+      "deviceId": "binary_sensor.bedroom_motion",
+      "traitPath": "traits.raw.state",
+      "operator": "eq",
+      "value": "on",
+      "changed": true
+    },
+    "when": {
+      "all": [
+        {
+          "deviceId": "binary_sensor.living_room_motion",
+          "traitPath": "traits.raw.state",
+          "operator": "eq",
+          "value": "off"
+        },
+        {
+          "deviceId": "binary_sensor.bedroom_motion",
+          "traitPath": "traits.raw.state",
+          "operator": "eq",
+          "value": "on"
+        }
+      ]
+    },
+    "forMs": 600000,
+    "cooldownMs": 3600000,
+    "then": [{ "type": "scene", "sceneId": "lr_to_br_long_stay" }]
+  }
+]
+

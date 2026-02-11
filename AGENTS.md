@@ -48,5 +48,6 @@
 - 重要设计文档索引：
   - `docs/feature/smart_house_agent/README.md`（Smart House Agent：MCP 工具调用 + 会话/安全/规划执行）
   - `docs/feature/scene_integration/README.md`（场景集成：JSON 场景配置 + API/MCP/Agent 执行链路）
+  - `docs/feature/automation/README.md`（自动化/规则：用户可配置联动，复用 Scene）
   - `docs/feature/floorplan_editor/README.md`（户型编辑与 3D 预览：2D 编辑、三点校准、API 设计）
 - Dev 容器：见 `.devcontainer/AGENTS.md`，默认附着 `api-gateway` 服务，命令保持 `sleep infinity` 供开发者启动自定义任务。 
