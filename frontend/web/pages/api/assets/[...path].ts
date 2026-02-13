@@ -15,7 +15,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const suffix = Array.isArray(path) ? path.map(encodeURIComponent).join("/") : encodeURIComponent(path || "");
 
   try {
-    const resp = await fetch(`${base}/assets/${suffix}`);
+    const apiKey = process.env.API_GATEWAY_API_KEY || "";
+    const resp = await fetch(`${base}/assets/${suffix}`, {
+      headers: {
+        ...(apiKey ? { "X-API-Key": apiKey } : {})
+      }
+    });
     res.status(resp.status);
     const contentType = resp.headers.get("content-type");
     if (contentType) res.setHeader("content-type", contentType);

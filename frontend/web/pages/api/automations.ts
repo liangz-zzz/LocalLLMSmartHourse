@@ -6,7 +6,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "GET") {
     try {
-      const resp = await fetch(`${base}/floorplans`, {
+      const resp = await fetch(`${base}/automations`, {
         headers: {
           ...(apiKey ? { "X-API-Key": apiKey } : {})
         }
@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "POST") {
     try {
-      const resp = await fetch(`${base}/floorplans`, {
+      const resp = await fetch(`${base}/automations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -38,3 +38,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader("Allow", "GET, POST");
   return res.status(405).json({ error: "method_not_allowed" });
 }
+

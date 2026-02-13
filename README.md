@@ -15,6 +15,10 @@
 4) 打开页面：
    - `http://localhost:3000/`（设备面板）
    - `http://localhost:3000/floorplan`（户型编辑与 3D 预览）
+   - `http://localhost:3000/scenes`（场景编辑）
+   - `http://localhost:3000/automations`（联动/自动化编辑）
+
+> 如果你在 API Gateway 配置了 `API_KEYS`，需要在启动前端时设置 `API_GATEWAY_API_KEY`（用于前端 Next API 代理到网关）。
 
 ## 数据与资产
 - 户型与资产默认保存在 `deploy/data/config/`（由 `CONFIG_DIR=/config` 映射）。

@@ -10,6 +10,7 @@ export function loadConfig() {
     mqttUrl: process.env.MQTT_URL || "mqtt://localhost:1883",
     mockDataDir: new URL("../mock-data/zigbee2mqtt", import.meta.url),
     deviceConfigPath: process.env.DEVICE_CONFIG_PATH || process.env.DEVICES_CONFIG_PATH || defaultDeviceConfigPath,
+    deviceOverridesPollMs: parsePositiveInt(process.env.DEVICE_OVERRIDES_POLL_MS, 2000),
     logLevel: process.env.LOG_LEVEL || "info",
     storage, // memory | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",

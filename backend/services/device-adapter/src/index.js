@@ -33,7 +33,8 @@ async function main() {
     haIncludeDomains: config.haIncludeDomains,
     haExcludeDomains: config.haExcludeDomains,
     haWsEnabled: config.haWsEnabled,
-    haPollIntervalMs: config.haPollIntervalMs
+    haPollIntervalMs: config.haPollIntervalMs,
+    deviceOverridesPollMs: config.deviceOverridesPollMs
   });
 
   if (config.dbEnabled) {

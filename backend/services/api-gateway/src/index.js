@@ -7,6 +7,8 @@ import { ActionResultStore } from "./action-store.js";
 import { RuleStore } from "./rule-store.js";
 import { SceneStore } from "./scene-store.js";
 import { FloorplanStore } from "./floorplan-store.js";
+import { AutomationStore } from "./automation-store.js";
+import { DeviceOverridesStore } from "./device-overrides-store.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -52,6 +54,8 @@ async function main() {
   let ruleStore;
   let sceneStore;
   let floorplanStore;
+  let automationStore;
+  let deviceOverridesStore;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
@@ -60,6 +64,8 @@ async function main() {
   }
   sceneStore = new SceneStore({ scenesPath: config.scenesPath, logger });
   floorplanStore = new FloorplanStore({ floorplansPath: config.floorplansPath, logger });
+  automationStore = new AutomationStore({ automationsPath: config.automationsPath, logger });
+  deviceOverridesStore = new DeviceOverridesStore({ deviceOverridesPath: config.deviceOverridesPath, logger });
 
   if (config.mode === "redis") {
     bus = new RedisBus({
@@ -81,7 +87,7 @@ async function main() {
     }
   }
 
-  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore });
+  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore, automationStore, deviceOverridesStore });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger, apiKeys: config.apiKeys });

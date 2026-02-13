@@ -52,6 +52,18 @@ test.describe("floorplan editor", () => {
     await page.route("**/api/devices", (route) => route.fulfill({ json: devicesPayload }));
     await page.route("**/api/scenes", (route) => route.fulfill({ json: scenesPayload }));
     await page.route("**/api/scenes/scene1/expanded", (route) => route.fulfill({ json: expandedScene }));
+    await page.route("**/api/device-overrides/light1", (route) => {
+      if (route.request().method() === "GET") {
+        route.fulfill({ status: 404, json: { error: "device_override_not_found" } });
+        return;
+      }
+      if (route.request().method() === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        route.fulfill({ status: 200, json: body });
+        return;
+      }
+      route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
+    });
     await page.route("**/api/assets/**", (route) =>
       route.fulfill({
         status: 200,
@@ -75,5 +87,16 @@ test.describe("floorplan editor", () => {
     await page.getByTestId("mode-view").click();
     await page.getByTestId("scene-select").selectOption("scene1");
     await expect(page.getByText("开启")).toBeVisible();
+  });
+
+  test("can save device override from floorplan device panel", async ({ page }) => {
+    await page.goto("/floorplan");
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("floorplan-device-light1").click();
+
+    await expect(page.getByTestId("device-override-save")).toBeVisible();
+    await page.getByPlaceholder("客厅灯").fill("客厅灯(测试)");
+    await page.getByTestId("device-override-save").click();
+    await expect(page.getByText("已保存（约 1~2 秒后生效）")).toBeVisible();
   });
 });

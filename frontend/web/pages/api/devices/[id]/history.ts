@@ -6,10 +6,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { limit, offset } = req.query;
   try {
     const base = process.env.API_HTTP_BASE || "http://localhost:4000";
+    const apiKey = process.env.API_GATEWAY_API_KEY || "";
     const params = new URLSearchParams();
     if (limit) params.set("limit", String(limit));
     if (offset) params.set("offset", String(offset));
-    const resp = await fetch(`${base}/devices/${encodeURIComponent(id)}/actions?${params.toString()}`);
+    const resp = await fetch(`${base}/devices/${encodeURIComponent(id)}/actions?${params.toString()}`, {
+      headers: {
+        ...(apiKey ? { "X-API-Key": apiKey } : {})
+      }
+    });
     const data = await resp.json();
     res.status(resp.status).json(data);
   } catch (err) {

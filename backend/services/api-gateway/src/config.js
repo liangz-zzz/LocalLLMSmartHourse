@@ -6,7 +6,11 @@ export function loadConfig() {
   const scenesPath = String(process.env.SCENES_PATH || "").trim() || (configDir ? path.join(configDir, "scenes.json") : "./scenes.json");
   const floorplansPath =
     String(process.env.FLOORPLANS_PATH || "").trim() || (configDir ? path.join(configDir, "floorplans.json") : "./floorplans.json");
+  const automationsPath =
+    String(process.env.AUTOMATIONS_PATH || "").trim() || (configDir ? path.join(configDir, "automations.json") : "./automations.json");
   const assetsDir = String(process.env.ASSETS_DIR || "").trim() || (configDir ? path.join(configDir, "assets") : "./assets");
+  const deviceOverridesPath =
+    String(process.env.DEVICE_CONFIG_PATH || "").trim() || (configDir ? path.join(configDir, "devices.config.json") : "./devices.config.json");
   const assetMaxImageMb = parsePositiveNumber(process.env.ASSET_MAX_IMAGE_MB, 20);
   const assetMaxModelMb = parsePositiveNumber(process.env.ASSET_MAX_MODEL_MB, 200);
   return {
@@ -23,7 +27,9 @@ export function loadConfig() {
     configDir: configDir || undefined,
     scenesPath,
     floorplansPath,
+    automationsPath,
     assetsDir,
+    deviceOverridesPath,
     assetMaxImageMb,
     assetMaxModelMb,
     apiKeys: (process.env.API_KEYS || process.env.API_KEY || "")

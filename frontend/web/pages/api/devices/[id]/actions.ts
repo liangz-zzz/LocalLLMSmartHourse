@@ -7,13 +7,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const base = process.env.API_HTTP_BASE || "http://localhost:4000";
+  const apiKey = process.env.API_GATEWAY_API_KEY || "";
   const { id } = req.query;
   if (!id || Array.isArray(id)) return res.status(400).json({ error: "bad_request" });
 
   try {
     const resp = await fetch(`${base}/devices/${encodeURIComponent(id)}/actions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { "X-API-Key": apiKey } : {})
+      },
       body: JSON.stringify(req.body || {})
     });
     const data = await resp.json();

@@ -20,7 +20,8 @@ export class DeviceAdapter {
     haIncludeDomains,
     haExcludeDomains,
     haWsEnabled,
-    haPollIntervalMs
+    haPollIntervalMs,
+    deviceOverridesPollMs
   }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
@@ -42,10 +43,18 @@ export class DeviceAdapter {
     this.haStopping = false;
     this.haReconnectAttempt = 0;
     this.deviceOverrides = new Map();
+    this.deviceOverridesPollMs = Number.isFinite(deviceOverridesPollMs) ? Math.floor(deviceOverridesPollMs) : 2000;
+    this.deviceOverridesPollTimer = null;
+    this.deviceOverridesLastMtimeMs = null;
+    this.deviceOverridesRefreshing = false;
+    this.deviceOverridesResolvedPath = "";
   }
 
   async start() {
+    this.deviceOverridesResolvedPath = resolveFsPath(this.deviceConfigPath);
+    this.deviceOverridesLastMtimeMs = await getMtimeMs(this.deviceOverridesResolvedPath);
     this.deviceOverrides = await loadDeviceOverrides(this.deviceConfigPath, this.logger);
+    this.startDeviceOverridesPolling();
     if (this.mode === "offline") {
       this.logger.info("Starting adapter in offline mode (mock data)");
       return this.loadMockData();
@@ -63,6 +72,10 @@ export class DeviceAdapter {
 
   async stop() {
     this.haStopping = true;
+    if (this.deviceOverridesPollTimer) {
+      clearInterval(this.deviceOverridesPollTimer);
+      this.deviceOverridesPollTimer = null;
+    }
     if (this.haPollTimer) {
       clearInterval(this.haPollTimer);
       this.haPollTimer = null;
@@ -78,6 +91,36 @@ export class DeviceAdapter {
     if (this.client) {
       await new Promise((resolve) => this.client.end(false, {}, resolve));
       this.client = null;
+    }
+  }
+
+  startDeviceOverridesPolling() {
+    if (!this.deviceOverridesPollMs || this.deviceOverridesPollMs <= 0) return;
+    if (this.deviceOverridesPollTimer) return;
+    this.deviceOverridesPollTimer = setInterval(() => {
+      this.refreshDeviceOverridesIfChanged().catch((err) => {
+        this.logger?.warn?.("device overrides refresh failed", err?.message || String(err));
+      });
+    }, this.deviceOverridesPollMs);
+  }
+
+  async refreshDeviceOverridesIfChanged() {
+    if (!this.deviceOverridesResolvedPath) return;
+    if (this.deviceOverridesRefreshing) return;
+    this.deviceOverridesRefreshing = true;
+    try {
+      const mtimeMs = await getMtimeMs(this.deviceOverridesResolvedPath);
+      if (mtimeMs === this.deviceOverridesLastMtimeMs) return;
+      this.deviceOverridesLastMtimeMs = mtimeMs;
+      this.deviceOverrides = await loadDeviceOverrides(this.deviceConfigPath, this.logger);
+      const devices = await this.store.list();
+      for (const device of devices) {
+        const override = this.deviceOverrides.get(device.id);
+        const normalized = applyDeviceOverrides({ base: device, existing: null, override });
+        await this.store.upsert(normalized);
+      }
+    } finally {
+      this.deviceOverridesRefreshing = false;
     }
   }
 
@@ -339,6 +382,23 @@ function buildZ2MSetPayload(action) {
     return { state: "ON", fan_mode: mode, mode };
   }
   return { state: "TOGGLE" };
+}
+
+function resolveFsPath(p) {
+  const raw = String(p || "").trim();
+  if (!raw) return "";
+  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+}
+
+async function getMtimeMs(resolvedPath) {
+  if (!resolvedPath) return null;
+  try {
+    const st = await fs.stat(resolvedPath);
+    return st.mtimeMs;
+  } catch (err) {
+    if (err?.code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 async function callHaService({ baseUrl, token, entityId, action, params, logger }) {

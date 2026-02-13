@@ -1,5 +1,6 @@
 import Head from "next/head";
 import Script from "next/script";
+import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 type Point2D = { x: number; y: number };
@@ -486,6 +487,7 @@ function ThreePreview({
 }
 
 export default function FloorplanPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("view");
   const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -504,6 +506,10 @@ export default function FloorplanPage() {
   const [placingDeviceId, setPlacingDeviceId] = useState<string | null>(null);
   const [calibration, setCalibration] = useState<CalibrationPoints>({ image: [], model: [] });
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+
+  const [deviceOverrideDraft, setDeviceOverrideDraft] = useState<any | null>(null);
+  const [deviceOverrideStatus, setDeviceOverrideStatus] = useState<string>("");
+  const [deviceOverrideSaving, setDeviceOverrideSaving] = useState<boolean>(false);
 
   const [newPlanName, setNewPlanName] = useState<string>("");
   const [newPlanId, setNewPlanId] = useState<string>("");
@@ -664,6 +670,42 @@ export default function FloorplanPage() {
       setPlacingDeviceId(null);
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (!selectedDeviceId) {
+      setDeviceOverrideDraft(null);
+      setDeviceOverrideStatus("");
+      return;
+    }
+    let active = true;
+    const load = async () => {
+      setDeviceOverrideStatus("加载设备覆盖配置...");
+      try {
+        const resp = await fetch(`/api/device-overrides/${encodeURIComponent(selectedDeviceId)}`);
+        const data = await resp.json().catch(() => ({}));
+        if (!active) return;
+        if (resp.status === 404) {
+          setDeviceOverrideDraft({ id: selectedDeviceId, placement: {}, semantics: {} });
+          setDeviceOverrideStatus("");
+          return;
+        }
+        if (!resp.ok) {
+          setDeviceOverrideDraft({ id: selectedDeviceId, placement: {}, semantics: {} });
+          setDeviceOverrideStatus(data?.reason || data?.error || "加载失败");
+          return;
+        }
+        setDeviceOverrideDraft(data);
+        setDeviceOverrideStatus("");
+      } catch (err) {
+        if (!active) return;
+        setDeviceOverrideStatus((err as Error).message);
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [selectedDeviceId]);
 
   const imageWidth = draft?.image?.width || imageDims?.width || 1000;
   const imageHeight = draft?.image?.height || imageDims?.height || 800;
@@ -1246,6 +1288,181 @@ export default function FloorplanPage() {
                       <button onClick={() => removeDevice(device.deviceId)} style={dangerButtonStyle}>
                         移除设备
                       </button>
+
+                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+                        <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>设备元信息覆盖（devices.config.json）</h4>
+                        <p style={hintStyle}>用于覆盖 name / placement / semantics；保存后由 device-adapter 热更新（约 1~2 秒生效）。</p>
+
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => router.push(`/scenes?deviceId=${encodeURIComponent(device.deviceId)}`)}
+                            style={secondaryButtonStyle}
+                            type="button"
+                          >
+                            去场景编辑
+                          </button>
+                          <button
+                            onClick={() => router.push(`/automations?deviceId=${encodeURIComponent(device.deviceId)}`)}
+                            style={secondaryButtonStyle}
+                            type="button"
+                          >
+                            去联动编辑
+                          </button>
+                        </div>
+
+                        <label style={labelStyle}>覆盖名称（name）</label>
+                        <input
+                          value={deviceOverrideDraft?.name || ""}
+                          onChange={(e) =>
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              name: e.target.value
+                            }))
+                          }
+                          style={inputStyle}
+                          placeholder={deviceMap[device.deviceId]?.name || device.deviceId}
+                        />
+
+                        <label style={labelStyle}>placement.room</label>
+                        <input
+                          value={deviceOverrideDraft?.placement?.room || ""}
+                          onChange={(e) =>
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              placement: { ...(prev?.placement || {}), room: e.target.value }
+                            }))
+                          }
+                          style={inputStyle}
+                          placeholder={deviceMap[device.deviceId]?.placement?.room || ""}
+                        />
+
+                        <label style={labelStyle}>placement.zone</label>
+                        <input
+                          value={deviceOverrideDraft?.placement?.zone || ""}
+                          onChange={(e) =>
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              placement: { ...(prev?.placement || {}), zone: e.target.value }
+                            }))
+                          }
+                          style={inputStyle}
+                          placeholder={deviceMap[device.deviceId]?.placement?.zone || ""}
+                        />
+
+                        <label style={labelStyle}>placement.description</label>
+                        <input
+                          value={deviceOverrideDraft?.placement?.description || ""}
+                          onChange={(e) =>
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              placement: { ...(prev?.placement || {}), description: e.target.value }
+                            }))
+                          }
+                          style={inputStyle}
+                          placeholder={deviceMap[device.deviceId]?.placement?.description || ""}
+                        />
+
+                        <label style={labelStyle}>semantics.aliases（逗号分隔）</label>
+                        <input
+                          value={Array.isArray(deviceOverrideDraft?.semantics?.aliases) ? deviceOverrideDraft.semantics.aliases.join(", ") : ""}
+                          onChange={(e) => {
+                            const list = e.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              semantics: { ...(prev?.semantics || {}), aliases: list }
+                            }));
+                          }}
+                          style={inputStyle}
+                          placeholder="例如：主灯, 客厅主灯"
+                        />
+
+                        <label style={labelStyle}>semantics.tags（逗号分隔）</label>
+                        <input
+                          value={Array.isArray(deviceOverrideDraft?.semantics?.tags) ? deviceOverrideDraft.semantics.tags.join(", ") : ""}
+                          onChange={(e) => {
+                            const list = e.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              semantics: { ...(prev?.semantics || {}), tags: list }
+                            }));
+                          }}
+                          style={inputStyle}
+                          placeholder="例如：living_room, dimmable"
+                        />
+
+                        <label style={labelStyle}>semantics.preferred_scenes</label>
+                        <select
+                          multiple
+                          value={Array.isArray(deviceOverrideDraft?.semantics?.preferred_scenes) ? deviceOverrideDraft.semantics.preferred_scenes : []}
+                          onChange={(e) => {
+                            const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                            setDeviceOverrideDraft((prev: any) => ({
+                              ...(prev || {}),
+                              id: device.deviceId,
+                              semantics: { ...(prev?.semantics || {}), preferred_scenes: selected }
+                            }));
+                          }}
+                          style={{ ...inputStyle, height: 110 }}
+                        >
+                          {scenes.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} ({s.id})
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          onClick={async () => {
+                            if (!device.deviceId) return;
+                            setDeviceOverrideSaving(true);
+                            setDeviceOverrideStatus("保存中...");
+                            try {
+                              const payload = {
+                                id: device.deviceId,
+                                name: String(deviceOverrideDraft?.name || "").trim() || undefined,
+                                placement: deviceOverrideDraft?.placement || undefined,
+                                semantics: deviceOverrideDraft?.semantics || undefined
+                              };
+                              const resp = await fetch(`/api/device-overrides/${encodeURIComponent(device.deviceId)}`, {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(payload)
+                              });
+                              const data = await resp.json().catch(() => ({}));
+                              if (!resp.ok) {
+                                setDeviceOverrideStatus(data?.reason || data?.error || "保存失败");
+                                return;
+                              }
+                              setDeviceOverrideDraft(data);
+                              setDeviceOverrideStatus("已保存（约 1~2 秒后生效）");
+                            } catch (err) {
+                              setDeviceOverrideStatus((err as Error).message);
+                            } finally {
+                              setDeviceOverrideSaving(false);
+                            }
+                          }}
+                          style={primaryButtonStyle}
+                          disabled={deviceOverrideSaving}
+                          type="button"
+                          data-testid="device-override-save"
+                        >
+                          {deviceOverrideSaving ? "保存中..." : "保存覆盖配置"}
+                        </button>
+
+                        {deviceOverrideStatus && <p style={hintStyle}>{deviceOverrideStatus}</p>}
+                      </div>
                     </div>
                   ))}
               </div>
@@ -1358,6 +1575,7 @@ export default function FloorplanPage() {
                           fill={color}
                           stroke={device.deviceId === selectedDeviceId ? "#0f172a" : "white"}
                           strokeWidth={2}
+                          data-testid={`floorplan-device-${device.deviceId}`}
                           onPointerDown={(evt) => {
                             evt.stopPropagation();
                             if (mode === "devices") {

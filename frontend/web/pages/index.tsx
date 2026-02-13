@@ -300,22 +300,66 @@ export default function Home() {
             浏览设备，快速触发开关，或让 LLM 代理你的意图（通过 llm-bridge echo/代理接口）。
           </p>
         </div>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          style={{
-            background: "#10b981",
-            border: "none",
-            color: "#0b1221",
-            padding: "0.8rem 1.2rem",
-            borderRadius: 10,
-            cursor: loading ? "not-allowed" : "pointer",
-            fontWeight: 700,
-            boxShadow: "0 10px 30px rgba(16,185,129,0.25)"
-          }}
-        >
-          {loading ? "刷新中..." : "刷新设备"}
-        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <a
+            href="/floorplan"
+            style={{
+              padding: "0.7rem 0.9rem",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(0,0,0,0.18)",
+              color: "#e8edf7",
+              textDecoration: "none",
+              fontWeight: 700
+            }}
+          >
+            户型
+          </a>
+          <a
+            href="/scenes"
+            style={{
+              padding: "0.7rem 0.9rem",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(0,0,0,0.18)",
+              color: "#e8edf7",
+              textDecoration: "none",
+              fontWeight: 700
+            }}
+          >
+            场景
+          </a>
+          <a
+            href="/automations"
+            style={{
+              padding: "0.7rem 0.9rem",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(0,0,0,0.18)",
+              color: "#e8edf7",
+              textDecoration: "none",
+              fontWeight: 700
+            }}
+          >
+            联动
+          </a>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            style={{
+              background: "#10b981",
+              border: "none",
+              color: "#0b1221",
+              padding: "0.8rem 1.2rem",
+              borderRadius: 10,
+              cursor: loading ? "not-allowed" : "pointer",
+              fontWeight: 700,
+              boxShadow: "0 10px 30px rgba(16,185,129,0.25)"
+            }}
+          >
+            {loading ? "刷新中..." : "刷新设备"}
+          </button>
+        </div>
       </header>
 
       <section style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1.5rem", marginTop: "1.5rem" }}>

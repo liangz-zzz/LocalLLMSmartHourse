@@ -10,8 +10,10 @@ import { Transform } from "node:stream";
 import imageSize from "image-size";
 import { SceneStoreError } from "./scene-store.js";
 import { FloorplanStoreError } from "./floorplan-store.js";
+import { AutomationStoreError } from "./automation-store.js";
+import { DeviceOverridesStoreError } from "./device-overrides-store.js";
 
-export function buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore }) {
+export function buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore, automationStore, deviceOverridesStore }) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
   let assetsDir = String(config.assetsDir || path.resolve(process.cwd(), "assets"));
@@ -352,6 +354,113 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     }
   });
 
+  // Automations management (file-backed, rules-engine compatible)
+  app.get("/automations", { preHandler: authGuard }, async (_req, reply) => {
+    if (!automationStore) return reply.code(503).send({ error: "automation_store_unavailable" });
+    try {
+      const items = await automationStore.list();
+      return { items, count: items.length };
+    } catch (err) {
+      return handleAutomationError(err, reply, logger);
+    }
+  });
+
+  app.get("/automations/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!automationStore) return reply.code(503).send({ error: "automation_store_unavailable" });
+    try {
+      const automation = await automationStore.get(req.params.id);
+      if (!automation) return reply.code(404).send({ error: "automation_not_found" });
+      return automation;
+    } catch (err) {
+      return handleAutomationError(err, reply, logger);
+    }
+  });
+
+  app.post("/automations", { preHandler: authGuard }, async (req, reply) => {
+    if (!automationStore) return reply.code(503).send({ error: "automation_store_unavailable" });
+    try {
+      const created = await automationStore.create(req.body || {});
+      logger?.info("automation.created", { id: created?.id, actor: getActor(req) });
+      return created;
+    } catch (err) {
+      return handleAutomationError(err, reply, logger);
+    }
+  });
+
+  app.put("/automations/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!automationStore) return reply.code(503).send({ error: "automation_store_unavailable" });
+    const payload = req.body || {};
+    if (payload?.id && payload.id !== req.params.id) {
+      return reply.code(400).send({ error: "automation_id_mismatch" });
+    }
+    try {
+      const updated = await automationStore.update(req.params.id, payload);
+      logger?.info("automation.updated", { id: req.params.id, actor: getActor(req) });
+      return updated;
+    } catch (err) {
+      return handleAutomationError(err, reply, logger);
+    }
+  });
+
+  app.delete("/automations/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!automationStore) return reply.code(503).send({ error: "automation_store_unavailable" });
+    try {
+      const result = await automationStore.delete(req.params.id);
+      logger?.info("automation.deleted", { id: req.params.id, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleAutomationError(err, reply, logger);
+    }
+  });
+
+  // Device overrides (file-backed, device-adapter compatible)
+  app.get("/device-overrides", { preHandler: authGuard }, async (_req, reply) => {
+    if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
+    try {
+      const items = await deviceOverridesStore.list();
+      return { items, count: items.length };
+    } catch (err) {
+      return handleDeviceOverridesError(err, reply, logger);
+    }
+  });
+
+  app.get("/device-overrides/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
+    try {
+      const item = await deviceOverridesStore.get(req.params.id);
+      if (!item) return reply.code(404).send({ error: "device_override_not_found" });
+      return item;
+    } catch (err) {
+      return handleDeviceOverridesError(err, reply, logger);
+    }
+  });
+
+  app.put("/device-overrides/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
+    const payload = req.body || {};
+    if (payload?.id && payload.id !== req.params.id) {
+      return reply.code(400).send({ error: "device_override_id_mismatch" });
+    }
+    try {
+      const updated = await deviceOverridesStore.upsert(req.params.id, payload);
+      logger?.info("device_override.upserted", { id: req.params.id, actor: getActor(req) });
+      return updated;
+    } catch (err) {
+      return handleDeviceOverridesError(err, reply, logger);
+    }
+  });
+
+  app.delete("/device-overrides/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
+    try {
+      const result = await deviceOverridesStore.delete(req.params.id);
+      logger?.info("device_override.deleted", { id: req.params.id, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleDeviceOverridesError(err, reply, logger);
+    }
+  });
+
   // Rule management (requires DB)
   app.get("/rules", { preHandler: authGuard }, async (_req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
@@ -446,6 +555,37 @@ function handleFloorplanError(err, reply, logger) {
     }
     logger?.warn?.("Floorplan store error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "floorplan_store_error", message: err.message });
+  }
+  throw err;
+}
+
+function handleAutomationError(err, reply, logger) {
+  if (err instanceof AutomationStoreError) {
+    if (err.code === "automation_not_found") {
+      return reply.code(404).send({ error: "automation_not_found" });
+    }
+    if (err.code === "automation_exists") {
+      return reply.code(409).send({ error: "automation_exists" });
+    }
+    if (err.code === "invalid_automations") {
+      return reply.code(400).send({ error: "invalid_automations", reason: err.message, details: err.details || [] });
+    }
+    logger?.warn?.("Automation store error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "automation_store_error", message: err.message });
+  }
+  throw err;
+}
+
+function handleDeviceOverridesError(err, reply, logger) {
+  if (err instanceof DeviceOverridesStoreError) {
+    if (err.code === "device_override_not_found") {
+      return reply.code(404).send({ error: "device_override_not_found" });
+    }
+    if (err.code === "invalid_device_override") {
+      return reply.code(400).send({ error: "invalid_device_override", reason: err.message, details: err.details || [] });
+    }
+    logger?.warn?.("Device overrides store error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "device_overrides_store_error", message: err.message });
   }
   throw err;
 }
