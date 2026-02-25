@@ -13,6 +13,7 @@
 - 状态缓存：Redis；事件源：MQTT 订阅 `zigbee2mqtt/#`，落库 Postgres。
 - 位置信息：解析/维护 `placement` 与 `semantics`，供 LLM 使用；可通过 `devices.config.json` 覆盖（见下）。
 - HA 映射：支持 turn_on/off、set_brightness、set_cover_position/tilt、set_temperature、set_hvac_mode、set_fan_mode、set_color_temp；无可用通路时返回错误 reason。
+- Voice 外呼映射：支持 `bindings.voice_control`（唤醒词→应答关键词→动作语音模板），并可按“最近麦克风”静态选择输入设备。
 
 测试
 - 单元：对编解码/校验函数；集成：使用本地 mqtt + 模拟 zigbee2mqtt payload。
@@ -20,6 +21,7 @@
 工具/样例
 - `mock-adapter.js`: 离线将 `mock-data/zigbee2mqtt` 的示例 payload 归一化为设备模型，用于无设备时的 dry-run。
 - `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以 `id`（通常等于 zigbee2mqtt 的 `friendly_name`）为键；可用 `DEVICE_CONFIG_PATH` 或 `CONFIG_DIR/devices.config.json` 指定路径（默认 `./devices.config.json`）。
+  - 可选 `voice_control` 顶层段：`defaults.ack_keywords`、`mic_selection.max_distance`、`mics[]`（用于语音设备应答监听）。
 
 运行与测试
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。
@@ -30,5 +32,6 @@
   - 可选：`HA_WS_ENABLED=false` 关闭 HA WebSocket（仅首次拉取 + 可用 `HA_POLL_INTERVAL_MS=15000` 轮询同步）
 - 存储：可显式 `STORAGE=memory` 关闭 Redis 写入。Redis 模式会在 `REDIS_UPDATES_CHANNEL`（默认 `device:updates`）发布状态更新，监听 `REDIS_ACTIONS_CHANNEL`（默认 `device:actions`）的动作，当前仅日志占位。
 - Postgres（Prisma）：`DB_ENABLED=true` 时会将设备与状态落库（默认 `DATABASE_URL=postgres://smarthome:smarthome@db:5432/smarthome`），使用共享 schema `backend/prisma/schema.prisma`。
-- 动作路径：`ACTION_TRANSPORT` 可设 `auto|mqtt|ha`；同时将结果发布到 `REDIS_ACTION_RESULTS_CHANNEL`（默认 `device:action_results`）。
+- 动作路径：`ACTION_TRANSPORT` 可设 `auto|mqtt|ha|voice`；同时将结果发布到 `REDIS_ACTION_RESULTS_CHANNEL`（默认 `device:action_results`）。
+  - Voice 运行时（可选）：`VOICE_TTS_COMMAND` / `VOICE_STT_COMMAND`；命令通过环境变量读写文本与设备信息。
 - 测试：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm test`（含 MQTT/HA 动作、Redis、Postgres 集成用例）。

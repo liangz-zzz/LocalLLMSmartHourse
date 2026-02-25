@@ -26,7 +26,12 @@ export function loadConfig() {
     databaseUrl: process.env.DATABASE_URL || "postgres://smarthome:smarthome@db:5432/smarthome",
     haBaseUrl: process.env.HA_BASE_URL || "http://homeassistant:8123",
     haToken: process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN,
-    actionTransport: process.env.ACTION_TRANSPORT || "auto" // auto | mqtt | ha
+    actionTransport: process.env.ACTION_TRANSPORT || "auto", // auto | mqtt | ha | voice
+    voiceTtsCommand: process.env.VOICE_TTS_COMMAND || "",
+    voiceSttCommand: process.env.VOICE_STT_COMMAND || "",
+    voiceAckKeywords: parseCsvList(process.env.VOICE_DEFAULT_ACK_KEYWORDS, ["我在", "请说", "请讲"]),
+    voiceMicMaxDistance: parseNumber(process.env.VOICE_MIC_MAX_DISTANCE, undefined),
+    voiceCommandTimeoutMs: parsePositiveInt(process.env.VOICE_COMMAND_TIMEOUT_MS, 15000)
   };
 }
 
@@ -42,4 +47,10 @@ function parsePositiveInt(value, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return fallback;
   return Math.floor(num);
+}
+
+function parseNumber(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return num;
 }

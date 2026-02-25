@@ -3,8 +3,9 @@ import path from "path";
 import mqtt from "mqtt";
 import { normalizeZigbee2Mqtt } from "./normalize.js";
 import { buildActionResult } from "./action-results.js";
-import { applyDeviceOverrides, loadDeviceOverrides } from "./device-config.js";
+import { applyDeviceOverrides, loadDeviceOverrides, loadVoiceControlConfig } from "./device-config.js";
 import { connectHaStateSubscription, fetchHaStates, normalizeHomeAssistantEntity, shouldIncludeHaEntity } from "./ha.js";
+import { createCommandVoiceRuntime, executeVoiceControlAction } from "./voice-control.js";
 
 export class DeviceAdapter {
   constructor({
@@ -21,7 +22,14 @@ export class DeviceAdapter {
     haExcludeDomains,
     haWsEnabled,
     haPollIntervalMs,
-    deviceOverridesPollMs
+    deviceOverridesPollMs,
+    voiceTtsCommand,
+    voiceSttCommand,
+    voiceAckKeywords,
+    voiceMicMaxDistance,
+    voiceCommandTimeoutMs,
+    voiceRuntime,
+    voiceControlConfig
   }) {
     this.mode = mode;
     this.mqttUrl = mqttUrl;
@@ -43,6 +51,23 @@ export class DeviceAdapter {
     this.haStopping = false;
     this.haReconnectAttempt = 0;
     this.deviceOverrides = new Map();
+    const envVoiceConfig = normalizeVoiceControlConfig({
+      defaults: { ack_keywords: Array.isArray(voiceAckKeywords) ? voiceAckKeywords : [] },
+      mic_selection: {
+        mode: "nearest_static",
+        max_distance: Number.isFinite(Number(voiceMicMaxDistance)) ? Number(voiceMicMaxDistance) : undefined
+      },
+      mics: []
+    });
+    this.voiceControlConfig = mergeVoiceControlConfig(envVoiceConfig, voiceControlConfig);
+    this.voiceRuntime =
+      voiceRuntime ||
+      createCommandVoiceRuntime({
+        ttsCommand: voiceTtsCommand,
+        sttCommand: voiceSttCommand,
+        commandTimeoutMs: voiceCommandTimeoutMs,
+        logger: this.logger
+      });
     this.deviceOverridesPollMs = Number.isFinite(deviceOverridesPollMs) ? Math.floor(deviceOverridesPollMs) : 2000;
     this.deviceOverridesPollTimer = null;
     this.deviceOverridesLastMtimeMs = null;
@@ -54,6 +79,8 @@ export class DeviceAdapter {
     this.deviceOverridesResolvedPath = resolveFsPath(this.deviceConfigPath);
     this.deviceOverridesLastMtimeMs = await getMtimeMs(this.deviceOverridesResolvedPath);
     this.deviceOverrides = await loadDeviceOverrides(this.deviceConfigPath, this.logger);
+    const loadedVoiceConfig = await loadVoiceControlConfig(this.deviceConfigPath, this.logger);
+    this.voiceControlConfig = mergeVoiceControlConfig(this.voiceControlConfig, loadedVoiceConfig);
     this.startDeviceOverridesPolling();
     if (this.mode === "offline") {
       this.logger.info("Starting adapter in offline mode (mock data)");
@@ -113,6 +140,8 @@ export class DeviceAdapter {
       if (mtimeMs === this.deviceOverridesLastMtimeMs) return;
       this.deviceOverridesLastMtimeMs = mtimeMs;
       this.deviceOverrides = await loadDeviceOverrides(this.deviceConfigPath, this.logger);
+      const loadedVoiceConfig = await loadVoiceControlConfig(this.deviceConfigPath, this.logger);
+      this.voiceControlConfig = mergeVoiceControlConfig(this.voiceControlConfig, loadedVoiceConfig);
       const devices = await this.store.list();
       for (const device of devices) {
         const override = this.deviceOverrides.get(device.id);
@@ -134,8 +163,35 @@ export class DeviceAdapter {
     }
 
     const hasZ2M = device.bindings?.zigbee2mqtt?.topic && this.client;
+    const haEntity = device.bindings?.ha?.entity_id || device.bindings?.ha_entity_id;
+    const hasVoice = Boolean(device.bindings?.voice_control);
     const preferHa = this.actionTransport === "ha";
     const preferMqtt = this.actionTransport === "mqtt";
+    const forceVoice = this.actionTransport === "voice";
+    const preferVoice = device.bindings?.voice_control?.priority === "prefer";
+
+    if (forceVoice) {
+      if (!hasVoice) {
+        await this.store.publishActionResult?.(
+          buildActionResult({
+            deviceId: device.id,
+            action: action.action,
+            status: "error",
+            transport: "voice",
+            params: action.params,
+            reason: "voice_binding_missing"
+          })
+        );
+        return;
+      }
+      await this.handleVoiceAction({ device, action });
+      return;
+    }
+
+    if (preferVoice && hasVoice) {
+      await this.handleVoiceAction({ device, action });
+      return;
+    }
 
     if (!preferHa && hasZ2M) {
       const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
@@ -148,7 +204,6 @@ export class DeviceAdapter {
       return;
     }
 
-    const haEntity = device.bindings?.ha?.entity_id || device.bindings?.ha_entity_id;
     if (!preferMqtt && haEntity && this.haToken) {
       const result = await callHaService({
         baseUrl: this.haBaseUrl,
@@ -171,6 +226,11 @@ export class DeviceAdapter {
       return;
     }
 
+    if (hasVoice) {
+      await this.handleVoiceAction({ device, action });
+      return;
+    }
+
     this.logger.warn("No delivery path for action", action);
     await this.store.publishActionResult?.(
       buildActionResult({
@@ -180,6 +240,54 @@ export class DeviceAdapter {
         transport: 'none',
         params: action.params,
         reason: 'no_delivery_path'
+      })
+    );
+  }
+
+  async handleVoiceAction({ device, action }) {
+    const result = await executeVoiceControlAction({
+      device,
+      actionName: action.action,
+      params: action.params || {},
+      voiceBinding: device.bindings?.voice_control,
+      voiceConfig: this.voiceControlConfig,
+      runtime: this.voiceRuntime,
+      logger: this.logger
+    });
+
+    if (result.ok) {
+      await this.store.publishActionResult?.(
+        buildActionResult({
+          deviceId: device.id,
+          action: action.action,
+          status: "ok",
+          transport: "voice",
+          params: action.params,
+          details: {
+            ...result.details,
+            voice_risk: device.bindings?.voice_control?.actions?.[action.action]?.risk
+          }
+        })
+      );
+      return;
+    }
+
+    this.logger.warn("Voice action blocked", {
+      deviceId: device.id,
+      action: action.action,
+      reason: result.reason,
+      errorCode: result.errorCode
+    });
+    await this.store.publishActionResult?.(
+      buildActionResult({
+        deviceId: device.id,
+        action: action.action,
+        status: "error",
+        transport: "voice",
+        params: action.params,
+        reason: result.reason || result.errorCode || "voice_action_failed",
+        errorCode: result.errorCode,
+        details: result.details
       })
     );
   }
@@ -399,6 +507,57 @@ async function getMtimeMs(resolvedPath) {
     if (err?.code === "ENOENT") return null;
     throw err;
   }
+}
+
+function mergeVoiceControlConfig(base, incoming) {
+  const baseCfg = normalizeVoiceControlConfig(base);
+  const nextCfg = normalizeVoiceControlConfig(incoming);
+  const ackKeywords = nextCfg.defaults.ack_keywords.length ? nextCfg.defaults.ack_keywords : baseCfg.defaults.ack_keywords;
+  const maxDistance =
+    nextCfg.mic_selection.max_distance !== undefined ? nextCfg.mic_selection.max_distance : baseCfg.mic_selection.max_distance;
+  return {
+    defaults: {
+      ack_keywords: ackKeywords
+    },
+    mic_selection: {
+      mode: String(nextCfg.mic_selection.mode || baseCfg.mic_selection.mode || "nearest_static"),
+      max_distance: maxDistance
+    },
+    mics: nextCfg.mics.length ? nextCfg.mics : baseCfg.mics
+  };
+}
+
+function normalizeVoiceControlConfig(raw) {
+  const cfg = raw && typeof raw === "object" ? raw : {};
+  const defaultsRaw = cfg.defaults && typeof cfg.defaults === "object" ? cfg.defaults : {};
+  const micSelectionRaw = cfg.mic_selection && typeof cfg.mic_selection === "object" ? cfg.mic_selection : {};
+  return {
+    defaults: {
+      ack_keywords: uniqStrings(defaultsRaw.ack_keywords || [])
+    },
+    mic_selection: {
+      mode: String(micSelectionRaw.mode || "nearest_static"),
+      max_distance: toFiniteNumber(micSelectionRaw.max_distance)
+    },
+    mics: Array.isArray(cfg.mics) ? cfg.mics.filter((mic) => mic && String(mic.id || "").trim()) : []
+  };
+}
+
+function uniqStrings(list) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    const s = String(item || "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 async function callHaService({ baseUrl, token, entityId, action, params, logger }) {

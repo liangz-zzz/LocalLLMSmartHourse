@@ -24,6 +24,46 @@ const zigbeeBinding = z.object({
   ieee_address: z.string().optional()
 });
 
+const voiceControlSlotSchema = z.object({
+  type: z.enum(["boolean", "number", "string", "enum"]).optional(),
+  minimum: z.number().optional(),
+  maximum: z.number().optional(),
+  enum: z.array(z.string()).optional(),
+  required: z.boolean().optional()
+});
+
+const voiceControlActionSpec = z.object({
+  utterances: z.array(z.string().min(1)).min(1),
+  deterministic: z.boolean().optional(),
+  slot_schema: z.record(z.string().min(1), voiceControlSlotSchema).optional(),
+  pre_delay_ms: z.number().int().min(0).optional(),
+  post_delay_ms: z.number().int().min(0).optional(),
+  interrupt_phrases: z.array(z.string().min(1)).optional(),
+  risk: z.enum(["low", "medium", "high"]).optional()
+});
+
+const voiceControlBinding = z.object({
+  transport: z.enum(["local_tts"]).optional(),
+  priority: z.enum(["prefer", "fallback"]).optional(),
+  audio_output: z.string().optional(),
+  preferred_mics: z.array(z.string().min(1)).optional(),
+  wake: z.object({
+    utterances: z.array(z.string().min(1)).min(1),
+    retries: z.number().int().min(0).optional(),
+    gap_ms: z.number().int().min(0).optional()
+  }),
+  ack: z
+    .object({
+      keywords: z.array(z.string().min(1)).optional(),
+      timeout_ms: z.number().int().min(100).optional(),
+      listen_window_ms: z.number().int().min(100).optional()
+    })
+    .optional(),
+  actions: z.record(z.string().min(1), voiceControlActionSpec).refine((value) => Object.keys(value).length > 0, {
+    message: "at least one voice action is required"
+  })
+});
+
 const bindingsSchema = z.object({
   zigbee2mqtt: zigbeeBinding.optional(),
   ha_entity_id: z.string().optional(),
@@ -32,6 +72,7 @@ const bindingsSchema = z.object({
       entity_id: z.string().min(1)
     })
     .optional(),
+  voice_control: voiceControlBinding.optional(),
   vendor_extra: z.record(z.unknown()).optional()
 });
 

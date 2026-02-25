@@ -7,7 +7,7 @@
 - `name` (string): 展示名称
 - `placement` (object): 位置/安装方式/描述，详见下节
 - `protocol` (string): 主协议（`zigbee` | `wifi` | `bluetooth_mesh` | `matter` ...）
-- `bindings` (object): 底层实体映射，如 `zigbee2mqtt.topic`, `ha_entity_id`, `vendor_extra`
+- `bindings` (object): 底层实体映射，如 `zigbee2mqtt.topic`, `ha_entity_id`, `voice_control`, `vendor_extra`
 - `traits` (object): 当前状态，按能力分块（见能力表）
 - `capabilities` (array): 可执行动作，含参数定义（类型/范围/单位、是否必填）
 - `semantics` (object): 自然语言描述/标签/偏好，供 LLM 知识库
@@ -39,6 +39,46 @@
 }
 ```
 - 与 placement 互补，提供 LLM 更丰富的上下文；`aliases` 用于同义词/别名匹配（语音/口语更友好）。
+
+### bindings.voice_control（语音外呼控制）
+用于“Agent 主动唤醒第三方语音设备并下发命令”的配置。典型流程：`wake -> ack -> command`。
+
+```json
+{
+  "voice_control": {
+    "transport": "local_tts",
+    "priority": "prefer",
+    "audio_output": "living_room_speaker",
+    "preferred_mics": ["mic_living_room"],
+    "wake": {
+      "utterances": ["小度小度"],
+      "retries": 1,
+      "gap_ms": 600
+    },
+    "ack": {
+      "keywords": ["我在", "请说"],
+      "timeout_ms": 4000,
+      "listen_window_ms": 3000
+    },
+    "actions": {
+      "turn_on": {
+        "utterances": ["打开{device_name}"],
+        "risk": "low"
+      },
+      "set_temperature": {
+        "utterances": ["把{device_name}调到{value}度"],
+        "slot_schema": {
+          "value": { "type": "number", "minimum": 16, "maximum": 30, "required": true }
+        },
+        "risk": "medium"
+      }
+    }
+  }
+}
+```
+- `wake`: 唤醒词与重试策略。
+- `ack.keywords`: 设备应答判定关键词；未命中则阻断执行并返回错误原因。
+- `actions`: 动作到语音模板的映射，支持参数槽位（例如 `{value}`）。
 
 ## 常见能力与状态片段
 - `switch`: state `on|off`

@@ -223,6 +223,43 @@ test("agent auto-executes when plan.type=execute", async () => {
   assert.equal(mcp.calls.filter((c) => c.name === "devices.list").length, 1, "bootstrap devices.list");
 });
 
+test("agent requires confirmation for medium/high risk voice actions", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [
+        {
+          id: "voice_ac",
+          name: "卧室空调",
+          bindings: {
+            voice_control: {
+              actions: {
+                set_temperature: { risk: "medium" }
+              }
+            }
+          }
+        }
+      ],
+      count: 1
+    })
+  });
+  const llm = makeLlmStub([
+    {
+      type: "final",
+      assistant: "已为你把卧室空调调到 18 度。",
+      plan: { planId: "p_voice_risk", type: "execute", actions: [{ deviceId: "voice_ac", action: "set_temperature", params: { value: 18 } }] }
+    }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const out = await agent.turn({ sessionId: "s_voice_risk", input: "把卧室空调调到18度", confirm: false });
+
+  assert.equal(out.type, "propose");
+  assert.equal(out.planId, "p_voice_risk");
+  assert.equal(mcp.calls.filter((c) => c.name === "actions.batch_invoke").length, 0, "should not auto execute medium/high voice risk");
+  assert.match(out.message, /需先确认/);
+});
+
 test("agent surfaces batch_invoke errors during confirmation (no optimistic success)", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({

@@ -19,10 +19,55 @@ export interface HABinding {
   entity_id: string; // e.g. switch.living_room_plug
 }
 
+export type VoiceControlTransport = "local_tts";
+export type VoiceControlPriority = "prefer" | "fallback";
+export type VoiceControlRisk = "low" | "medium" | "high";
+
+export interface VoiceControlWakeConfig {
+  utterances: string[];
+  retries?: number;
+  gap_ms?: number;
+}
+
+export interface VoiceControlAckConfig {
+  keywords?: string[];
+  timeout_ms?: number;
+  listen_window_ms?: number;
+}
+
+export interface VoiceControlSlotSchema {
+  type?: ParameterType;
+  minimum?: number;
+  maximum?: number;
+  enum?: string[];
+  required?: boolean;
+}
+
+export interface VoiceControlActionSpec {
+  utterances: string[];
+  deterministic?: boolean;
+  slot_schema?: Record<string, VoiceControlSlotSchema>;
+  pre_delay_ms?: number;
+  post_delay_ms?: number;
+  interrupt_phrases?: string[];
+  risk?: VoiceControlRisk;
+}
+
+export interface VoiceControlBinding {
+  transport?: VoiceControlTransport;
+  priority?: VoiceControlPriority;
+  audio_output?: string;
+  preferred_mics?: string[];
+  wake: VoiceControlWakeConfig;
+  ack?: VoiceControlAckConfig;
+  actions: Record<string, VoiceControlActionSpec>;
+}
+
 export interface DeviceBindings {
   zigbee2mqtt?: Zigbee2MqttBinding;
   ha_entity_id?: string; // fallback string form
   ha?: HABinding;
+  voice_control?: VoiceControlBinding;
   vendor_extra?: Record<string, unknown>;
 }
 

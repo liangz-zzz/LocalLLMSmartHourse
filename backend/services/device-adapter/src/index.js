@@ -34,7 +34,12 @@ async function main() {
     haExcludeDomains: config.haExcludeDomains,
     haWsEnabled: config.haWsEnabled,
     haPollIntervalMs: config.haPollIntervalMs,
-    deviceOverridesPollMs: config.deviceOverridesPollMs
+    deviceOverridesPollMs: config.deviceOverridesPollMs,
+    voiceTtsCommand: config.voiceTtsCommand,
+    voiceSttCommand: config.voiceSttCommand,
+    voiceAckKeywords: config.voiceAckKeywords,
+    voiceMicMaxDistance: config.voiceMicMaxDistance,
+    voiceCommandTimeoutMs: config.voiceCommandTimeoutMs
   });
 
   if (config.dbEnabled) {

@@ -52,6 +52,73 @@
           "required": ["entity_id"],
           "additionalProperties": false
         },
+        "voice_control": {
+          "type": "object",
+          "required": ["wake", "actions"],
+          "properties": {
+            "transport": { "type": "string", "enum": ["local_tts"] },
+            "priority": { "type": "string", "enum": ["prefer", "fallback"] },
+            "audio_output": { "type": "string" },
+            "preferred_mics": { "type": "array", "items": { "type": "string" } },
+            "wake": {
+              "type": "object",
+              "required": ["utterances"],
+              "properties": {
+                "utterances": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                "retries": { "type": "integer", "minimum": 0 },
+                "gap_ms": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            },
+            "ack": {
+              "type": "object",
+              "properties": {
+                "keywords": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "timeout_ms": { "type": "integer", "minimum": 100 },
+                "listen_window_ms": { "type": "integer", "minimum": 100 }
+              },
+              "additionalProperties": false
+            },
+            "actions": {
+              "type": "object",
+              "minProperties": 1,
+              "patternProperties": {
+                "^[A-Za-z0-9_.:-]+$": {
+                  "type": "object",
+                  "required": ["utterances"],
+                  "properties": {
+                    "utterances": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                    "deterministic": { "type": "boolean" },
+                    "slot_schema": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[A-Za-z0-9_.:-]+$": {
+                          "type": "object",
+                          "properties": {
+                            "type": { "type": "string", "enum": ["boolean", "number", "string", "enum"] },
+                            "minimum": { "type": "number" },
+                            "maximum": { "type": "number" },
+                            "enum": { "type": "array", "items": { "type": "string" } },
+                            "required": { "type": "boolean" }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "pre_delay_ms": { "type": "integer", "minimum": 0 },
+                    "post_delay_ms": { "type": "integer", "minimum": 0 },
+                    "interrupt_phrases": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "risk": { "type": "string", "enum": ["low", "medium", "high"] }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "vendor_extra": { "type": "object" }
       },
       "additionalProperties": false

@@ -227,7 +227,8 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
 
         if (actions.length) {
           const planId = String(plan?.planId || parsed.planId || randomUUID()).trim();
-          const shouldExecute = decideExecutionMode({ config, planType });
+          const riskGate = assessVoiceRiskGate({ actions, deviceInventory });
+          const shouldExecute = decideExecutionMode({ config, planType, forceConfirm: riskGate.required });
 
           if (!shouldExecute) {
             session.state.pending = { planId, actions, createdAt: Date.now() };
@@ -241,7 +242,8 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             const base =
               assistant ||
               `我将执行 ${actions.length} 个动作。`;
-            const msg = withConfirmationHint(base);
+            const hint = riskGate.required ? `该操作为 ${riskGate.level} 风险语音控制（${riskGate.deviceId}/${riskGate.action}），需先确认。` : "";
+            const msg = withConfirmationHint(hint ? `${base} ${hint}` : base);
             appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
             appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
             await sessionStore.save(session);
@@ -545,7 +547,25 @@ function summarizeDryrunFailure({ dryrun, actions }) {
   return `无法执行：${where || "动作校验失败"}${detail ? `（${detail}）` : ""}。请确认要控制的设备/动作是否正确。`;
 }
 
-function decideExecutionMode({ config, planType }) {
+function assessVoiceRiskGate({ actions, deviceInventory }) {
+  const devices = Array.isArray(deviceInventory?.items) ? deviceInventory.items : [];
+  const byId = new Map(devices.map((d) => [String(d?.id || ""), d]));
+  for (const item of actions || []) {
+    if (item?.type === "scene") continue;
+    const deviceId = String(item?.deviceId || "");
+    const action = String(item?.action || "");
+    if (!deviceId || !action) continue;
+    const device = byId.get(deviceId);
+    const risk = String(device?.bindings?.voice_control?.actions?.[action]?.risk || "").toLowerCase();
+    if (risk === "high" || risk === "medium") {
+      return { required: true, level: risk, deviceId, action };
+    }
+  }
+  return { required: false, level: "", deviceId: "", action: "" };
+}
+
+function decideExecutionMode({ config, planType, forceConfirm = false }) {
+  if (forceConfirm) return false;
   const mode = String(config?.executionMode || "auto").trim().toLowerCase();
   if (mode === "always_confirm") return false;
   if (mode === "always_execute") return true;
