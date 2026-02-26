@@ -8,6 +8,7 @@
    - 按需填写（建议设置 `LOCAL_UID/GID` 与宿主一致，避免挂载权限问题）
 2) 启动后端与基础服务：
    - `./deploy/dev-up.sh`
+   - 如需无真机调试，可在 `deploy/data/config/devices.config.json` 配置 `virtual.devices[]`（见 `docs/feature/device_simulation/README.md`）
 3) 启动前端：
    - `cd frontend/web`
    - `npm ci`

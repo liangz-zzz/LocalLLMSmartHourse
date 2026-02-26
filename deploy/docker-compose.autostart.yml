@@ -34,6 +34,20 @@ services:
           fi
           exec su node -c "cd /app && npm run dev"
 
+  device-simulator:
+    user: "0:0"
+    command:
+      - bash
+      - -lc
+      - |
+          set -euo pipefail
+          cd /app
+          mkdir -p /app/node_modules
+          chown -R node:node /app/node_modules
+          su node -c "cd /app && npm install"
+          until (echo > /dev/tcp/redis/6379) >/dev/null 2>&1; do echo "[device-simulator] waiting for redis:6379"; sleep 1; done
+          exec su node -c "cd /app && npm run dev"
+
   llm-bridge:
     user: "0:0"
     command:

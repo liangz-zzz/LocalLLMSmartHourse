@@ -19,6 +19,10 @@ test("device config separates device overrides and voice_control section", async
         voice_control: {
           defaults: { ack_keywords: ["我在", "请说"] },
           mics: [{ id: "mic_living_room", enabled: true, placement: { room: "living_room" } }]
+        },
+        virtual: {
+          enabled: true,
+          devices: [{ id: "sim_light", name: "模拟灯", placement: { room: "living_room" }, capabilities: [{ action: "turn_on" }] }]
         }
       },
       null,
@@ -30,6 +34,7 @@ test("device config separates device overrides and voice_control section", async
   const overrides = await loadDeviceOverrides(filePath);
   assert.equal(overrides.size, 1);
   assert.equal(overrides.has("voice_control"), false);
+  assert.equal(overrides.has("virtual"), false);
   assert.equal(overrides.get("kettle_plug")?.name, "烧水壶插座");
 
   const voiceConfig = await loadVoiceControlConfig(filePath);

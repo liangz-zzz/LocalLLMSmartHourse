@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "$schema", "version"]);
+
 export class DeviceOverridesStoreError extends Error {
   constructor(code, message, extra) {
     super(message);
@@ -21,7 +23,7 @@ export class DeviceOverridesStore {
   }
 
   async list() {
-    const list = await this.load();
+    const { devices: list } = await this.loadEnvelope();
     validateOverrideList(list);
     return list;
   }
@@ -60,13 +62,18 @@ export class DeviceOverridesStore {
   }
 
   async load() {
+    const { devices } = await this.loadEnvelope();
+    return devices;
+  }
+
+  async loadEnvelope() {
     const resolved = this.resolvePath();
     try {
       const raw = await fs.readFile(resolved, "utf8");
       const parsed = JSON.parse(raw);
-      return normalizeOverrideList(parsed);
+      return normalizeOverrideEnvelope(parsed);
     } catch (err) {
-      if (err?.code === "ENOENT") return [];
+      if (err?.code === "ENOENT") return { devices: [], envelope: {} };
       throw new DeviceOverridesStoreError("device_overrides_store_read_failed", err?.message || "failed to read device overrides file");
     }
   }
@@ -76,19 +83,27 @@ export class DeviceOverridesStore {
     const dir = path.dirname(resolved);
     await fs.mkdir(dir, { recursive: true });
     const tmp = `${resolved}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const payload = JSON.stringify({ devices: list }, null, 2);
+    const { envelope } = await this.loadEnvelope();
+    const payload = JSON.stringify({ ...(envelope || {}), devices: list }, null, 2);
     await fs.writeFile(tmp, payload, "utf8");
     await fs.rename(tmp, resolved);
   }
 }
 
-function normalizeOverrideList(parsed) {
-  if (Array.isArray(parsed)) return parsed;
+function normalizeOverrideEnvelope(parsed) {
+  if (Array.isArray(parsed)) return { devices: parsed, envelope: {} };
   if (parsed && typeof parsed === "object") {
-    if (Array.isArray(parsed.devices)) return parsed.devices;
-    return Object.entries(parsed).map(([id, value]) => ({ id, ...(value || {}) }));
+    if (Array.isArray(parsed.devices)) {
+      const { devices: _devices, ...rest } = parsed;
+      return { devices: parsed.devices, envelope: rest };
+    }
+    const devices = Object.entries(parsed)
+      .filter(([id]) => !RESERVED_TOP_LEVEL_KEYS.has(id))
+      .map(([id, value]) => ({ id, ...(value || {}) }));
+    const envelope = Object.fromEntries(Object.entries(parsed).filter(([key]) => RESERVED_TOP_LEVEL_KEYS.has(key) && key !== "devices"));
+    return { devices, envelope };
   }
-  return [];
+  return { devices: [], envelope: {} };
 }
 
 function validateOverrideList(list) {
@@ -161,4 +176,3 @@ function deepMerge(a, b) {
 function isPlainObject(v) {
   return v && typeof v === "object" && !Array.isArray(v);
 }
-

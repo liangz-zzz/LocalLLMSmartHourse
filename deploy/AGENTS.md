@@ -9,6 +9,7 @@
 - `db` / `redis`: 状态与缓存
 - `api-gateway`: 对外 API (REST/WS) 占位容器
 - `device-adapter`: 统一设备模型与底层实体的适配占位容器
+- `device-simulator`: 基于配置的虚拟设备模拟服务（与真实设备共享发现/控制链路）
 - `rules-engine`: 规则/联动占位容器
 - `llm-bridge`: OpenAI 协议到自建 LLM API 的桥接占位容器
 - `smart-house-mcp-server`: MCP 工具服务器（对接 Agent/LLM，代理 api-gateway 的设备/状态/控制能力）

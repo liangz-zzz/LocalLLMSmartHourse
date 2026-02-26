@@ -27,6 +27,49 @@ test("buildTools returns expected tool names", () => {
   assert.ok(names.has("actions.batch_invoke"));
 });
 
+test("devices.list strips simulator source marker from vendor_extra", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).endsWith("/devices")) {
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "sim_light_lr",
+              name: "客厅模拟灯",
+              placement: { room: "living_room" },
+              protocol: "virtual",
+              bindings: {
+                vendor_extra: {
+                  __simulator_source: true,
+                  model_hint: "sim-v1"
+                }
+              },
+              traits: {},
+              capabilities: [{ action: "turn_on" }]
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    return new Response("not_found", { status: 404 });
+  };
+
+  const result = await callTool({
+    name: "devices.list",
+    args: {},
+    config: baseConfig
+  });
+  assert.ok(!result.isError);
+  const body = parseToolResult(result);
+  assert.equal(body.items.length, 1);
+  assert.equal(body.items[0].bindings.vendor_extra.__simulator_source, undefined);
+  assert.equal(body.items[0].bindings.vendor_extra.model_hint, "sim-v1");
+
+  global.fetch = originalFetch;
+});
+
 test("devices.invoke defaults to dry-run and returns next call hint", async () => {
   const originalFetch = global.fetch;
   global.fetch = async (url) => {

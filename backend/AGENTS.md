@@ -5,6 +5,7 @@
 ## 目录
 - `services/api-gateway/`: 对外 REST/WS，用户/LLM 调用入口
 - `services/device-adapter/`: 订阅 MQTT/HA，标准化状态，暴露 `invoke` 等接口
+- `services/device-simulator/`: 基于配置注册虚拟设备并模拟动作/状态，用于无真机调试
 - `services/rules-engine/`: 规则/场景 DSL 与执行器
 - `services/llm-bridge/`: OpenAI 协议转发至本地 LLM 服务
 - `pkg/device-model/`: 统一设备模型定义、Schema、编解码/校验

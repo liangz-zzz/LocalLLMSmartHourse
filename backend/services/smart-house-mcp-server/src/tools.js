@@ -124,6 +124,7 @@ const TOOLS = [
     }
   }
 ];
+const SIMULATOR_SOURCE_FLAG = "__simulator_source";
 
 export function buildTools() {
   return TOOLS;
@@ -159,7 +160,7 @@ async function devicesList({ args, config }) {
     headers: authHeaders(config)
   });
 
-  let items = res.items || [];
+  let items = Array.isArray(res?.items) ? res.items.map(sanitizeDeviceForAgent) : [];
   const ids = Array.isArray(args?.ids) ? args.ids : null;
   const room = typeof args?.room === "string" ? args.room.trim() : "";
   const tag = typeof args?.tag === "string" ? args.tag.trim() : "";
@@ -202,15 +203,17 @@ async function devicesGet({ args, config }) {
   const device = await fetchJson(`${config.apiGatewayBase}/devices/${encodeURIComponent(id)}`, {
     headers: authHeaders(config)
   });
-  return asJsonResult(device);
+  return asJsonResult(sanitizeDeviceForAgent(device));
 }
 
 async function devicesState({ args, config }) {
   const id = String(args?.id || "").trim();
   if (!id) return asError("invalid_args", "id is required");
-  const device = await fetchJson(`${config.apiGatewayBase}/devices/${encodeURIComponent(id)}`, {
-    headers: authHeaders(config)
-  });
+  const device = sanitizeDeviceForAgent(
+    await fetchJson(`${config.apiGatewayBase}/devices/${encodeURIComponent(id)}`, {
+      headers: authHeaders(config)
+    })
+  );
   return asJsonResult({ id: device.id, traits: device.traits || {}, updatedAt: Date.now() });
 }
 
@@ -358,6 +361,19 @@ async function systemHealth({ config }) {
 
 function authHeaders(config) {
   return config.apiGatewayApiKey ? { "X-API-Key": config.apiGatewayApiKey } : {};
+}
+
+function sanitizeDeviceForAgent(device) {
+  if (!isPlainObject(device)) return device;
+  const out = clone(device);
+  const vendorExtra = out?.bindings?.vendor_extra;
+  if (isPlainObject(vendorExtra)) {
+    delete vendorExtra[SIMULATOR_SOURCE_FLAG];
+    if (!Object.keys(vendorExtra).length) {
+      delete out.bindings.vendor_extra;
+    }
+  }
+  return out;
 }
 
 async function fetchJson(url, init = {}) {
@@ -568,6 +584,10 @@ function sleep(ms) {
 
 function isPlainObject(v) {
   return v && typeof v === "object" && !Array.isArray(v);
+}
+
+function clone(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
 function normalize(v) {

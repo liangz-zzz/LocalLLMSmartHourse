@@ -119,6 +119,29 @@ services:
       - device_adapter_node_modules:/app/node_modules
     command: ["sleep", "infinity"]
 
+  device-simulator:
+    build:
+      context: ../backend/services/device-simulator
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+    image: localllm-smarthouse/device-simulator:dev
+    restart: unless-stopped
+    depends_on:
+      - redis
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - CONFIG_DIR=${CONFIG_DIR:-/config}
+      - SIMULATOR_ENABLED=${SIMULATOR_ENABLED:-true}
+      - SIM_DEVICE_CONFIG_PATH=${SIM_DEVICE_CONFIG_PATH:-}
+      - REDIS_URL=redis://redis:${REDIS_PORT:-6379}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../backend/services/device-simulator:/app
+      - ./data/config:/config
+      - device_simulator_node_modules:/app/node_modules
+    command: ["sleep", "infinity"]
+
   rules-engine:
     build:
       context: ../backend/services/rules-engine
@@ -274,6 +297,7 @@ networks:
 volumes:
   api_gateway_node_modules:
   device_adapter_node_modules:
+  device_simulator_node_modules:
   rules_engine_node_modules:
   llm_bridge_node_modules:
   smart_house_mcp_server_node_modules:

@@ -10,6 +10,7 @@
 - `feature/floorplan_editor/README.md`: 户型编辑与 3D 预览（2D 编辑、三点校准、API 设计）。
 - `feature/smart_house_agent/README.md`: 智能家居 Agent（MCP 工具调用）需求与设计文档索引。
 - `feature/scene_integration/README.md`: 场景集成（JSON 场景配置、API/MCP/Agent 执行链路）文档索引。
+- `feature/device_simulation/README.md`: 设备模拟（配置注入虚拟设备、与 Agent 透明交互）设计与运行说明。
 - `feature/voice_assistant/README.md`: 离线语音入口（唤醒词/VAD/STT/TTS 与 Agent 对接）。
 
 写作规范
