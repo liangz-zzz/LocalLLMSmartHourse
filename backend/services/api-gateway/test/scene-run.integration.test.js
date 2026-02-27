@@ -7,6 +7,7 @@ import path from "node:path";
 import { buildServer } from "../src/server.js";
 import { SceneStore } from "../src/scene-store.js";
 import { SceneRunner } from "../src/scene-runner.js";
+import { AgenticSceneRunner } from "../src/agentic-scene-runner.js";
 
 class FakeDeviceStore {
   constructor() {
@@ -177,6 +178,125 @@ test("scene run endpoint supports dryRun and requires confirm for real run", asy
     const dryRun = dryRunRes.json();
     assert.equal(dryRun.status, "ok");
     assert.equal(dryRun.steps[0].status, "dry_run");
+
+    await app.close();
+  });
+});
+
+test("agentic scene plan + run resolve stableKey and skip missing targets", async () => {
+  await withTempDir(async (dir) => {
+    const sceneStore = new SceneStore({ scenesPath: path.join(dir, "scenes.json") });
+    await sceneStore.create({
+      id: "agentic_sleep",
+      name: "智能睡眠",
+      description: "按目标约束执行",
+      ordering: "safety_first",
+      fallback: { policy: "skip_continue" },
+      risk: { requireConfirmOn: ["high"] },
+      intent: {
+        goals: [
+          {
+            id: "g_light_off",
+            selector: { stableKey: "stable_living_light" },
+            action: "turn_off",
+            params: {}
+          },
+          {
+            id: "g_plug_on",
+            selector: { room: "living_room", tags: ["plug"] },
+            action: "turn_on",
+            params: {}
+          },
+          {
+            id: "g_missing",
+            selector: { stableKey: "stable_missing_device" },
+            action: "turn_off",
+            params: {}
+          }
+        ]
+      }
+    });
+
+    const store = new FakeDeviceStore();
+    store.items.delete("light1");
+    store.items.set("light1_v2", {
+      id: "light1_v2",
+      name: "客厅灯-重连后",
+      placement: { room: "living_room" },
+      semantics: { tags: ["light"] },
+      identity: { stableKey: "stable_living_light" },
+      capabilities: [{ action: "turn_off" }, { action: "turn_on" }]
+    });
+    store.items.set("plug1", {
+      id: "plug1",
+      name: "插座",
+      placement: { room: "living_room" },
+      semantics: { tags: ["plug"] },
+      capabilities: [{ action: "turn_on" }]
+    });
+
+    const bus = new FakeBus({
+      outcomes: {
+        "light1_v2:turn_off": { status: "ok" },
+        "plug1:turn_on": { status: "ok" }
+      }
+    });
+
+    const sceneRunner = new SceneRunner({
+      sceneStore,
+      store,
+      bus,
+      defaultTimeoutMs: 200
+    });
+    const agenticSceneRunner = new AgenticSceneRunner({
+      sceneStore,
+      store,
+      bus,
+      defaultTimeoutMs: 200
+    });
+
+    const app = buildServer({
+      store,
+      logger: console,
+      config: { mode: "mock", assetsDir: path.join(dir, "assets") },
+      sceneStore,
+      sceneRunner,
+      agenticSceneRunner
+    });
+
+    const planRes = await app.inject({
+      method: "POST",
+      url: "/scenes/agentic_sleep/plan",
+      payload: {}
+    });
+    assert.equal(planRes.statusCode, 200);
+    const plan = planRes.json();
+    assert.equal(plan.mode, "agentic");
+    assert.equal(plan.steps.length, 3);
+    const missingPlanStep = plan.steps.find((step) => step.goalId === "g_missing");
+    assert.equal(missingPlanStep?.status, "skipped");
+    assert.ok(plan.steps.some((step) => step.deviceId === "light1_v2"));
+
+    const runRes = await app.inject({
+      method: "POST",
+      url: "/scenes/agentic_sleep/agent-run",
+      payload: {}
+    });
+    assert.equal(runRes.statusCode, 200);
+    const run = runRes.json();
+    assert.equal(run.mode, "agentic");
+    assert.equal(run.steps.length, 3);
+    const missingRunStep = run.steps.find((step) => step.goalId === "g_missing");
+    assert.equal(missingRunStep?.status, "skipped");
+    assert.equal(run.steps.filter((step) => step.status === "ok").length, 2);
+    assert.equal(run.status, "partial_ok");
+
+    const getRunRes = await app.inject({
+      method: "GET",
+      url: `/scene-runs/${encodeURIComponent(run.runId)}`
+    });
+    assert.equal(getRunRes.statusCode, 200);
+    assert.equal(getRunRes.json().runId, run.runId);
 
     await app.close();
   });

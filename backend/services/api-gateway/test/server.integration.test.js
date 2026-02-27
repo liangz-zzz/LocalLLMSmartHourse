@@ -22,11 +22,13 @@ test("GET /devices and /devices/:id return data from store", async (t) => {
   const listJson = await listRes.json();
   assert.equal(listJson.count, 1);
   assert.equal(listJson.items[0].id, "plug_living_room_1");
+  assert.equal(typeof listJson.items[0].identity?.stableKey, "string");
 
   const detailRes = await fetch(`${baseUrl}/devices/plug_living_room_1`);
   assert.equal(detailRes.status, 200);
   const detail = await detailRes.json();
   assert.equal(detail.id, "plug_living_room_1");
+  assert.equal(typeof detail.identity?.stableKey, "string");
 
   const notFound = await fetch(`${baseUrl}/devices/unknown`);
   assert.equal(notFound.status, 404);

@@ -11,6 +11,8 @@ import { AutomationStore } from "./automation-store.js";
 import { DeviceOverridesStore } from "./device-overrides-store.js";
 import { VirtualDevicesStore } from "./virtual-devices-store.js";
 import { SceneRunner } from "./scene-runner.js";
+import { DeviceIdentityResolver } from "./device-identity.js";
+import { AgenticSceneRunner } from "./agentic-scene-runner.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -60,6 +62,7 @@ async function main() {
   let deviceOverridesStore;
   let virtualDevicesStore;
   let sceneRunner;
+  let agenticSceneRunner;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
@@ -93,6 +96,17 @@ async function main() {
   }
 
   sceneRunner = new SceneRunner({ sceneStore, store, bus, logger });
+  if (config.agenticSceneEnabled) {
+    const identityResolver = new DeviceIdentityResolver({ store, logger });
+    agenticSceneRunner = new AgenticSceneRunner({
+      sceneStore,
+      store,
+      bus,
+      logger,
+      runTtlMs: config.agenticSceneRunTtlMs,
+      identityResolver
+    });
+  }
   const app = buildServer({
     store,
     logger,
@@ -105,7 +119,8 @@ async function main() {
     automationStore,
     deviceOverridesStore,
     virtualDevicesStore,
-    sceneRunner
+    sceneRunner,
+    agenticSceneRunner
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {

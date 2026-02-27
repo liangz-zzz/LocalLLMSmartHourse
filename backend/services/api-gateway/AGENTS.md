@@ -5,6 +5,7 @@
 规划要点
 - 框架：NestJS/Fastify + TypeScript。
 - 接口：设备 CRUD、状态查询、动作执行、场景/规则 CRUD（含 `/scenes/:id/expanded`）、户型/布局 CRUD、资产上传、LLM 意图入口。
+- 场景执行支持双轨：经典 `POST /scenes/:id/run`（step-based）与 Agentic `POST /scenes/:id/plan` / `POST /scenes/:id/agent-run`（goal-based，运行时选设备）。
 - 实时：WebSocket/SSE 订阅 MQTT 归一化事件。
 - 安全：JWT + API Key（给 LLM），后续可支持 HA SSO。
 
@@ -15,6 +16,7 @@
 - 动作参数校验：capability.parameters 支持 `required`/`enum`/`minimum`/`maximum`，REST/WS 会按定义校验并返回 reason。
 - 鉴权：可设置 `API_KEYS`（逗号分隔）启用 API Key 校验，HTTP 使用 `X-API-Key` 或 Bearer，WS 使用 `?api_key=` 或 `Sec-WebSocket-Protocol` 携带；也可配置 `JWT_SECRET`（可选 `JWT_AUD`/`JWT_ISS`）启用 JWT 校验（互为或条件）。
 - 场景文件：通过 `SCENES_PATH`（或 `CONFIG_DIR/scenes.json`）配置；与设备配置文件同目录便于管理。
+- Agentic 场景：`AGENTIC_SCENE_ENABLED=true` 时启用；最近执行报告可通过 `GET /scene-runs/:runId` 查询（内存 TTL 由 `AGENTIC_SCENE_RUN_TTL_MS` 控制）。
 - 户型文件：通过 `FLOORPLANS_PATH`（或 `CONFIG_DIR/floorplans.json`）配置；资产目录使用 `ASSETS_DIR`（默认 `${CONFIG_DIR}/assets`），上传限制由 `ASSET_MAX_IMAGE_MB`/`ASSET_MAX_MODEL_MB` 控制。
 - 设备覆盖配置：`/device-overrides` 仅维护 `devices[]`，保存时会保留 `virtual`/`voice_control` 等顶层段，避免覆盖模拟器配置。
 

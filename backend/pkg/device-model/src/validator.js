@@ -143,6 +143,12 @@ const semanticsSchema = z.object({
   model: z.string().optional()
 });
 
+const identitySchema = z.object({
+  stableKey: z.string().min(1).optional(),
+  fingerprint: z.record(z.unknown()).optional(),
+  aliasKeys: z.array(z.string().min(1)).optional()
+});
+
 export const deviceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -151,7 +157,8 @@ export const deviceSchema = z.object({
   bindings: bindingsSchema,
   traits: traitsSchema,
   capabilities: z.array(capabilitySchema),
-  semantics: semanticsSchema.optional()
+  semantics: semanticsSchema.optional(),
+  identity: identitySchema.optional()
 });
 
 export function validateDevice(input) {

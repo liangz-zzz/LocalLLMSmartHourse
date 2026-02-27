@@ -32,6 +32,8 @@ export function loadConfig() {
     deviceOverridesPath,
     assetMaxImageMb,
     assetMaxModelMb,
+    agenticSceneEnabled: parseBoolean(process.env.AGENTIC_SCENE_ENABLED, false),
+    agenticSceneRunTtlMs: parsePositiveNumber(process.env.AGENTIC_SCENE_RUN_TTL_MS, 60 * 60 * 1000),
     apiKeys: (process.env.API_KEYS || process.env.API_KEY || "")
       .split(",")
       .map((s) => s.trim())
@@ -46,4 +48,12 @@ function parsePositiveNumber(value, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return fallback;
   return num;
+}
+
+function parseBoolean(value, fallback) {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return fallback;
+  if (["1", "true", "yes", "on"].includes(v)) return true;
+  if (["0", "false", "no", "off"].includes(v)) return false;
+  return fallback;
 }

@@ -43,6 +43,19 @@ components:
             $ref: "#/components/schemas/Capability"
         semantics:
           type: object
+        identity:
+          $ref: "#/components/schemas/DeviceIdentity"
+    DeviceIdentity:
+      type: object
+      properties:
+        stableKey:
+          type: string
+        fingerprint:
+          type: object
+        aliasKeys:
+          type: array
+          items:
+            type: string
     Placement:
       type: object
       properties:
@@ -368,6 +381,10 @@ components:
     SceneRunRequest:
       type: object
       properties:
+        mode:
+          type: string
+          enum: [classic, agentic]
+          default: classic
         dryRun:
           type: boolean
           default: false
@@ -379,9 +396,11 @@ components:
         timeoutMs:
           type: integer
           minimum: 1
+        context:
+          type: object
     SceneRunStepResult:
       type: object
-      required: [index, deviceId, action, status]
+      required: [index, action, status]
       properties:
         index:
           type: integer
@@ -391,17 +410,59 @@ components:
           type: string
         status:
           type: string
-          enum: [queued, ok, error, timeout, dry_run]
+          enum: [planned, queued, ok, error, timeout, dry_run, skipped]
         reason:
           type: string
         transport:
           type: string
         params:
           type: object
+        goalId:
+          type: string
+        stableKey:
+          type: string
+        deviceName:
+          type: string
+        selectionScore:
+          type: number
+        online:
+          type: boolean
         startedAt:
           type: integer
         endedAt:
           type: integer
+    SceneDecision:
+      type: object
+      properties:
+        index:
+          type: integer
+        goalId:
+          type: string
+        decision:
+          type: string
+        reason:
+          type: string
+        rationale:
+          type: string
+        action:
+          type: string
+        selector:
+          type: object
+        selected:
+          type: object
+    SceneRiskSummary:
+      type: object
+      properties:
+        maxLevel:
+          type: string
+          enum: [low, medium, high]
+        requireConfirmOn:
+          type: array
+          items:
+            type: string
+            enum: [low, medium, high]
+        requiresConfirm:
+          type: boolean
     SceneRunResult:
       type: object
       required: [runId, sceneId, status, steps, startedAt]
@@ -410,6 +471,9 @@ components:
           type: string
         sceneId:
           type: string
+        mode:
+          type: string
+          enum: [classic, agentic]
         status:
           type: string
           enum: [running, ok, partial_ok, error, timeout]
@@ -417,12 +481,57 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SceneRunStepResult"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SceneDecision"
+        ordering:
+          type: string
+        fallbackPolicy:
+          type: string
+        risk:
+          $ref: "#/components/schemas/SceneRiskSummary"
         startedAt:
           type: integer
         endedAt:
           type: integer
         durationMs:
           type: integer
+    ScenePlanRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+        context:
+          type: object
+    ScenePlanResult:
+      type: object
+      required: [runId, sceneId, mode, type, steps]
+      properties:
+        runId:
+          type: string
+        sceneId:
+          type: string
+        mode:
+          type: string
+          enum: [agentic]
+        type:
+          type: string
+          enum: [plan]
+        ordering:
+          type: string
+        fallbackPolicy:
+          type: string
+        risk:
+          $ref: "#/components/schemas/SceneRiskSummary"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SceneDecision"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/SceneRunStepResult"
 paths:
   /health:
     get:
@@ -830,6 +939,88 @@ paths:
           description: Scene not found
         "503":
           description: Scene run unavailable
+  /scenes/{id}/plan:
+    post:
+      summary: Build an agentic execution plan for a goal-based scene
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenePlanRequest"
+      responses:
+        "200":
+          description: Plan generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenePlanResult"
+        "400":
+          description: Invalid scene or request
+        "404":
+          description: Scene not found
+        "503":
+          description: Agentic scene runner unavailable
+  /scenes/{id}/agent-run:
+    post:
+      summary: Run a goal-based scene with agentic device selection
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SceneRunRequest"
+      responses:
+        "200":
+          description: Agentic run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SceneRunResult"
+        "400":
+          description: Invalid request or confirmation required
+        "404":
+          description: Scene not found
+        "503":
+          description: Agentic scene runner unavailable
+  /scene-runs/{runId}:
+    get:
+      summary: Get one agentic scene run report
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scene run report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SceneRunResult"
+        "404":
+          description: Scene run not found
+        "503":
+          description: Agentic scene runner unavailable
   /virtual-devices/config:
     get:
       summary: Get virtual simulator config from devices.config.json

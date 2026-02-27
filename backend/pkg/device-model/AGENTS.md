@@ -12,6 +12,7 @@
 - `capabilities`: 可执行动作，描述 action 名、参数名/类型/范围
 - `semantics`: 供 LLM/搜索的自然语言描述、标签、偏好（例如常用场景、限制因素）
 - `telemetry`: 元数据，如 `last_seen`, `battery`, `signal`
+- `identity`: 稳定身份信息（`stableKey/fingerprint/aliasKeys`），用于设备重连后的稳态映射
 
 placement 细化（满足“位置/功能描述”需求）
 - `room` (必填): `living_room` 等

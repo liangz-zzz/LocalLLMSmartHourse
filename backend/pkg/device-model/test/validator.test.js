@@ -52,3 +52,20 @@ test("validateDevice accepts voice_control binding", () => {
   const result = validateDevice(voiceEnabled);
   assert.equal(result.success, true);
 });
+
+test("validateDevice accepts identity fields", () => {
+  const withIdentity = {
+    ...sample,
+    identity: {
+      stableKey: "stable_living_room_plug",
+      fingerprint: {
+        protocol: "zigbee",
+        room: "living_room",
+        ieee: "0x00158d00045abcde"
+      },
+      aliasKeys: ["plug_living_room_1", "客厅插座"]
+    }
+  };
+  const result = validateDevice(withIdentity);
+  assert.equal(result.success, true);
+});

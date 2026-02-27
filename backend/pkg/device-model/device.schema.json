@@ -221,6 +221,18 @@
         "model": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "stableKey": { "type": "string", "minLength": 1 },
+        "fingerprint": { "type": "object" },
+        "aliasKeys": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

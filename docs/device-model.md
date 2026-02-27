@@ -12,6 +12,7 @@
 - `capabilities` (array): 可执行动作，含参数定义（类型/范围/单位、是否必填）
 - `semantics` (object): 自然语言描述/标签/偏好，供 LLM 知识库
 - `telemetry` (object): 元数据，如 `last_seen`, `battery`, `rssi`
+- `identity` (object): 稳定业务身份（`stableKey/fingerprint/aliasKeys`），用于设备重连后的稳定匹配
 
 ### placement（位置/安装/描述）
 ```json
@@ -150,7 +151,15 @@
       }
     },
     "semantics": { "type": "object" },
-    "telemetry": { "type": "object" }
+    "telemetry": { "type": "object" },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "stableKey": { "type": "string" },
+        "fingerprint": { "type": "object" },
+        "aliasKeys": { "type": "array", "items": { "type": "string" } }
+      }
+    }
   },
   "additionalProperties": false
 }

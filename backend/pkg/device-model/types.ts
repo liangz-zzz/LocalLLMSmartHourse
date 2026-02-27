@@ -144,6 +144,12 @@ export interface Semantics {
   model?: string;
 }
 
+export interface DeviceIdentity {
+  stableKey?: string;
+  fingerprint?: Record<string, unknown>;
+  aliasKeys?: string[];
+}
+
 export interface DeviceModel {
   id: string;
   name: string;
@@ -153,4 +159,5 @@ export interface DeviceModel {
   traits: DeviceTraits;
   capabilities: Capability[];
   semantics?: Semantics;
+  identity?: DeviceIdentity;
 }

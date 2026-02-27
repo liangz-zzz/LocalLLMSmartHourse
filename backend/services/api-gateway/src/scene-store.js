@@ -154,43 +154,54 @@ function validateSceneList(list) {
     if (typeof scene.description !== "string") {
       errors.push(`scene[${sceneIndex}].description must be string`);
     }
-    if (!Array.isArray(scene.steps)) {
-      errors.push(`scene[${sceneIndex}].steps must be an array`);
+    const hasLegacySteps = Array.isArray(scene.steps);
+    const hasIntentGoals = Array.isArray(scene?.intent?.goals);
+    if (hasLegacySteps && hasIntentGoals) {
+      errors.push(`scene[${sceneIndex}] cannot define both steps and intent.goals`);
+      return;
+    }
+    if (!hasLegacySteps && !hasIntentGoals) {
+      errors.push(`scene[${sceneIndex}] must define either steps[] or intent.goals[]`);
       return;
     }
 
-    for (let stepIndex = 0; stepIndex < scene.steps.length; stepIndex++) {
-      const step = scene.steps[stepIndex];
-      const prefix = `scene[${sceneIndex}].steps[${stepIndex}]`;
-      if (!isPlainObject(step)) {
-        errors.push(`${prefix} must be an object`);
-        continue;
+    if (hasLegacySteps) {
+      for (let stepIndex = 0; stepIndex < scene.steps.length; stepIndex++) {
+        const step = scene.steps[stepIndex];
+        const prefix = `scene[${sceneIndex}].steps[${stepIndex}]`;
+        if (!isPlainObject(step)) {
+          errors.push(`${prefix} must be an object`);
+          continue;
+        }
+        if (step.type === "device") {
+          if (typeof step.deviceId !== "string" || !step.deviceId.trim()) {
+            errors.push(`${prefix}.deviceId is required`);
+          }
+          if (typeof step.action !== "string" || !step.action.trim()) {
+            errors.push(`${prefix}.action is required`);
+          }
+          if (step.params !== undefined && !isPlainObject(step.params)) {
+            errors.push(`${prefix}.params must be an object`);
+          }
+          if (step.wait_for !== undefined) {
+            validateWaitFor(step.wait_for, `${prefix}.wait_for`, errors);
+          }
+        } else if (step.type === "scene") {
+          if (typeof step.sceneId !== "string" || !step.sceneId.trim()) {
+            errors.push(`${prefix}.sceneId is required`);
+          } else if (scene.id) {
+            const list = refs.get(scene.id) || [];
+            list.push(step.sceneId);
+            refs.set(scene.id, list);
+          }
+        } else {
+          errors.push(`${prefix}.type must be "device" or "scene"`);
+        }
       }
-      if (step.type === "device") {
-        if (typeof step.deviceId !== "string" || !step.deviceId.trim()) {
-          errors.push(`${prefix}.deviceId is required`);
-        }
-        if (typeof step.action !== "string" || !step.action.trim()) {
-          errors.push(`${prefix}.action is required`);
-        }
-        if (step.params !== undefined && !isPlainObject(step.params)) {
-          errors.push(`${prefix}.params must be an object`);
-        }
-        if (step.wait_for !== undefined) {
-          validateWaitFor(step.wait_for, `${prefix}.wait_for`, errors);
-        }
-      } else if (step.type === "scene") {
-        if (typeof step.sceneId !== "string" || !step.sceneId.trim()) {
-          errors.push(`${prefix}.sceneId is required`);
-        } else if (scene.id) {
-          const list = refs.get(scene.id) || [];
-          list.push(step.sceneId);
-          refs.set(scene.id, list);
-        }
-      } else {
-        errors.push(`${prefix}.type must be "device" or "scene"`);
-      }
+      return;
     }
+
+    validateAgenticScene(scene, sceneIndex, errors);
   });
 
   for (const [owner, targets] of refs.entries()) {
@@ -233,6 +244,113 @@ function validateWaitFor(waitFor, prefix, errors) {
   }
   if (waitFor.on_timeout !== undefined && waitFor.on_timeout !== "abort") {
     errors.push(`${prefix}.on_timeout must be "abort"`);
+  }
+}
+
+function validateAgenticScene(scene, sceneIndex, errors) {
+  const prefix = `scene[${sceneIndex}]`;
+  if (!isPlainObject(scene.intent)) {
+    errors.push(`${prefix}.intent must be an object`);
+    return;
+  }
+  const goals = Array.isArray(scene.intent.goals) ? scene.intent.goals : [];
+  if (!goals.length) {
+    errors.push(`${prefix}.intent.goals must be a non-empty array`);
+    return;
+  }
+  for (let goalIndex = 0; goalIndex < goals.length; goalIndex += 1) {
+    const goal = goals[goalIndex];
+    const goalPrefix = `${prefix}.intent.goals[${goalIndex}]`;
+    if (!isPlainObject(goal)) {
+      errors.push(`${goalPrefix} must be an object`);
+      continue;
+    }
+    if (!isPlainObject(goal.selector)) {
+      errors.push(`${goalPrefix}.selector must be an object`);
+    } else {
+      validateGoalSelector(goal.selector, `${goalPrefix}.selector`, errors);
+    }
+    if (typeof goal.action !== "string" || !goal.action.trim()) {
+      errors.push(`${goalPrefix}.action is required`);
+    }
+    if (goal.params !== undefined && !isPlainObject(goal.params)) {
+      errors.push(`${goalPrefix}.params must be an object`);
+    }
+    if (goal.wait_for !== undefined) {
+      validateWaitFor(goal.wait_for, `${goalPrefix}.wait_for`, errors);
+    }
+    if (goal.optional !== undefined && typeof goal.optional !== "boolean") {
+      errors.push(`${goalPrefix}.optional must be boolean`);
+    }
+    if (goal.priority !== undefined && !Number.isFinite(goal.priority)) {
+      errors.push(`${goalPrefix}.priority must be number`);
+    }
+  }
+
+  if (scene.ordering !== undefined) {
+    const key = String(scene.ordering || "").trim().toLowerCase();
+    if (!["declared", "safety_first", "comfort_first", "energy_first"].includes(key)) {
+      errors.push(`${prefix}.ordering must be one of declared/safety_first/comfort_first/energy_first`);
+    }
+  }
+  if (scene.fallback !== undefined) {
+    if (!isPlainObject(scene.fallback)) {
+      errors.push(`${prefix}.fallback must be an object`);
+    } else if (scene.fallback.policy !== undefined) {
+      const key = String(scene.fallback.policy || "").trim().toLowerCase();
+      if (!["skip_continue", "abort"].includes(key)) {
+        errors.push(`${prefix}.fallback.policy must be skip_continue or abort`);
+      }
+    }
+  }
+  if (scene.risk !== undefined) {
+    if (!isPlainObject(scene.risk)) {
+      errors.push(`${prefix}.risk must be an object`);
+    } else if (scene.risk.requireConfirmOn !== undefined) {
+      if (!Array.isArray(scene.risk.requireConfirmOn)) {
+        errors.push(`${prefix}.risk.requireConfirmOn must be an array`);
+      } else if (
+        scene.risk.requireConfirmOn.some(
+          (item) => !["low", "medium", "high"].includes(String(item || "").trim().toLowerCase())
+        )
+      ) {
+        errors.push(`${prefix}.risk.requireConfirmOn supports only low/medium/high`);
+      }
+    }
+  }
+}
+
+function validateGoalSelector(selector, prefix, errors) {
+  if (
+    selector.stableKey === undefined &&
+    selector.deviceId === undefined &&
+    selector.room === undefined &&
+    selector.tags === undefined &&
+    selector.query === undefined &&
+    selector.capability === undefined
+  ) {
+    errors.push(`${prefix} must include at least one selector field`);
+    return;
+  }
+  if (selector.stableKey !== undefined && (typeof selector.stableKey !== "string" || !selector.stableKey.trim())) {
+    errors.push(`${prefix}.stableKey must be a non-empty string`);
+  }
+  if (selector.deviceId !== undefined && (typeof selector.deviceId !== "string" || !selector.deviceId.trim())) {
+    errors.push(`${prefix}.deviceId must be a non-empty string`);
+  }
+  if (selector.room !== undefined && (typeof selector.room !== "string" || !selector.room.trim())) {
+    errors.push(`${prefix}.room must be a non-empty string`);
+  }
+  if (selector.query !== undefined && (typeof selector.query !== "string" || !selector.query.trim())) {
+    errors.push(`${prefix}.query must be a non-empty string`);
+  }
+  if (selector.capability !== undefined && (typeof selector.capability !== "string" || !selector.capability.trim())) {
+    errors.push(`${prefix}.capability must be a non-empty string`);
+  }
+  if (selector.tags !== undefined) {
+    if (!Array.isArray(selector.tags) || selector.tags.some((item) => typeof item !== "string" || !item.trim())) {
+      errors.push(`${prefix}.tags must be a non-empty string array`);
+    }
   }
 }
 
@@ -284,6 +402,9 @@ function expandScene(sceneId, map, visiting) {
   const scene = map.get(sceneId);
   if (!scene) {
     throw new SceneStoreError("scene_not_found", `scene ${sceneId} not found`);
+  }
+  if (!Array.isArray(scene.steps)) {
+    throw new SceneStoreError("scene_not_expandable", `scene ${sceneId} is not step-based`);
   }
   visiting.add(sceneId);
   const out = [];

@@ -32,6 +32,37 @@ const TOOLS = [
     }
   },
   {
+    name: "scenes.plan",
+    description: "Build an agentic execution plan for a goal-based scene.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sceneId"],
+      properties: {
+        sceneId: { type: "string" },
+        requestId: { type: "string" },
+        context: { type: "object" }
+      }
+    }
+  },
+  {
+    name: "scenes.agent_run",
+    description: "Run a goal-based scene with runtime device resolution.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sceneId"],
+      properties: {
+        sceneId: { type: "string" },
+        dryRun: { type: "boolean" },
+        confirm: { type: "boolean" },
+        requestId: { type: "string" },
+        timeoutMs: { type: "number" },
+        context: { type: "object" }
+      }
+    }
+  },
+  {
     name: "devices.get",
     description: "Get a device by id.",
     inputSchema: {
@@ -39,6 +70,23 @@ const TOOLS = [
       additionalProperties: false,
       required: ["id"],
       properties: { id: { type: "string" } }
+    }
+  },
+  {
+    name: "devices.resolve",
+    description: "Resolve one best-fit device by stable identity and selector constraints.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        stableKey: { type: "string" },
+        deviceId: { type: "string" },
+        room: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+        query: { type: "string" },
+        capability: { type: "string" },
+        action: { type: "string" }
+      }
     }
   },
   {
@@ -135,7 +183,10 @@ export async function callTool({ name, args, config }) {
     if (name === "system.health") return await systemHealth({ config });
     if (name === "devices.list") return await devicesList({ args, config });
     if (name === "scenes.list") return await scenesList({ args, config });
+    if (name === "scenes.plan") return await scenesPlan({ args, config });
+    if (name === "scenes.agent_run") return await scenesAgentRun({ args, config });
     if (name === "devices.get") return await devicesGet({ args, config });
+    if (name === "devices.resolve") return await devicesResolve({ args, config });
     if (name === "devices.state") return await devicesState({ args, config });
     if (name === "devices.invoke") return await devicesInvoke({ args, config });
     if (name === "actions.batch_invoke") return await actionsBatchInvoke({ args, config });
@@ -197,6 +248,46 @@ async function scenesList({ args, config }) {
   return asJsonResult({ items, count: items.length });
 }
 
+async function scenesPlan({ args, config }) {
+  const sceneId = String(args?.sceneId || "").trim();
+  if (!sceneId) return asError("invalid_args", "sceneId is required");
+  const payload = {};
+  if (typeof args?.requestId === "string" && args.requestId.trim()) payload.requestId = args.requestId.trim();
+  if (isPlainObject(args?.context)) payload.context = args.context;
+  try {
+    const out = await fetchJson(`${config.apiGatewayBase}/scenes/${encodeURIComponent(sceneId)}/plan`, {
+      method: "POST",
+      headers: { ...authHeaders(config), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    return asJsonResult(out);
+  } catch (err) {
+    return asError("upstream_error", err?.message || String(err));
+  }
+}
+
+async function scenesAgentRun({ args, config }) {
+  const sceneId = String(args?.sceneId || "").trim();
+  if (!sceneId) return asError("invalid_args", "sceneId is required");
+  const payload = {
+    dryRun: typeof args?.dryRun === "boolean" ? args.dryRun : config.defaultDryRun,
+    confirm: typeof args?.confirm === "boolean" ? args.confirm : false
+  };
+  if (typeof args?.requestId === "string" && args.requestId.trim()) payload.requestId = args.requestId.trim();
+  if (Number.isFinite(args?.timeoutMs)) payload.timeoutMs = Number(args.timeoutMs);
+  if (isPlainObject(args?.context)) payload.context = args.context;
+  try {
+    const out = await fetchJson(`${config.apiGatewayBase}/scenes/${encodeURIComponent(sceneId)}/agent-run`, {
+      method: "POST",
+      headers: { ...authHeaders(config), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    return asJsonResult(out);
+  } catch (err) {
+    return asError("upstream_error", err?.message || String(err));
+  }
+}
+
 async function devicesGet({ args, config }) {
   const id = String(args?.id || "").trim();
   if (!id) return asError("invalid_args", "id is required");
@@ -204,6 +295,57 @@ async function devicesGet({ args, config }) {
     headers: authHeaders(config)
   });
   return asJsonResult(sanitizeDeviceForAgent(device));
+}
+
+async function devicesResolve({ args, config }) {
+  const res = await fetchJson(`${config.apiGatewayBase}/devices`, {
+    headers: authHeaders(config)
+  });
+  const items = Array.isArray(res?.items) ? res.items.map(sanitizeDeviceForAgent) : [];
+  const stableKey = normalize(args?.stableKey);
+  const deviceId = normalize(args?.deviceId);
+  const room = normalize(args?.room);
+  const tags = Array.isArray(args?.tags) ? args.tags.map(normalize).filter(Boolean) : [];
+  const query = normalize(args?.query);
+  const capability = normalize(args?.capability);
+  const action = normalize(args?.action);
+
+  const candidates = items
+    .filter((device) => {
+      if (stableKey && normalize(device?.identity?.stableKey) !== stableKey) return false;
+      if (deviceId && normalize(device?.id) !== deviceId) return false;
+      if (room && normalize(device?.placement?.room) !== room) return false;
+      if (tags.length) {
+        const dt = Array.isArray(device?.semantics?.tags) ? device.semantics.tags.map(normalize) : [];
+        if (!tags.every((tag) => dt.includes(tag))) return false;
+      }
+      if (capability || action) {
+        const actions = Array.isArray(device?.capabilities) ? device.capabilities.map((item) => normalize(item?.action)) : [];
+        if (capability && !actions.includes(capability)) return false;
+        if (action && !actions.includes(action)) return false;
+      }
+      if (query) {
+        const hay = [
+          device?.id,
+          device?.name,
+          device?.semantics?.summary,
+          device?.semantics?.description,
+          ...(device?.semantics?.aliases || []),
+          ...(device?.identity?.aliasKeys || [])
+        ]
+          .map(normalize)
+          .join(" ");
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => String(a?.id || "").localeCompare(String(b?.id || "")));
+
+  return asJsonResult({
+    selected: candidates[0] || null,
+    count: candidates.length,
+    candidates
+  });
 }
 
 async function devicesState({ args, config }) {

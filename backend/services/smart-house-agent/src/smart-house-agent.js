@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 const MAX_ITERATIONS = 8;
-const WRITE_TOOLS = new Set(["devices.invoke", "actions.batch_invoke"]);
+const WRITE_TOOLS = new Set(["devices.invoke", "actions.batch_invoke", "scenes.agent_run"]);
 const MAX_TOOL_CALLS_PER_TURN = 16;
 
 export function createAgent({ config, logger, sessionStore, mcp, llm }) {

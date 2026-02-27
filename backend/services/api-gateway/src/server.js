@@ -14,6 +14,7 @@ import { AutomationStoreError } from "./automation-store.js";
 import { DeviceOverridesStoreError } from "./device-overrides-store.js";
 import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
 import { SceneRunnerError } from "./scene-runner.js";
+import { DeviceIdentityResolver } from "./device-identity.js";
 
 export function buildServer({
   store,
@@ -27,7 +28,8 @@ export function buildServer({
   automationStore,
   deviceOverridesStore,
   virtualDevicesStore,
-  sceneRunner
+  sceneRunner,
+  agenticSceneRunner
 }) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
@@ -37,6 +39,7 @@ export function buildServer({
   }
   const assetMaxImageBytes = Math.max(1, Number(config.assetMaxImageMb || 20)) * 1024 * 1024;
   const assetMaxModelBytes = Math.max(1, Number(config.assetMaxModelMb || 200)) * 1024 * 1024;
+  const identityResolver = new DeviceIdentityResolver({ store, logger });
 
   try {
     fs.mkdirSync(assetsDir, { recursive: true });
@@ -173,7 +176,8 @@ export function buildServer({
 
   app.get("/devices", { preHandler: authGuard }, async () => {
     const list = await store.list();
-    return { items: list, count: list.length };
+    const items = identityResolver.enrichDevices(list);
+    return { items, count: items.length };
   });
 
   app.get("/devices/:id", { preHandler: authGuard }, async (req, reply) => {
@@ -181,7 +185,7 @@ export function buildServer({
     if (!device) {
       return reply.code(404).send({ error: "not_found" });
     }
-    return device;
+    return identityResolver.enrichDevice(device);
   });
 
   app.get("/devices/:id/actions", { preHandler: authGuard }, async (req, reply) => {
@@ -266,25 +270,94 @@ export function buildServer({
 
   app.post("/scenes/:id/run", { preHandler: authGuard }, async (req, reply) => {
     if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
-    if (!sceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
     try {
+      const mode = String(req.body?.mode || "classic")
+        .trim()
+        .toLowerCase();
       const dryRun = req.body?.dryRun === true;
       const confirm = req.body?.confirm === true;
       const requestId = typeof req.body?.requestId === "string" ? req.body.requestId.trim() : "";
       const timeoutMs = req.body?.timeoutMs;
-      const result = await sceneRunner.run({
+      if (mode === "agentic") {
+        if (!agenticSceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+        return await agenticSceneRunner.run({
+          sceneId: req.params.id,
+          dryRun,
+          confirm,
+          requestId,
+          timeoutMs,
+          context: req.body?.context
+        });
+      }
+      if (!sceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+      return await sceneRunner.run({
         sceneId: req.params.id,
         dryRun,
         confirm,
         requestId,
         timeoutMs
       });
-      return result;
     } catch (err) {
       if (err instanceof SceneRunnerError) {
         return handleSceneRunError(err, reply, logger);
       }
       return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.post("/scenes/:id/plan", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    if (!agenticSceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+    try {
+      const requestId = typeof req.body?.requestId === "string" ? req.body.requestId.trim() : "";
+      const out = await agenticSceneRunner.plan({
+        sceneId: req.params.id,
+        requestId,
+        context: req.body?.context
+      });
+      return out;
+    } catch (err) {
+      if (err instanceof SceneRunnerError) {
+        return handleSceneRunError(err, reply, logger);
+      }
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.post("/scenes/:id/agent-run", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    if (!agenticSceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+    try {
+      const dryRun = req.body?.dryRun === true;
+      const confirm = req.body?.confirm === true;
+      const requestId = typeof req.body?.requestId === "string" ? req.body.requestId.trim() : "";
+      const timeoutMs = req.body?.timeoutMs;
+      const out = await agenticSceneRunner.run({
+        sceneId: req.params.id,
+        dryRun,
+        confirm,
+        requestId,
+        timeoutMs,
+        context: req.body?.context
+      });
+      return out;
+    } catch (err) {
+      if (err instanceof SceneRunnerError) {
+        return handleSceneRunError(err, reply, logger);
+      }
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
+  app.get("/scene-runs/:runId", { preHandler: authGuard }, async (req, reply) => {
+    if (!agenticSceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+    try {
+      return agenticSceneRunner.getRun(req.params.runId);
+    } catch (err) {
+      if (err instanceof SceneRunnerError) {
+        return handleSceneRunError(err, reply, logger);
+      }
+      throw err;
     }
   });
 
@@ -622,6 +695,9 @@ function handleSceneError(err, reply, logger) {
     if (err.code === "invalid_scene") {
       return reply.code(400).send({ error: "invalid_scene", reason: err.message, details: err.details || [] });
     }
+    if (err.code === "scene_not_expandable") {
+      return reply.code(400).send({ error: "scene_not_expandable", reason: err.message });
+    }
     logger?.warn?.("Scene store error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "scene_store_error", message: err.message });
   }
@@ -700,6 +776,9 @@ function handleSceneRunError(err, reply, logger) {
     }
     if (err.code === "scene_run_unavailable") {
       return reply.code(503).send({ error: "scene_run_unavailable", reason: err.message });
+    }
+    if (err.code === "scene_not_found" || err.code === "scene_run_not_found") {
+      return reply.code(404).send({ error: err.code, reason: err.message });
     }
     logger?.warn?.("Scene run error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "scene_run_error", message: err.message });

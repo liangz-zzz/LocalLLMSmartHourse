@@ -113,3 +113,36 @@ test("scene store detects cycles", async () => {
     );
   });
 });
+
+test("scene store accepts goal-based scene and marks it non-expandable", async () => {
+  await withTempDir(async (dir) => {
+    const store = new SceneStore({ scenesPath: path.join(dir, "scenes.json") });
+
+    await store.create({
+      id: "agentic_sleep",
+      name: "Agentic Sleep",
+      description: "Goal based scene",
+      ordering: "safety_first",
+      fallback: { policy: "skip_continue" },
+      intent: {
+        goals: [
+          {
+            id: "g1",
+            selector: { room: "living_room", tags: ["light"] },
+            action: "turn_off",
+            params: {}
+          }
+        ]
+      }
+    });
+
+    const saved = await store.get("agentic_sleep");
+    assert.equal(Array.isArray(saved.intent.goals), true);
+    assert.equal(saved.intent.goals.length, 1);
+
+    await assert.rejects(
+      () => store.expand("agentic_sleep"),
+      (err) => err instanceof SceneStoreError && err.code === "scene_not_expandable"
+    );
+  });
+});
