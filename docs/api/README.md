@@ -1,6 +1,6 @@
 # API Surface
 
-- REST：见 `openapi.yaml`（设备列表/详情、动作下发与查询、规则 CRUD、户型/布局与资产上传、健康检查，支持 ApiKey/JWT）。
+- REST：见 `openapi.yaml`（设备列表/详情、动作下发与查询、规则 CRUD、户型/布局与资产上传、场景运行 `/scenes/{id}/run`、模拟设备配置 `/virtual-devices/*`、健康检查，支持 ApiKey/JWT）。
 - WS：`/ws`（查询参数 `?devices=id1,id2` 可过滤），推送事件：
   - `device_update`：归一化设备状态更新
   - `action_result`：动作回执

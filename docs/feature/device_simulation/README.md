@@ -93,6 +93,19 @@
 - `device-adapter` 的配置解析已将 `virtual` 视为保留顶层字段，不会误当作设备覆盖项。
 - `api-gateway` 的 `device-overrides` 存储已改为“保留 envelope”：通过 API 更新 `devices` 时不会覆盖 `virtual`/`voice_control` 等段。
 
+## API 管理接口
+- `GET /virtual-devices/config`：读取 `devices.config.json` 中 `virtual` 段（含 `enabled/defaults/devices`）。
+- `PUT /virtual-devices/config`：更新 `virtual` 配置（保留 `devices/voice_control` 等其他顶层段）。
+- `PUT /virtual-devices/:id`：按 `id` upsert 单个虚拟设备。
+- `DELETE /virtual-devices/:id`：删除单个虚拟设备。
+
+## 前端集成（户型编辑）
+- `frontend/web/pages/floorplan.tsx` 在设备模式新增“模拟设备”分区，可完成：
+  - 模拟器全局开关与默认参数（`latency_ms/failure_rate`）设置；
+  - 虚拟设备增删改（`id/name/placement/capabilities/traits/simulation`）；
+  - 保存后刷新 `/api/devices`，可直接在 2D 户型图布点并参与场景编排。
+- 场景执行从“前端逐步下发设备动作”改为调用 `POST /scenes/:id/run`，返回步骤级聚合结果用于测试反馈。
+
 ## 运行
 在 compose 中新增 `device-simulator` 服务（默认 `sleep infinity`，配合 autostart 覆盖运行 `npm run dev`）。
 
@@ -112,5 +125,12 @@
   - `virtual` 顶层字段不被误解析为设备覆盖
 - `backend/services/api-gateway/test/device-overrides-store.test.js`
   - 更新 device overrides 时保留 `virtual` 段
+- `backend/services/api-gateway/test/virtual-devices-routes.integration.test.js`
+  - 虚拟设备配置 API 的 CRUD 与 envelope 保留行为
+- `backend/services/api-gateway/test/scene-run.integration.test.js`
+  - 场景运行聚合结果、`dryRun` 与 `confirm` 行为
 - `backend/services/smart-house-mcp-server/test/tools.test.js`
   - MCP 返回对 Agent 隐藏模拟来源标记
+- `frontend/web/tests/floorplan.spec.ts`
+  - 场景运行结果展示
+  - 户型页新建模拟设备流程

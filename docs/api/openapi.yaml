@@ -296,6 +296,133 @@ components:
           type: integer
         height:
           type: integer
+    VirtualSimulatorDefaults:
+      type: object
+      required: [latency_ms, failure_rate]
+      properties:
+        latency_ms:
+          type: integer
+          minimum: 0
+        failure_rate:
+          type: number
+          minimum: 0
+          maximum: 1
+    VirtualDevice:
+      type: object
+      required: [id, name, placement, protocol, bindings, traits, capabilities]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        placement:
+          $ref: "#/components/schemas/Placement"
+        protocol:
+          type: string
+          example: virtual
+        bindings:
+          type: object
+        traits:
+          type: object
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        semantics:
+          type: object
+        simulation:
+          type: object
+          properties:
+            latency_ms:
+              type: integer
+              minimum: 0
+            failure_rate:
+              type: number
+              minimum: 0
+              maximum: 1
+            transitions:
+              type: object
+    VirtualDevicesConfig:
+      type: object
+      required: [enabled, defaults, devices]
+      properties:
+        enabled:
+          type: boolean
+        defaults:
+          $ref: "#/components/schemas/VirtualSimulatorDefaults"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualDevice"
+    VirtualDevicesConfigUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        defaults:
+          $ref: "#/components/schemas/VirtualSimulatorDefaults"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualDevice"
+    SceneRunRequest:
+      type: object
+      properties:
+        dryRun:
+          type: boolean
+          default: false
+        confirm:
+          type: boolean
+          default: false
+        requestId:
+          type: string
+        timeoutMs:
+          type: integer
+          minimum: 1
+    SceneRunStepResult:
+      type: object
+      required: [index, deviceId, action, status]
+      properties:
+        index:
+          type: integer
+        deviceId:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+          enum: [queued, ok, error, timeout, dry_run]
+        reason:
+          type: string
+        transport:
+          type: string
+        params:
+          type: object
+        startedAt:
+          type: integer
+        endedAt:
+          type: integer
+    SceneRunResult:
+      type: object
+      required: [runId, sceneId, status, steps, startedAt]
+      properties:
+        runId:
+          type: string
+        sceneId:
+          type: string
+        status:
+          type: string
+          enum: [running, ok, partial_ok, error, timeout]
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/SceneRunStepResult"
+        startedAt:
+          type: integer
+        endedAt:
+          type: integer
+        durationMs:
+          type: integer
 paths:
   /health:
     get:
@@ -673,3 +800,123 @@ paths:
           description: Payload too large
         "415":
           description: Unsupported media type
+  /scenes/{id}/run:
+    post:
+      summary: Run a scene and return aggregated step results
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SceneRunRequest"
+      responses:
+        "200":
+          description: Run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SceneRunResult"
+        "400":
+          description: Invalid request or confirmation required
+        "404":
+          description: Scene not found
+        "503":
+          description: Scene run unavailable
+  /virtual-devices/config:
+    get:
+      summary: Get virtual simulator config from devices.config.json
+      security:
+        - ApiKey: []
+      responses:
+        "200":
+          description: Virtual devices config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDevicesConfig"
+        "503":
+          description: Virtual device store unavailable
+    put:
+      summary: Update virtual simulator config
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VirtualDevicesConfigUpdate"
+      responses:
+        "200":
+          description: Updated virtual devices config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDevicesConfig"
+        "400":
+          description: Invalid virtual config
+        "503":
+          description: Virtual device store unavailable
+  /virtual-devices/{id}:
+    put:
+      summary: Upsert one virtual device
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VirtualDevice"
+      responses:
+        "200":
+          description: Upserted virtual device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDevice"
+        "400":
+          description: Invalid virtual config
+        "503":
+          description: Virtual device store unavailable
+    delete:
+      summary: Delete one virtual device
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+                  removed:
+                    type: string
+        "404":
+          description: Virtual device not found
+        "503":
+          description: Virtual device store unavailable

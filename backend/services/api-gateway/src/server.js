@@ -12,8 +12,23 @@ import { SceneStoreError } from "./scene-store.js";
 import { FloorplanStoreError } from "./floorplan-store.js";
 import { AutomationStoreError } from "./automation-store.js";
 import { DeviceOverridesStoreError } from "./device-overrides-store.js";
+import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
+import { SceneRunnerError } from "./scene-runner.js";
 
-export function buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore, automationStore, deviceOverridesStore }) {
+export function buildServer({
+  store,
+  logger,
+  config,
+  bus,
+  actionStore,
+  ruleStore,
+  sceneStore,
+  floorplanStore,
+  automationStore,
+  deviceOverridesStore,
+  virtualDevicesStore,
+  sceneRunner
+}) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
   let assetsDir = String(config.assetsDir || path.resolve(process.cwd(), "assets"));
@@ -249,6 +264,30 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     }
   });
 
+  app.post("/scenes/:id/run", { preHandler: authGuard }, async (req, reply) => {
+    if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
+    if (!sceneRunner) return reply.code(503).send({ error: "scene_run_unavailable" });
+    try {
+      const dryRun = req.body?.dryRun === true;
+      const confirm = req.body?.confirm === true;
+      const requestId = typeof req.body?.requestId === "string" ? req.body.requestId.trim() : "";
+      const timeoutMs = req.body?.timeoutMs;
+      const result = await sceneRunner.run({
+        sceneId: req.params.id,
+        dryRun,
+        confirm,
+        requestId,
+        timeoutMs
+      });
+      return result;
+    } catch (err) {
+      if (err instanceof SceneRunnerError) {
+        return handleSceneRunError(err, reply, logger);
+      }
+      return handleSceneError(err, reply, logger);
+    }
+  });
+
   app.post("/scenes", { preHandler: authGuard }, async (req, reply) => {
     if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
     try {
@@ -461,6 +500,53 @@ export function buildServer({ store, logger, config, bus, actionStore, ruleStore
     }
   });
 
+  app.get("/virtual-devices/config", { preHandler: authGuard }, async (_req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    try {
+      const configPayload = await virtualDevicesStore.getConfig();
+      return configPayload;
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
+  app.put("/virtual-devices/config", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    try {
+      const configPayload = await virtualDevicesStore.saveConfig(req.body || {});
+      logger?.info("virtual_devices.config.updated", { actor: getActor(req), devices: configPayload.devices.length });
+      return configPayload;
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
+  app.put("/virtual-devices/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    const payload = req.body || {};
+    if (payload?.id && payload.id !== req.params.id) {
+      return reply.code(400).send({ error: "virtual_device_id_mismatch" });
+    }
+    try {
+      const updated = await virtualDevicesStore.upsert(req.params.id, payload);
+      logger?.info("virtual_device.upserted", { id: req.params.id, actor: getActor(req) });
+      return updated;
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
+  app.delete("/virtual-devices/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    try {
+      const result = await virtualDevicesStore.delete(req.params.id);
+      logger?.info("virtual_device.deleted", { id: req.params.id, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
   // Rule management (requires DB)
   app.get("/rules", { preHandler: authGuard }, async (_req, reply) => {
     if (!ruleStore) return reply.code(503).send({ error: "rule_store_unavailable" });
@@ -586,6 +672,37 @@ function handleDeviceOverridesError(err, reply, logger) {
     }
     logger?.warn?.("Device overrides store error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "device_overrides_store_error", message: err.message });
+  }
+  throw err;
+}
+
+function handleVirtualDevicesError(err, reply, logger) {
+  if (err instanceof VirtualDevicesStoreError) {
+    if (err.code === "virtual_device_not_found") {
+      return reply.code(404).send({ error: "virtual_device_not_found" });
+    }
+    if (err.code === "invalid_virtual_config") {
+      return reply.code(400).send({ error: "invalid_virtual_config", reason: err.message, details: err.details || [] });
+    }
+    logger?.warn?.("Virtual devices store error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "virtual_devices_store_error", message: err.message });
+  }
+  throw err;
+}
+
+function handleSceneRunError(err, reply, logger) {
+  if (err instanceof SceneRunnerError) {
+    if (err.code === "invalid_scene_run") {
+      return reply.code(400).send({ error: "invalid_scene_run", reason: err.message });
+    }
+    if (err.code === "confirmation_required") {
+      return reply.code(400).send({ error: "confirmation_required", reason: err.message });
+    }
+    if (err.code === "scene_run_unavailable") {
+      return reply.code(503).send({ error: "scene_run_unavailable", reason: err.message });
+    }
+    logger?.warn?.("Scene run error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "scene_run_error", message: err.message });
   }
   throw err;
 }

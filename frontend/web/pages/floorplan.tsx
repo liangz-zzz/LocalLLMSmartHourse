@@ -92,6 +92,39 @@ type SceneEffect = {
   label: string;
 };
 
+type VirtualDevice = {
+  id?: string;
+  name?: string;
+  placement?: { room?: string; zone?: string; description?: string };
+  protocol?: string;
+  bindings?: Record<string, any>;
+  traits?: Record<string, any>;
+  capabilities?: { action: string; parameters?: any[] }[];
+  simulation?: { latency_ms?: number; failure_rate?: number; transitions?: Record<string, any> };
+};
+
+type VirtualConfig = {
+  enabled: boolean;
+  defaults: { latency_ms: number; failure_rate: number };
+  devices: VirtualDevice[];
+};
+
+type SceneRunStepResult = {
+  index: number;
+  deviceId: string;
+  action: string;
+  status: "ok" | "error" | "timeout" | "queued" | "dry_run";
+  reason?: string;
+};
+
+type SceneRunResult = {
+  runId: string;
+  sceneId: string;
+  status: string;
+  steps: SceneRunStepResult[];
+  durationMs?: number;
+};
+
 type Mode = "view" | "rooms" | "devices" | "calibration";
 
 const MODE_LABELS: Record<Mode, string> = {
@@ -248,6 +281,18 @@ function buildSceneEffects(steps: SceneStep[]): Record<string, SceneEffect> {
     effects[step.deviceId] = { color: "#64748b", label: action || "动作" };
   }
   return effects;
+}
+
+function tryParseObject(text: string) {
+  const raw = String(text || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function ThreePreview({
@@ -497,6 +542,8 @@ export default function FloorplanPage() {
   const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const [scenePreview, setScenePreview] = useState<ScenePreview | null>(null);
   const [sceneEffects, setSceneEffects] = useState<Record<string, SceneEffect>>({});
+  const [sceneRunResult, setSceneRunResult] = useState<SceneRunResult | null>(null);
+  const [sceneRunLoading, setSceneRunLoading] = useState<boolean>(false);
   const [status, setStatus] = useState<string>("");
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -510,6 +557,18 @@ export default function FloorplanPage() {
   const [deviceOverrideDraft, setDeviceOverrideDraft] = useState<any | null>(null);
   const [deviceOverrideStatus, setDeviceOverrideStatus] = useState<string>("");
   const [deviceOverrideSaving, setDeviceOverrideSaving] = useState<boolean>(false);
+
+  const [virtualConfig, setVirtualConfig] = useState<VirtualConfig>({
+    enabled: false,
+    defaults: { latency_ms: 120, failure_rate: 0 },
+    devices: []
+  });
+  const [selectedVirtualId, setSelectedVirtualId] = useState<string>("");
+  const [virtualDraft, setVirtualDraft] = useState<VirtualDevice | null>(null);
+  const [virtualTraitsText, setVirtualTraitsText] = useState<string>("{}");
+  const [virtualActionsText, setVirtualActionsText] = useState<string>("turn_on, turn_off");
+  const [virtualStatus, setVirtualStatus] = useState<string>("");
+  const [virtualSaving, setVirtualSaving] = useState<boolean>(false);
 
   const [newPlanName, setNewPlanName] = useState<string>("");
   const [newPlanId, setNewPlanId] = useState<string>("");
@@ -533,6 +592,37 @@ export default function FloorplanPage() {
     return JSON.stringify(draft) !== savedSnapshot;
   }, [draft, savedSnapshot]);
 
+  const refreshDevices = async () => {
+    const res = await fetch("/api/devices");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.reason || data?.error || "加载设备失败");
+    setDevices(data.items || []);
+  };
+
+  const loadVirtualConfig = async (preferredId?: string) => {
+    const res = await fetch("/api/virtual-devices/config");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.reason || data?.error || "加载模拟设备配置失败");
+    const next: VirtualConfig = {
+      enabled: data?.enabled === true,
+      defaults: {
+        latency_ms: Number(data?.defaults?.latency_ms ?? 120),
+        failure_rate: Number(data?.defaults?.failure_rate ?? 0)
+      },
+      devices: Array.isArray(data?.devices) ? data.devices : []
+    };
+    setVirtualConfig(next);
+    const currentId = preferredId !== undefined ? preferredId : selectedVirtualId;
+    if (currentId && !next.devices.some((item) => item.id === currentId)) {
+      setSelectedVirtualId("");
+    }
+    if (currentId && next.devices.some((item) => item.id === currentId)) {
+      setSelectedVirtualId(currentId);
+    } else if (!currentId && next.devices.length) {
+      setSelectedVirtualId(next.devices[0].id);
+    }
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -551,15 +641,6 @@ export default function FloorplanPage() {
   }, []);
 
   useEffect(() => {
-    const loadDevices = async () => {
-      try {
-        const res = await fetch("/api/devices");
-        const data = await res.json();
-        setDevices(data.items || []);
-      } catch (err) {
-        setStatus(`加载设备失败: ${(err as Error).message}`);
-      }
-    };
     const loadScenes = async () => {
       try {
         const res = await fetch("/api/scenes");
@@ -569,7 +650,12 @@ export default function FloorplanPage() {
         setStatus(`加载场景失败: ${(err as Error).message}`);
       }
     };
-    loadDevices();
+    refreshDevices().catch((err) => {
+      setStatus(`加载设备失败: ${(err as Error).message}`);
+    });
+    loadVirtualConfig().catch((err) => {
+      setVirtualStatus((err as Error).message);
+    });
     loadScenes();
   }, []);
 
@@ -592,6 +678,7 @@ export default function FloorplanPage() {
         setSelectedDeviceId(null);
         setScenePreview(null);
         setSceneEffects({});
+        setSceneRunResult(null);
       } catch (err) {
         setStatus(`加载户型失败: ${(err as Error).message}`);
       }
@@ -706,6 +793,19 @@ export default function FloorplanPage() {
       active = false;
     };
   }, [selectedDeviceId]);
+
+  useEffect(() => {
+    if (!selectedVirtualId) return;
+    const found = virtualConfig.devices.find((item) => item.id === selectedVirtualId);
+    if (!found) return;
+    setVirtualDraft(JSON.parse(JSON.stringify(found)));
+    setVirtualTraitsText(JSON.stringify(found.traits || {}, null, 2));
+    setVirtualActionsText(
+      Array.isArray(found.capabilities) && found.capabilities.length
+        ? found.capabilities.map((item) => item.action).filter(Boolean).join(", ")
+        : "turn_on, turn_off"
+    );
+  }, [selectedVirtualId, virtualConfig.devices]);
 
   const imageWidth = draft?.image?.width || imageDims?.width || 1000;
   const imageHeight = draft?.image?.height || imageDims?.height || 800;
@@ -891,6 +991,7 @@ export default function FloorplanPage() {
     if (!sceneId) {
       setScenePreview(null);
       setSceneEffects({});
+      setSceneRunResult(null);
       return;
     }
     try {
@@ -904,6 +1005,7 @@ export default function FloorplanPage() {
       const preview = { sceneId, steps };
       setScenePreview(preview);
       setSceneEffects(buildSceneEffects(steps));
+      setSceneRunResult(null);
     } catch (err) {
       setStatus(`场景加载失败: ${(err as Error).message}`);
     }
@@ -914,17 +1016,169 @@ export default function FloorplanPage() {
     const confirmed = window.confirm(`确认执行场景 ${scenePreview.sceneId}？`);
     if (!confirmed) return;
     setStatus("执行中...");
+    setSceneRunLoading(true);
     try {
-      for (const step of scenePreview.steps) {
-        await fetch(`/api/devices/${encodeURIComponent(step.deviceId)}/actions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: step.action, params: step.params || {} })
-        });
+      const res = await fetch(`/api/scenes/${encodeURIComponent(scenePreview.sceneId)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, timeoutMs: 8000 })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(`场景执行失败: ${data?.reason || data?.error || res.status}`);
+        setSceneRunResult(null);
+        return;
       }
-      setStatus("场景已下发");
+      setSceneRunResult(data);
+      setStatus(`场景执行完成: ${data.status}`);
     } catch (err) {
       setStatus(`场景执行失败: ${(err as Error).message}`);
+      setSceneRunResult(null);
+    } finally {
+      setSceneRunLoading(false);
+    }
+  };
+
+  const startNewVirtualDevice = () => {
+    const id = `sim_${Date.now()}`;
+    const next: VirtualDevice = {
+      id,
+      name: "",
+      placement: { room: "living_room", zone: "" },
+      protocol: "virtual",
+      bindings: {},
+      traits: { switch: { state: "off" } },
+      capabilities: [{ action: "turn_on" }, { action: "turn_off" }],
+      simulation: {
+        latency_ms: Number(virtualConfig.defaults.latency_ms || 120),
+        failure_rate: Number(virtualConfig.defaults.failure_rate || 0)
+      }
+    };
+    setSelectedVirtualId("");
+    setVirtualDraft(next);
+    setVirtualTraitsText(JSON.stringify(next.traits || {}, null, 2));
+    setVirtualActionsText("turn_on, turn_off");
+    setVirtualStatus("");
+  };
+
+  const saveVirtualDevice = async () => {
+    if (!virtualDraft) return;
+    const id = String(virtualDraft.id || "").trim();
+    if (!id) {
+      setVirtualStatus("模拟设备 id 不能为空");
+      return;
+    }
+
+    const parsedTraits = tryParseObject(virtualTraitsText);
+    if (parsedTraits === null) {
+      setVirtualStatus("traits 必须是 JSON 对象");
+      return;
+    }
+
+    const actions = virtualActionsText
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!actions.length) {
+      setVirtualStatus("至少需要一个 capability action");
+      return;
+    }
+
+    setVirtualSaving(true);
+    setVirtualStatus("保存中...");
+    try {
+      const payload: VirtualDevice = {
+        id,
+        name: String(virtualDraft.name || id).trim() || id,
+        placement: {
+          room: String(virtualDraft.placement?.room || "").trim(),
+          zone: String(virtualDraft.placement?.zone || "").trim(),
+          description: String(virtualDraft.placement?.description || "").trim()
+        },
+        protocol: String(virtualDraft.protocol || "virtual").trim() || "virtual",
+        bindings: virtualDraft.bindings || {},
+        traits: parsedTraits || {},
+        capabilities: actions.map((action) => ({ action })),
+        simulation: {
+          latency_ms: Number(virtualDraft.simulation?.latency_ms ?? virtualConfig.defaults.latency_ms ?? 120),
+          failure_rate: Number(virtualDraft.simulation?.failure_rate ?? virtualConfig.defaults.failure_rate ?? 0)
+        }
+      };
+
+      const resp = await fetch(`/api/virtual-devices/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setVirtualStatus(data?.reason || data?.error || "保存失败");
+        return;
+      }
+      setSelectedVirtualId(id);
+      setVirtualDraft(data);
+      await Promise.all([loadVirtualConfig(id), refreshDevices()]);
+      setVirtualStatus("模拟设备已保存");
+    } catch (err) {
+      setVirtualStatus((err as Error).message);
+    } finally {
+      setVirtualSaving(false);
+    }
+  };
+
+  const deleteVirtualDevice = async () => {
+    const id = String(virtualDraft?.id || selectedVirtualId || "").trim();
+    if (!id) return;
+    if (!window.confirm(`确认删除模拟设备 ${id}？`)) return;
+    setVirtualSaving(true);
+    setVirtualStatus("删除中...");
+    try {
+      const resp = await fetch(`/api/virtual-devices/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setVirtualStatus(data?.reason || data?.error || "删除失败");
+        return;
+      }
+      setVirtualDraft(null);
+      setSelectedVirtualId("");
+      await Promise.all([loadVirtualConfig(""), refreshDevices()]);
+      setVirtualStatus("模拟设备已删除");
+    } catch (err) {
+      setVirtualStatus((err as Error).message);
+    } finally {
+      setVirtualSaving(false);
+    }
+  };
+
+  const saveVirtualGlobalConfig = async () => {
+    setVirtualSaving(true);
+    setVirtualStatus("保存全局配置中...");
+    try {
+      const resp = await fetch("/api/virtual-devices/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: virtualConfig.enabled,
+          defaults: virtualConfig.defaults
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setVirtualStatus(data?.reason || data?.error || "保存失败");
+        return;
+      }
+      setVirtualConfig({
+        enabled: data?.enabled === true,
+        defaults: data?.defaults || virtualConfig.defaults,
+        devices: Array.isArray(data?.devices) ? data.devices : []
+      });
+      setVirtualStatus("模拟器全局配置已保存");
+    } catch (err) {
+      setVirtualStatus((err as Error).message);
+    } finally {
+      setVirtualSaving(false);
     }
   };
 
@@ -1125,9 +1379,40 @@ export default function FloorplanPage() {
               {scenePreview && (
                 <div style={{ marginTop: "8px" }}>
                   <p style={hintStyle}>共 {scenePreview.steps.length} 步设备动作</p>
-                  <button onClick={executeScene} style={primaryButtonStyle}>
-                    执行场景
+                  <button onClick={executeScene} style={primaryButtonStyle} disabled={sceneRunLoading} data-testid="scene-run">
+                    {sceneRunLoading ? "执行中..." : "执行场景"}
                   </button>
+                  {sceneRunResult && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                      <p style={hintStyle} data-testid="scene-run-status">
+                        run={sceneRunResult.runId} status={sceneRunResult.status} 耗时 {sceneRunResult.durationMs ?? 0}ms
+                      </p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {sceneRunResult.steps.map((step) => (
+                          <div
+                            key={`${sceneRunResult.runId}-${step.index}`}
+                            style={{
+                              fontSize: 12,
+                              border: "1px solid #e2e8f0",
+                              borderRadius: 8,
+                              padding: "6px 8px",
+                              background:
+                                step.status === "ok"
+                                  ? "#ecfdf5"
+                                  : step.status === "timeout"
+                                    ? "#eff6ff"
+                                    : step.status === "error"
+                                      ? "#fef2f2"
+                                      : "white"
+                            }}
+                          >
+                            #{step.index + 1} {step.deviceId}.{step.action} 状态 {step.status}
+                            {step.reason ? ` (${step.reason})` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1193,6 +1478,181 @@ export default function FloorplanPage() {
                           ))}
                       </select>
                       {placingDeviceId && <p style={hintStyle}>在 2D 图上点击放置设备</p>}
+
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+                        <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>模拟设备</h4>
+                        <label style={labelStyle}>模拟器启用</label>
+                        <input
+                          type="checkbox"
+                          checked={virtualConfig.enabled}
+                          onChange={(e) => setVirtualConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+                          data-testid="virtual-enabled"
+                        />
+
+                        <label style={labelStyle}>默认 latency_ms</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={virtualConfig.defaults.latency_ms}
+                          onChange={(e) =>
+                            setVirtualConfig((prev) => ({
+                              ...prev,
+                              defaults: { ...prev.defaults, latency_ms: Number(e.target.value || 0) }
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+
+                        <label style={labelStyle}>默认 failure_rate (0~1)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step="0.01"
+                          value={virtualConfig.defaults.failure_rate}
+                          onChange={(e) =>
+                            setVirtualConfig((prev) => ({
+                              ...prev,
+                              defaults: { ...prev.defaults, failure_rate: Number(e.target.value || 0) }
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+
+                        <button
+                          type="button"
+                          style={secondaryButtonStyle}
+                          onClick={saveVirtualGlobalConfig}
+                          disabled={virtualSaving}
+                          data-testid="virtual-save-global"
+                        >
+                          保存全局配置
+                        </button>
+
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <button type="button" style={secondaryButtonStyle} onClick={startNewVirtualDevice} data-testid="virtual-new">
+                            新建模拟设备
+                          </button>
+                          <select
+                            value={selectedVirtualId}
+                            onChange={(e) => setSelectedVirtualId(e.target.value)}
+                            style={inputStyle}
+                            data-testid="virtual-select"
+                          >
+                            <option value="">选择已有模拟设备</option>
+                            {virtualConfig.devices.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name || item.id} ({item.id})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {virtualDraft && (
+                          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                            <label style={labelStyle}>id</label>
+                            <input
+                              value={virtualDraft.id || ""}
+                              onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), id: e.target.value }))}
+                              style={inputStyle}
+                              data-testid="virtual-id"
+                            />
+                            <label style={labelStyle}>name</label>
+                            <input
+                              value={virtualDraft.name || ""}
+                              onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), name: e.target.value }))}
+                              style={inputStyle}
+                            />
+                            <label style={labelStyle}>placement.room</label>
+                            <input
+                              value={virtualDraft.placement?.room || ""}
+                              onChange={(e) =>
+                                setVirtualDraft((prev) => ({
+                                  ...(prev || {}),
+                                  placement: { ...(prev?.placement || {}), room: e.target.value }
+                                }))
+                              }
+                              style={inputStyle}
+                            />
+                            <label style={labelStyle}>placement.zone</label>
+                            <input
+                              value={virtualDraft.placement?.zone || ""}
+                              onChange={(e) =>
+                                setVirtualDraft((prev) => ({
+                                  ...(prev || {}),
+                                  placement: { ...(prev?.placement || {}), zone: e.target.value }
+                                }))
+                              }
+                              style={inputStyle}
+                            />
+                            <label style={labelStyle}>capabilities（逗号分隔）</label>
+                            <input
+                              value={virtualActionsText}
+                              onChange={(e) => setVirtualActionsText(e.target.value)}
+                              style={inputStyle}
+                              placeholder="turn_on, turn_off, set_brightness"
+                              data-testid="virtual-actions"
+                            />
+                            <label style={labelStyle}>traits(JSON)</label>
+                            <textarea
+                              value={virtualTraitsText}
+                              onChange={(e) => setVirtualTraitsText(e.target.value)}
+                              style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+                              data-testid="virtual-traits"
+                            />
+                            <label style={labelStyle}>simulation.latency_ms</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={virtualDraft.simulation?.latency_ms ?? virtualConfig.defaults.latency_ms}
+                              onChange={(e) =>
+                                setVirtualDraft((prev) => ({
+                                  ...(prev || {}),
+                                  simulation: { ...(prev?.simulation || {}), latency_ms: Number(e.target.value || 0) }
+                                }))
+                              }
+                              style={inputStyle}
+                            />
+                            <label style={labelStyle}>simulation.failure_rate</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={1}
+                              step="0.01"
+                              value={virtualDraft.simulation?.failure_rate ?? virtualConfig.defaults.failure_rate}
+                              onChange={(e) =>
+                                setVirtualDraft((prev) => ({
+                                  ...(prev || {}),
+                                  simulation: { ...(prev?.simulation || {}), failure_rate: Number(e.target.value || 0) }
+                                }))
+                              }
+                              style={inputStyle}
+                            />
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={saveVirtualDevice}
+                                style={primaryButtonStyle}
+                                disabled={virtualSaving}
+                                data-testid="virtual-save"
+                              >
+                                {virtualSaving ? "保存中..." : "保存模拟设备"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={deleteVirtualDevice}
+                                style={dangerButtonStyle}
+                                disabled={virtualSaving}
+                                data-testid="virtual-delete"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {virtualStatus && <p style={hintStyle}>{virtualStatus}</p>}
+                      </div>
                     </>
                   )}
                   {mode === "calibration" && (

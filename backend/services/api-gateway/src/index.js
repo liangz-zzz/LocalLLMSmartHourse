@@ -9,6 +9,8 @@ import { SceneStore } from "./scene-store.js";
 import { FloorplanStore } from "./floorplan-store.js";
 import { AutomationStore } from "./automation-store.js";
 import { DeviceOverridesStore } from "./device-overrides-store.js";
+import { VirtualDevicesStore } from "./virtual-devices-store.js";
+import { SceneRunner } from "./scene-runner.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -56,6 +58,8 @@ async function main() {
   let floorplanStore;
   let automationStore;
   let deviceOverridesStore;
+  let virtualDevicesStore;
+  let sceneRunner;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
@@ -66,6 +70,7 @@ async function main() {
   floorplanStore = new FloorplanStore({ floorplansPath: config.floorplansPath, logger });
   automationStore = new AutomationStore({ automationsPath: config.automationsPath, logger });
   deviceOverridesStore = new DeviceOverridesStore({ deviceOverridesPath: config.deviceOverridesPath, logger });
+  virtualDevicesStore = new VirtualDevicesStore({ deviceConfigPath: config.deviceOverridesPath, logger });
 
   if (config.mode === "redis") {
     bus = new RedisBus({
@@ -87,7 +92,21 @@ async function main() {
     }
   }
 
-  const app = buildServer({ store, logger, config, bus, actionStore, ruleStore, sceneStore, floorplanStore, automationStore, deviceOverridesStore });
+  sceneRunner = new SceneRunner({ sceneStore, store, bus, logger });
+  const app = buildServer({
+    store,
+    logger,
+    config,
+    bus,
+    actionStore,
+    ruleStore,
+    sceneStore,
+    floorplanStore,
+    automationStore,
+    deviceOverridesStore,
+    virtualDevicesStore,
+    sceneRunner
+  });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {
     setupWs({ server: app.server, bus, mode: config.mode, logger, apiKeys: config.apiKeys });
