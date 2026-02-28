@@ -68,6 +68,7 @@ const tinyPngBase64 =
 test.describe("floorplan editor", () => {
   test.beforeEach(async ({ page }) => {
     const devices = [...baseDevices];
+    const modelTemplates: any[] = JSON.parse(JSON.stringify(virtualModels));
     const virtualConfig: any = {
       enabled: true,
       defaults: { latency_ms: 120, failure_rate: 0 },
@@ -82,9 +83,29 @@ test.describe("floorplan editor", () => {
     await page.route("**/api/virtual-devices/models", (route) =>
       route.fulfill({
         status: 200,
-        json: { items: virtualModels, count: virtualModels.length }
+        json: { items: modelTemplates, count: modelTemplates.length }
       })
     );
+    await page.route("**/api/virtual-devices/models/*", (route) => {
+      const method = route.request().method();
+      const url = route.request().url();
+      const modelId = decodeURIComponent(url.split("/api/virtual-devices/models/")[1] || "");
+      if (method === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        const index = modelTemplates.findIndex((item: any) => item.id === modelId);
+        if (index >= 0) modelTemplates[index] = body;
+        else modelTemplates.push(body);
+        route.fulfill({ status: 200, json: body });
+        return;
+      }
+      if (method === "DELETE") {
+        const index = modelTemplates.findIndex((item: any) => item.id === modelId);
+        if (index >= 0) modelTemplates.splice(index, 1);
+        route.fulfill({ status: 200, json: { status: "deleted", removed: modelId } });
+        return;
+      }
+      route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
+    });
     await page.route("**/api/scenes/scene1/run", (route) =>
       route.fulfill({
         json: {
@@ -117,7 +138,7 @@ test.describe("floorplan editor", () => {
       const url = route.request().url();
       const id = decodeURIComponent(url.split("/api/virtual-devices/")[1] || "");
       if (id === "models" && method === "GET") {
-        route.fulfill({ status: 200, json: { items: virtualModels, count: virtualModels.length } });
+        route.fulfill({ status: 200, json: { items: modelTemplates, count: modelTemplates.length } });
         return;
       }
       if (id === "config") {
@@ -223,5 +244,20 @@ test.describe("floorplan editor", () => {
     await page.getByTestId("virtual-save").click();
     await page.getByTestId("virtual-select").selectOption("sim_light_lr");
     await expect(page.getByTestId("virtual-id")).toHaveValue("sim_light_lr");
+  });
+
+  test("can manage virtual model templates in floorplan editor", async ({ page }) => {
+    await page.goto("/floorplan");
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("virtual-model-new").click();
+    await page.getByTestId("virtual-model-id").fill("light.rgb.v1");
+    await page.getByTestId("virtual-model-actions").fill("turn_on, turn_off, set_color");
+    await page.getByTestId("virtual-model-traits").fill(`{"switch":{"state":"off"},"color":{"r":255,"g":255,"b":255}}`);
+    await page.getByTestId("virtual-model-save").click();
+
+    await expect(page.getByTestId("virtual-model-edit-select").locator('option[value="light.rgb.v1"]')).toHaveCount(1);
+    await page.getByTestId("virtual-model-select").selectOption("light.rgb.v1");
+    await page.getByTestId("virtual-new").click();
+    await expect(page.getByTestId("virtual-actions")).toHaveValue("turn_on, turn_off, set_color");
   });
 });

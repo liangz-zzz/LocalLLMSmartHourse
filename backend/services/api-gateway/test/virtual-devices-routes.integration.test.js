@@ -72,6 +72,25 @@ test("virtual devices routes support config update and preserve envelope", async
     assert.equal(models.items[0].id, "light.dimmer.v1");
     assert.equal(models.items[0].capabilities[2].action, "set_brightness");
 
+    const upsertModelRes = await app.inject({
+      method: "PUT",
+      url: "/virtual-devices/models/light.cct.v1",
+      payload: {
+        id: "light.cct.v1",
+        name: "可调色温灯",
+        traits: { switch: { state: "off" }, color_temp: { kelvin: 4000 } },
+        capabilities: [{ action: "turn_on" }, { action: "turn_off" }, { action: "set_color_temp" }]
+      }
+    });
+    assert.equal(upsertModelRes.statusCode, 200);
+    const upsertedModel = upsertModelRes.json();
+    assert.equal(upsertedModel.id, "light.cct.v1");
+
+    const modelsAfterUpsert = await app.inject({ method: "GET", url: "/virtual-devices/models" });
+    assert.equal(modelsAfterUpsert.statusCode, 200);
+    const modelsList = modelsAfterUpsert.json();
+    assert.equal(modelsList.count, 2);
+
     const upsertRes = await app.inject({
       method: "PUT",
       url: "/virtual-devices/sim_light_lr",
@@ -107,10 +126,16 @@ test("virtual devices routes support config update and preserve envelope", async
     const deleted = deleteRes.json();
     assert.equal(deleted.removed, "sim_light_lr");
 
+    const deleteModelRes = await app.inject({ method: "DELETE", url: "/virtual-devices/models/light.dimmer.v1" });
+    assert.equal(deleteModelRes.statusCode, 200);
+    const deletedModel = deleteModelRes.json();
+    assert.equal(deletedModel.removed, "light.dimmer.v1");
+
     const saved = JSON.parse(await fs.readFile(filePath, "utf8"));
     assert.equal(saved.voice_control.defaults.ack_keywords[0], "我在");
     assert.equal(saved.devices.length, 1);
-    assert.equal(saved.virtual_models[0].id, "light.dimmer.v1");
+    assert.equal(saved.virtual_models.length, 1);
+    assert.equal(saved.virtual_models[0].id, "light.cct.v1");
     assert.equal(saved.virtual.defaults.failure_rate, 0.03);
     assert.equal(Array.isArray(saved.virtual.devices), true);
     assert.equal(saved.virtual.devices.length, 0);

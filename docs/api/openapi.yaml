@@ -416,6 +416,14 @@ components:
             $ref: "#/components/schemas/VirtualDeviceModel"
         count:
           type: integer
+    VirtualDeviceModelsUpdate:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualDeviceModel"
     VirtualDevicesConfigUpdate:
       type: object
       properties:
@@ -1119,6 +1127,82 @@ paths:
                 $ref: "#/components/schemas/VirtualDeviceModelsResponse"
         "400":
           description: Invalid virtual models config
+        "503":
+          description: Virtual device store unavailable
+    put:
+      summary: Replace virtual device model templates
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VirtualDeviceModelsUpdate"
+      responses:
+        "200":
+          description: Updated virtual device model templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDeviceModelsResponse"
+        "400":
+          description: Invalid virtual models config
+        "503":
+          description: Virtual device store unavailable
+  /virtual-devices/models/{id}:
+    put:
+      summary: Upsert one virtual device model template
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VirtualDeviceModel"
+      responses:
+        "200":
+          description: Upserted virtual device model template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDeviceModel"
+        "400":
+          description: Invalid virtual models config
+        "503":
+          description: Virtual device store unavailable
+    delete:
+      summary: Delete one virtual device model template
+      security:
+        - ApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+                  removed:
+                    type: string
+        "404":
+          description: Virtual model not found
         "503":
           description: Virtual device store unavailable
   /virtual-devices/{id}:

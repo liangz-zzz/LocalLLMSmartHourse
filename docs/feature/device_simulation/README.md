@@ -118,6 +118,9 @@
 - `GET /virtual-devices/config`：读取 `devices.config.json` 中 `virtual` 段（含 `enabled/defaults/devices`）。
 - `PUT /virtual-devices/config`：更新 `virtual` 配置（保留 `devices/voice_control` 等其他顶层段）。
 - `GET /virtual-devices/models`：读取 `devices.config.json` 的 `virtual_models`（未配置时返回内置模板）。
+- `PUT /virtual-devices/models`：整体替换型号模板列表。
+- `PUT /virtual-devices/models/:id`：按 `id` upsert 单个型号模板。
+- `DELETE /virtual-devices/models/:id`：删除单个型号模板。
 - `PUT /virtual-devices/:id`：按 `id` upsert 单个虚拟设备。
 - `DELETE /virtual-devices/:id`：删除单个虚拟设备。
 
@@ -125,6 +128,7 @@
 - `frontend/web/pages/floorplan.tsx` 在设备模式新增“模拟设备”分区，可完成：
   - 模拟器全局开关与默认参数（`latency_ms/failure_rate`）设置；
   - 选择“设备型号模板”后新建模拟设备（自动填充 `traits/capabilities/simulation`）；
+  - 型号模板维护（新建/编辑/删除，覆盖 `id/name/traits/capabilities`）；
   - 虚拟设备增删改（`id/name/placement/capabilities/traits/simulation`）；
   - 保存后刷新 `/api/devices`，可直接在 2D 户型图布点并参与场景编排。
 - 场景执行从“前端逐步下发设备动作”改为调用 `POST /scenes/:id/run`，返回步骤级聚合结果用于测试反馈。

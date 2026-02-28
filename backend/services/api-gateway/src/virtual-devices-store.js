@@ -164,6 +164,14 @@ export class VirtualDevicesStore {
     return normalizeVirtualModels(root.virtual_models);
   }
 
+  async saveModels(items) {
+    const root = await this.loadRoot();
+    const next = normalizeVirtualModels(items);
+    root.virtual_models = toPersistedVirtualModels(next);
+    await this.saveRoot(root);
+    return next;
+  }
+
   async saveConfig(patch) {
     const root = await this.loadRoot();
     const current = normalizeVirtualConfig(root.virtual);
@@ -231,6 +239,49 @@ export class VirtualDevicesStore {
     return { removed: deviceId };
   }
 
+  async upsertModel(id, patch) {
+    const modelId = String(id || "").trim();
+    if (!modelId) {
+      throw new VirtualDevicesStoreError("invalid_virtual_models", "virtual model id is required");
+    }
+
+    const root = await this.loadRoot();
+    const current = normalizeVirtualModels(root.virtual_models);
+    const nextItems = [...current];
+    const index = nextItems.findIndex((item) => item.id === modelId);
+    const merged = mergeVirtualModel(index >= 0 ? nextItems[index] : null, {
+      ...(patch || {}),
+      id: modelId
+    });
+
+    if (index >= 0) nextItems[index] = merged;
+    else nextItems.push(merged);
+
+    const next = normalizeVirtualModels(nextItems);
+    root.virtual_models = toPersistedVirtualModels(next);
+    await this.saveRoot(root);
+    return next.find((item) => item.id === modelId);
+  }
+
+  async deleteModel(id) {
+    const modelId = String(id || "").trim();
+    if (!modelId) {
+      throw new VirtualDevicesStoreError("invalid_virtual_models", "virtual model id is required");
+    }
+
+    const root = await this.loadRoot();
+    const current = normalizeVirtualModels(root.virtual_models);
+    const nextItems = current.filter((item) => item.id !== modelId);
+    if (nextItems.length === current.length) {
+      throw new VirtualDevicesStoreError("virtual_model_not_found", `virtual model ${modelId} not found`);
+    }
+
+    const next = normalizeVirtualModels(nextItems);
+    root.virtual_models = toPersistedVirtualModels(next);
+    await this.saveRoot(root);
+    return { removed: modelId };
+  }
+
   async loadRoot() {
     const resolved = this.resolvePath();
     try {
@@ -274,6 +325,10 @@ function toPersistedVirtual(config) {
     defaults: { ...config.defaults },
     devices: config.devices.map((item) => clone(item))
   };
+}
+
+function toPersistedVirtualModels(models) {
+  return models.map((item) => clone(item));
 }
 
 function normalizeVirtualConfig(raw) {
@@ -477,6 +532,26 @@ function normalizeVirtualModels(raw) {
 }
 
 function mergeVirtualDevice(existing, patch) {
+  const out = clone(existing || {});
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (["placement", "bindings", "traits", "simulation", "semantics"].includes(key) && isPlainObject(value)) {
+      out[key] = deepMerge(isPlainObject(out[key]) ? out[key] : {}, value);
+      continue;
+    }
+    out[key] = clone(value);
+  }
+
+  out.id = String(out.id || "").trim();
+  if (!out.name) out.name = out.id;
+  if (!out.protocol) out.protocol = "virtual";
+  if (!isPlainObject(out.placement)) out.placement = {};
+  if (!isPlainObject(out.bindings)) out.bindings = {};
+  if (!isPlainObject(out.traits)) out.traits = {};
+  if (!Array.isArray(out.capabilities)) out.capabilities = [];
+  return out;
+}
+
+function mergeVirtualModel(existing, patch) {
   const out = clone(existing || {});
   for (const [key, value] of Object.entries(patch || {})) {
     if (["placement", "bindings", "traits", "simulation", "semantics"].includes(key) && isPlainObject(value)) {

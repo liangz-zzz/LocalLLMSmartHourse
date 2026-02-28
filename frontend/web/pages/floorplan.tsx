@@ -641,6 +641,12 @@ export default function FloorplanPage() {
   });
   const [virtualModels, setVirtualModels] = useState<VirtualDeviceModel[]>([]);
   const [selectedVirtualModelId, setSelectedVirtualModelId] = useState<string>("");
+  const [selectedVirtualModelEditId, setSelectedVirtualModelEditId] = useState<string>("");
+  const [virtualModelDraft, setVirtualModelDraft] = useState<VirtualDeviceModel | null>(null);
+  const [virtualModelTraitsText, setVirtualModelTraitsText] = useState<string>("{}");
+  const [virtualModelActionsText, setVirtualModelActionsText] = useState<string>("turn_on, turn_off");
+  const [virtualModelStatus, setVirtualModelStatus] = useState<string>("");
+  const [virtualModelSaving, setVirtualModelSaving] = useState<boolean>(false);
   const [selectedVirtualId, setSelectedVirtualId] = useState<string>("");
   const [virtualDraft, setVirtualDraft] = useState<VirtualDevice | null>(null);
   const [virtualTraitsText, setVirtualTraitsText] = useState<string>("{}");
@@ -711,6 +717,13 @@ export default function FloorplanPage() {
       if (current && items.some((item: VirtualDeviceModel) => item.id === current)) return current;
       return items[0]?.id || "";
     });
+    setSelectedVirtualModelEditId((current) => {
+      if (current && items.some((item: VirtualDeviceModel) => item.id === current)) return current;
+      return items[0]?.id || "";
+    });
+    if (!items.length) {
+      setVirtualModelDraft(null);
+    }
   };
 
   useEffect(() => {
@@ -896,6 +909,15 @@ export default function FloorplanPage() {
     setVirtualActionsText(serializeCapabilityActions(found.capabilities));
     if (found.model_template_id) setSelectedVirtualModelId(String(found.model_template_id));
   }, [selectedVirtualId, virtualConfig.devices]);
+
+  useEffect(() => {
+    if (!selectedVirtualModelEditId) return;
+    const found = virtualModels.find((item) => item.id === selectedVirtualModelEditId);
+    if (!found) return;
+    setVirtualModelDraft(cloneValue(found));
+    setVirtualModelTraitsText(JSON.stringify(found.traits || {}, null, 2));
+    setVirtualModelActionsText(serializeCapabilityActions(found.capabilities));
+  }, [selectedVirtualModelEditId, virtualModels]);
 
   const imageWidth = draft?.image?.width || imageDims?.width || 1000;
   const imageHeight = draft?.image?.height || imageDims?.height || 800;
@@ -1142,6 +1164,125 @@ export default function FloorplanPage() {
     setVirtualTraitsText(JSON.stringify(next.traits || {}, null, 2));
     setVirtualActionsText(serializeCapabilityActions(next.capabilities));
     setVirtualStatus("");
+  };
+
+  const startNewVirtualModel = () => {
+    const id = `custom.model.${Date.now()}`;
+    const next: VirtualDeviceModel = {
+      id,
+      name: "",
+      protocol: "virtual",
+      bindings: {},
+      traits: { switch: { state: "off" } },
+      capabilities: [{ action: "turn_on" }, { action: "turn_off" }],
+      semantics: {}
+    };
+    setSelectedVirtualModelEditId("");
+    setVirtualModelDraft(next);
+    setVirtualModelTraitsText(JSON.stringify(next.traits || {}, null, 2));
+    setVirtualModelActionsText(serializeCapabilityActions(next.capabilities));
+    setVirtualModelStatus("");
+  };
+
+  const saveVirtualModel = async () => {
+    if (!virtualModelDraft) return;
+    const id = String(virtualModelDraft.id || "").trim();
+    if (!id) {
+      setVirtualModelStatus("型号模板 id 不能为空");
+      return;
+    }
+
+    const parsedTraits = tryParseObject(virtualModelTraitsText);
+    if (parsedTraits === null) {
+      setVirtualModelStatus("型号模板 traits 必须是 JSON 对象");
+      return;
+    }
+
+    const actions = virtualModelActionsText
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!actions.length) {
+      setVirtualModelStatus("型号模板至少需要一个 capability action");
+      return;
+    }
+
+    setVirtualModelSaving(true);
+    setVirtualModelStatus("保存型号模板中...");
+    try {
+      const existingCaps = new Map(
+        (Array.isArray(virtualModelDraft.capabilities) ? virtualModelDraft.capabilities : [])
+          .filter((item) => item && item.action)
+          .map((item) => [String(item.action), item])
+      );
+      const dedupActions = Array.from(new Set(actions));
+      const payload: VirtualDeviceModel = {
+        id,
+        name: String(virtualModelDraft.name || id).trim() || id,
+        category: String(virtualModelDraft.category || "").trim(),
+        description: String(virtualModelDraft.description || "").trim(),
+        placement: cloneValue(virtualModelDraft.placement || {}),
+        protocol: String(virtualModelDraft.protocol || "virtual").trim() || "virtual",
+        bindings: virtualModelDraft.bindings || {},
+        traits: parsedTraits || {},
+        capabilities: dedupActions.map((action) => {
+          const existing = existingCaps.get(action);
+          if (existing?.parameters) return { action, parameters: existing.parameters };
+          return { action };
+        }),
+        semantics: virtualModelDraft.semantics || {},
+        simulation: virtualModelDraft.simulation || {}
+      };
+
+      const resp = await fetch(`/api/virtual-devices/models/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setVirtualModelStatus(data?.reason || data?.error || "型号模板保存失败");
+        return;
+      }
+      setVirtualModelDraft(data);
+      setSelectedVirtualModelEditId(id);
+      setSelectedVirtualModelId(id);
+      await loadVirtualModels();
+      setVirtualModelStatus("型号模板已保存");
+    } catch (err) {
+      setVirtualModelStatus((err as Error).message);
+    } finally {
+      setVirtualModelSaving(false);
+    }
+  };
+
+  const deleteVirtualModel = async () => {
+    const id = String(virtualModelDraft?.id || selectedVirtualModelEditId || "").trim();
+    if (!id) return;
+    if (!window.confirm(`确认删除型号模板 ${id}？`)) return;
+    setVirtualModelSaving(true);
+    setVirtualModelStatus("删除型号模板中...");
+    try {
+      const resp = await fetch(`/api/virtual-devices/models/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setVirtualModelStatus(data?.reason || data?.error || "型号模板删除失败");
+        return;
+      }
+      setVirtualModelDraft(null);
+      setSelectedVirtualModelEditId("");
+      if (selectedVirtualModelId === id) {
+        setSelectedVirtualModelId("");
+      }
+      await loadVirtualModels();
+      setVirtualModelStatus("型号模板已删除");
+    } catch (err) {
+      setVirtualModelStatus((err as Error).message);
+    } finally {
+      setVirtualModelSaving(false);
+    }
   };
 
   const saveVirtualDevice = async () => {
@@ -1654,6 +1795,100 @@ export default function FloorplanPage() {
                               </option>
                             ))}
                           </select>
+                        </div>
+
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e2e8f0" }}>
+                          <label style={labelStyle}>型号模板维护</label>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              type="button"
+                              style={secondaryButtonStyle}
+                              onClick={startNewVirtualModel}
+                              data-testid="virtual-model-new"
+                            >
+                              新建型号模板
+                            </button>
+                            <select
+                              value={selectedVirtualModelEditId}
+                              onChange={(e) => setSelectedVirtualModelEditId(e.target.value)}
+                              style={inputStyle}
+                              data-testid="virtual-model-edit-select"
+                            >
+                              <option value="">选择已有型号模板</option>
+                              {virtualModels.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name} ({item.id})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {virtualModelDraft && (
+                            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                              <label style={labelStyle}>model.id</label>
+                              <input
+                                value={virtualModelDraft.id || ""}
+                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), id: e.target.value }))}
+                                style={inputStyle}
+                                data-testid="virtual-model-id"
+                              />
+                              <label style={labelStyle}>model.name</label>
+                              <input
+                                value={virtualModelDraft.name || ""}
+                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), name: e.target.value }))}
+                                style={inputStyle}
+                              />
+                              <label style={labelStyle}>model.category</label>
+                              <input
+                                value={virtualModelDraft.category || ""}
+                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), category: e.target.value }))}
+                                style={inputStyle}
+                              />
+                              <label style={labelStyle}>model.description</label>
+                              <textarea
+                                value={virtualModelDraft.description || ""}
+                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), description: e.target.value }))}
+                                style={{ ...inputStyle, minHeight: 72 }}
+                              />
+                              <label style={labelStyle}>model.capabilities（逗号分隔）</label>
+                              <input
+                                value={virtualModelActionsText}
+                                onChange={(e) => setVirtualModelActionsText(e.target.value)}
+                                style={inputStyle}
+                                placeholder="turn_on, turn_off, set_brightness"
+                                data-testid="virtual-model-actions"
+                              />
+                              <label style={labelStyle}>model.traits(JSON)</label>
+                              <textarea
+                                value={virtualModelTraitsText}
+                                onChange={(e) => setVirtualModelTraitsText(e.target.value)}
+                                style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+                                data-testid="virtual-model-traits"
+                              />
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  onClick={saveVirtualModel}
+                                  style={primaryButtonStyle}
+                                  disabled={virtualModelSaving}
+                                  data-testid="virtual-model-save"
+                                >
+                                  {virtualModelSaving ? "保存中..." : "保存型号模板"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={deleteVirtualModel}
+                                  style={dangerButtonStyle}
+                                  disabled={virtualModelSaving}
+                                  data-testid="virtual-model-delete"
+                                >
+                                  删除型号模板
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {virtualModelStatus && <p style={hintStyle}>{virtualModelStatus}</p>}
                         </div>
 
                         {virtualDraft && (

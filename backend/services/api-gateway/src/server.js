@@ -604,6 +604,45 @@ export function buildServer({
     }
   });
 
+  app.put("/virtual-devices/models", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    const payload = req.body || {};
+    const items = Array.isArray(payload) ? payload : Array.isArray(payload.items) ? payload.items : [];
+    try {
+      const models = await virtualDevicesStore.saveModels(items);
+      logger?.info("virtual_models.updated", { actor: getActor(req), count: models.length });
+      return { items: models, count: models.length };
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
+  app.put("/virtual-devices/models/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    const payload = req.body || {};
+    if (payload?.id && payload.id !== req.params.id) {
+      return reply.code(400).send({ error: "virtual_model_id_mismatch" });
+    }
+    try {
+      const model = await virtualDevicesStore.upsertModel(req.params.id, payload);
+      logger?.info("virtual_model.upserted", { id: req.params.id, actor: getActor(req) });
+      return model;
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
+  app.delete("/virtual-devices/models/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    try {
+      const result = await virtualDevicesStore.deleteModel(req.params.id);
+      logger?.info("virtual_model.deleted", { id: req.params.id, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
   app.put("/virtual-devices/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
     const payload = req.body || {};
@@ -764,8 +803,8 @@ function handleDeviceOverridesError(err, reply, logger) {
 
 function handleVirtualDevicesError(err, reply, logger) {
   if (err instanceof VirtualDevicesStoreError) {
-    if (err.code === "virtual_device_not_found") {
-      return reply.code(404).send({ error: "virtual_device_not_found" });
+    if (err.code === "virtual_device_not_found" || err.code === "virtual_model_not_found") {
+      return reply.code(404).send({ error: err.code });
     }
     if (err.code === "invalid_virtual_config" || err.code === "invalid_virtual_models") {
       return reply.code(400).send({ error: err.code, reason: err.message, details: err.details || [] });
