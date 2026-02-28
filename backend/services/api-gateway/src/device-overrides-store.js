@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "$schema", "version"]);
+const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "virtual_models", "$schema", "version"]);
 
 export class DeviceOverridesStoreError extends Error {
   constructor(code, message, extra) {

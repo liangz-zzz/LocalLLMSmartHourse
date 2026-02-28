@@ -594,6 +594,16 @@ export function buildServer({
     }
   });
 
+  app.get("/virtual-devices/models", { preHandler: authGuard }, async (_req, reply) => {
+    if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
+    try {
+      const models = await virtualDevicesStore.getModels();
+      return { items: models, count: models.length };
+    } catch (err) {
+      return handleVirtualDevicesError(err, reply, logger);
+    }
+  });
+
   app.put("/virtual-devices/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!virtualDevicesStore) return reply.code(503).send({ error: "virtual_devices_store_unavailable" });
     const payload = req.body || {};
@@ -757,8 +767,8 @@ function handleVirtualDevicesError(err, reply, logger) {
     if (err.code === "virtual_device_not_found") {
       return reply.code(404).send({ error: "virtual_device_not_found" });
     }
-    if (err.code === "invalid_virtual_config") {
-      return reply.code(400).send({ error: "invalid_virtual_config", reason: err.message, details: err.details || [] });
+    if (err.code === "invalid_virtual_config" || err.code === "invalid_virtual_models") {
+      return reply.code(400).send({ error: err.code, reason: err.message, details: err.details || [] });
     }
     logger?.warn?.("Virtual devices store error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "virtual_devices_store_error", message: err.message });

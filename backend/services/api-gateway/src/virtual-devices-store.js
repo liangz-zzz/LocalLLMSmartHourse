@@ -6,6 +6,135 @@ const DEFAULT_DEFAULTS = Object.freeze({
   failure_rate: 0
 });
 
+const DEFAULT_VIRTUAL_MODELS = Object.freeze([
+  {
+    id: "plug.switch.v1",
+    name: "Smart Plug (Switch)",
+    category: "plug",
+    description: "Basic on/off plug for appliance and lamp simulation",
+    protocol: "virtual",
+    traits: {
+      switch: { state: "off" }
+    },
+    capabilities: [{ action: "turn_on" }, { action: "turn_off" }],
+    semantics: {
+      vendor: "generic",
+      model: "SIM_PLUG_SWITCH_V1",
+      tags: ["plug", "switch"]
+    }
+  },
+  {
+    id: "light.dimmer.v1",
+    name: "Dimmable Light",
+    category: "light",
+    description: "Supports power and brightness control",
+    protocol: "virtual",
+    traits: {
+      switch: { state: "off" },
+      dimmer: { state: "off", brightness: 0 }
+    },
+    capabilities: [
+      { action: "turn_on" },
+      { action: "turn_off" },
+      {
+        action: "set_brightness",
+        parameters: [{ name: "brightness", type: "number", minimum: 0, maximum: 100, required: true }]
+      }
+    ],
+    semantics: {
+      vendor: "generic",
+      model: "SIM_LIGHT_DIMMER_V1",
+      tags: ["light", "dimmable"]
+    }
+  },
+  {
+    id: "curtain.cover.v1",
+    name: "Curtain Motor",
+    category: "cover",
+    description: "Supports cover position and tilt control",
+    protocol: "virtual",
+    traits: {
+      cover: { position_percent: 0, tilt_percent: 0, state: "stopped" }
+    },
+    capabilities: [
+      {
+        action: "set_cover_position",
+        parameters: [{ name: "position", type: "number", minimum: 0, maximum: 100, required: true }]
+      },
+      {
+        action: "set_cover_tilt",
+        parameters: [{ name: "tilt", type: "number", minimum: 0, maximum: 100, required: true }]
+      }
+    ],
+    semantics: {
+      vendor: "generic",
+      model: "SIM_CURTAIN_COVER_V1",
+      tags: ["cover", "curtain"]
+    }
+  },
+  {
+    id: "climate.ac.v1",
+    name: "Split AC",
+    category: "climate",
+    description: "Supports temperature, hvac mode, and fan mode",
+    protocol: "virtual",
+    traits: {
+      switch: { state: "off" },
+      climate: { mode: "cool", fan_mode: "auto", target_temperature_c: 26 }
+    },
+    capabilities: [
+      { action: "turn_on" },
+      { action: "turn_off" },
+      {
+        action: "set_temperature",
+        parameters: [{ name: "temperature", type: "number", minimum: 16, maximum: 30, required: true }]
+      },
+      {
+        action: "set_hvac_mode",
+        parameters: [{ name: "mode", type: "enum", enum: ["cool", "heat", "dry", "fan_only", "auto"], required: true }]
+      },
+      {
+        action: "set_fan_mode",
+        parameters: [{ name: "fan_mode", type: "enum", enum: ["low", "medium", "high", "auto"], required: true }]
+      }
+    ],
+    semantics: {
+      vendor: "generic",
+      model: "SIM_CLIMATE_AC_V1",
+      tags: ["climate", "ac"]
+    }
+  },
+  {
+    id: "light.cct.v1",
+    name: "CCT Light",
+    category: "light",
+    description: "Supports brightness and color temperature in Kelvin",
+    protocol: "virtual",
+    traits: {
+      switch: { state: "off" },
+      dimmer: { state: "off", brightness: 0 },
+      color_temp: { kelvin: 4000 }
+    },
+    capabilities: [
+      { action: "turn_on" },
+      { action: "turn_off" },
+      {
+        action: "set_brightness",
+        parameters: [{ name: "brightness", type: "number", minimum: 0, maximum: 100, required: true }]
+      },
+      {
+        action: "set_color_temp",
+        parameters: [{ name: "kelvin", type: "number", minimum: 2200, maximum: 6500, required: true }]
+      }
+    ],
+    semantics: {
+      vendor: "generic",
+      model: "SIM_LIGHT_CCT_V1",
+      tags: ["light", "cct"]
+    }
+  }
+]);
+
 export class VirtualDevicesStoreError extends Error {
   constructor(code, message, extra) {
     super(message);
@@ -28,6 +157,11 @@ export class VirtualDevicesStore {
   async getConfig() {
     const root = await this.loadRoot();
     return normalizeVirtualConfig(root.virtual);
+  }
+
+  async getModels() {
+    const root = await this.loadRoot();
+    return normalizeVirtualModels(root.virtual_models);
   }
 
   async saveConfig(patch) {
@@ -246,6 +380,102 @@ function normalizeVirtualConfig(raw) {
   };
 }
 
+function normalizeVirtualModels(raw) {
+  const errors = [];
+  const source = raw === undefined ? DEFAULT_VIRTUAL_MODELS : raw;
+
+  if (!Array.isArray(source)) {
+    throw new VirtualDevicesStoreError("invalid_virtual_models", "virtual_models must be an array");
+  }
+
+  const ids = new Set();
+  const models = [];
+
+  source.forEach((entry, index) => {
+    if (!isPlainObject(entry)) {
+      errors.push(`virtual_models[${index}] must be an object`);
+      return;
+    }
+
+    const id = String(entry.id || "").trim();
+    if (!id) {
+      errors.push(`virtual_models[${index}].id is required`);
+      return;
+    }
+    if (ids.has(id)) {
+      errors.push(`virtual_models[${index}].id duplicate: ${id}`);
+      return;
+    }
+    ids.add(id);
+
+    const next = clone(entry);
+    next.id = id;
+    next.name = String(next.name || id).trim() || id;
+    if (next.description !== undefined) next.description = String(next.description || "").trim();
+    if (next.category !== undefined) next.category = String(next.category || "").trim();
+    next.protocol = String(next.protocol || "virtual").trim() || "virtual";
+
+    if (next.placement !== undefined && !isPlainObject(next.placement)) {
+      errors.push(`virtual_models[${index}].placement must be an object`);
+      return;
+    }
+    next.placement = isPlainObject(next.placement) ? next.placement : {};
+
+    if (next.bindings !== undefined && !isPlainObject(next.bindings)) {
+      errors.push(`virtual_models[${index}].bindings must be an object`);
+      return;
+    }
+    next.bindings = isPlainObject(next.bindings) ? next.bindings : {};
+
+    if (next.traits !== undefined && !isPlainObject(next.traits)) {
+      errors.push(`virtual_models[${index}].traits must be an object`);
+      return;
+    }
+    next.traits = isPlainObject(next.traits) ? next.traits : {};
+
+    if (next.semantics !== undefined && !isPlainObject(next.semantics)) {
+      errors.push(`virtual_models[${index}].semantics must be an object`);
+      return;
+    }
+
+    if (next.capabilities !== undefined && !Array.isArray(next.capabilities)) {
+      errors.push(`virtual_models[${index}].capabilities must be an array`);
+      return;
+    }
+    next.capabilities = Array.isArray(next.capabilities)
+      ? next.capabilities
+          .filter((item) => isPlainObject(item) && String(item.action || "").trim())
+          .map((item) => ({
+            ...item,
+            action: String(item.action || "").trim()
+          }))
+      : [];
+
+    if (next.simulation !== undefined && !isPlainObject(next.simulation)) {
+      errors.push(`virtual_models[${index}].simulation must be an object`);
+      return;
+    }
+
+    if (isPlainObject(next.simulation)) {
+      const normalizedSimulation = { ...next.simulation };
+      if (Object.prototype.hasOwnProperty.call(normalizedSimulation, "latency_ms")) {
+        normalizedSimulation.latency_ms = normalizeLatency(normalizedSimulation.latency_ms, DEFAULT_DEFAULTS.latency_ms);
+      }
+      if (Object.prototype.hasOwnProperty.call(normalizedSimulation, "failure_rate")) {
+        normalizedSimulation.failure_rate = normalizeFailureRate(normalizedSimulation.failure_rate, DEFAULT_DEFAULTS.failure_rate);
+      }
+      next.simulation = normalizedSimulation;
+    }
+
+    models.push(next);
+  });
+
+  if (errors.length) {
+    throw new VirtualDevicesStoreError("invalid_virtual_models", errors.join("; "), { details: errors });
+  }
+  return models;
+}
+
 function mergeVirtualDevice(existing, patch) {
   const out = clone(existing || {});
   for (const [key, value] of Object.entries(patch || {})) {
@@ -308,4 +538,3 @@ function clone(value) {
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-

@@ -23,6 +23,10 @@ test("device config separates device overrides and voice_control section", async
         virtual: {
           enabled: true,
           devices: [{ id: "sim_light", name: "模拟灯", placement: { room: "living_room" }, capabilities: [{ action: "turn_on" }] }]
+        },
+        virtual_models: {
+          id: "light.dimmer.v1",
+          name: "可调光灯"
         }
       },
       null,
@@ -35,6 +39,7 @@ test("device config separates device overrides and voice_control section", async
   assert.equal(overrides.size, 1);
   assert.equal(overrides.has("voice_control"), false);
   assert.equal(overrides.has("virtual"), false);
+  assert.equal(overrides.has("virtual_models"), false);
   assert.equal(overrides.get("kettle_plug")?.name, "烧水壶插座");
 
   const voiceConfig = await loadVoiceControlConfig(filePath);

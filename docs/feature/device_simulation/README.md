@@ -65,12 +65,33 @@
         }
       }
     ]
+  },
+  "virtual_models": [
+    {
+      "id": "light.dimmer.v1",
+      "name": "可调光灯",
+      "category": "light",
+      "traits": {
+        "switch": { "state": "off" },
+        "dimmer": { "state": "off", "brightness": 0 }
+      },
+      "capabilities": [
+        { "action": "turn_on" },
+        { "action": "turn_off" },
+        {
+          "action": "set_brightness",
+          "parameters": [{ "name": "brightness", "type": "number", "minimum": 0, "maximum": 100, "required": true }]
+        }
+      ],
+      "semantics": { "model": "SIM_LIGHT_DIMMER_V1", "tags": ["light", "dimmable"] }
+    }
   }
 }
 ```
 
 说明：
 - `virtual.defaults` 为全局默认值。
+- `virtual_models[]` 为“型号模板库”，前端可先选型号再创建模拟设备。
 - `simulation.transitions.<action>.traits`：动作后附加 traits patch。
 - `simulation.transitions.<action>.from_params`：把动作参数映射到 traits 路径。
 - 若未配置 transition，服务内置常见动作默认状态演进（如 `turn_on/turn_off/set_brightness/...`）。
@@ -96,12 +117,14 @@
 ## API 管理接口
 - `GET /virtual-devices/config`：读取 `devices.config.json` 中 `virtual` 段（含 `enabled/defaults/devices`）。
 - `PUT /virtual-devices/config`：更新 `virtual` 配置（保留 `devices/voice_control` 等其他顶层段）。
+- `GET /virtual-devices/models`：读取 `devices.config.json` 的 `virtual_models`（未配置时返回内置模板）。
 - `PUT /virtual-devices/:id`：按 `id` upsert 单个虚拟设备。
 - `DELETE /virtual-devices/:id`：删除单个虚拟设备。
 
 ## 前端集成（户型编辑）
 - `frontend/web/pages/floorplan.tsx` 在设备模式新增“模拟设备”分区，可完成：
   - 模拟器全局开关与默认参数（`latency_ms/failure_rate`）设置；
+  - 选择“设备型号模板”后新建模拟设备（自动填充 `traits/capabilities/simulation`）；
   - 虚拟设备增删改（`id/name/placement/capabilities/traits/simulation`）；
   - 保存后刷新 `/api/devices`，可直接在 2D 户型图布点并参与场景编排。
 - 场景执行从“前端逐步下发设备动作”改为调用 `POST /scenes/:id/run`，返回步骤级聚合结果用于测试反馈。

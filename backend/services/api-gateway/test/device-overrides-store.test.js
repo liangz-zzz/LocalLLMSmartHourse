@@ -15,7 +15,7 @@ async function withTempDir(fn) {
   }
 }
 
-test("list ignores reserved top-level keys including virtual", async () => {
+test("list ignores reserved top-level keys including virtual and virtual_models", async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, "devices.config.json");
     await fs.writeFile(
@@ -27,6 +27,7 @@ test("list ignores reserved top-level keys including virtual", async () => {
             enabled: true,
             devices: [{ id: "sim_light", name: "模拟灯", placement: { room: "living_room" }, capabilities: [{ action: "turn_on" }] }]
           },
+          virtual_models: [{ id: "light.dimmer.v1", name: "可调光灯", capabilities: [{ action: "turn_on" }], traits: {} }],
           voice_control: {
             defaults: { ack_keywords: ["我在"] }
           }
@@ -56,6 +57,7 @@ test("upsert preserves virtual config envelope", async () => {
             defaults: { latency_ms: 100 },
             devices: [{ id: "sim_light", name: "模拟灯", placement: { room: "living_room" }, capabilities: [{ action: "turn_on" }] }]
           },
+          virtual_models: [{ id: "light.dimmer.v1", name: "可调光灯", capabilities: [{ action: "turn_on" }], traits: {} }],
           devices: [{ id: "kettle_plug", name: "烧水壶插座", placement: { room: "kitchen" } }]
         },
         null,
@@ -72,6 +74,7 @@ test("upsert preserves virtual config envelope", async () => {
     assert.equal(saved.virtual.enabled, true);
     assert.equal(saved.virtual.defaults.latency_ms, 100);
     assert.equal(Array.isArray(saved.virtual.devices), true);
+    assert.equal(saved.virtual_models[0].id, "light.dimmer.v1");
     assert.equal(saved.devices.length, 1);
     assert.deepEqual(saved.devices[0].semantics.aliases, ["水壶"]);
   });

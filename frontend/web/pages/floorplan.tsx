@@ -100,6 +100,22 @@ type VirtualDevice = {
   bindings?: Record<string, any>;
   traits?: Record<string, any>;
   capabilities?: { action: string; parameters?: any[] }[];
+  semantics?: Record<string, any>;
+  model_template_id?: string;
+  simulation?: { latency_ms?: number; failure_rate?: number; transitions?: Record<string, any> };
+};
+
+type VirtualDeviceModel = {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  placement?: { room?: string; zone?: string; description?: string };
+  protocol?: string;
+  bindings?: Record<string, any>;
+  traits?: Record<string, any>;
+  capabilities?: { action: string; parameters?: any[] }[];
+  semantics?: Record<string, any>;
   simulation?: { latency_ms?: number; failure_rate?: number; transitions?: Record<string, any> };
 };
 
@@ -293,6 +309,66 @@ function tryParseObject(text: string) {
   } catch {
     return null;
   }
+}
+
+function cloneValue<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+function serializeCapabilityActions(capabilities?: { action: string }[]) {
+  if (!Array.isArray(capabilities) || !capabilities.length) return "turn_on, turn_off";
+  return capabilities
+    .map((item) => String(item?.action || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function buildVirtualDraftFromModel({
+  id,
+  defaults,
+  model
+}: {
+  id: string;
+  defaults: { latency_ms: number; failure_rate: number };
+  model?: VirtualDeviceModel | null;
+}): VirtualDevice {
+  if (!model) {
+    return {
+      id,
+      name: "",
+      placement: { room: "living_room", zone: "" },
+      protocol: "virtual",
+      bindings: {},
+      traits: { switch: { state: "off" } },
+      capabilities: [{ action: "turn_on" }, { action: "turn_off" }],
+      simulation: {
+        latency_ms: Number(defaults.latency_ms || 120),
+        failure_rate: Number(defaults.failure_rate || 0)
+      }
+    };
+  }
+
+  const modelSimulation = model.simulation && typeof model.simulation === "object" ? cloneValue(model.simulation) : {};
+  return {
+    id,
+    name: model.name || "",
+    model_template_id: model.id,
+    placement: {
+      room: String(model.placement?.room || "living_room"),
+      zone: String(model.placement?.zone || ""),
+      description: String(model.placement?.description || "")
+    },
+    protocol: String(model.protocol || "virtual").trim() || "virtual",
+    bindings: cloneValue(model.bindings || {}),
+    traits: cloneValue(model.traits || {}),
+    capabilities: Array.isArray(model.capabilities) ? cloneValue(model.capabilities) : [],
+    semantics: cloneValue(model.semantics || {}),
+    simulation: {
+      ...(modelSimulation || {}),
+      latency_ms: Number(modelSimulation?.latency_ms ?? defaults.latency_ms ?? 120),
+      failure_rate: Number(modelSimulation?.failure_rate ?? defaults.failure_rate ?? 0)
+    }
+  };
 }
 
 function ThreePreview({
@@ -563,6 +639,8 @@ export default function FloorplanPage() {
     defaults: { latency_ms: 120, failure_rate: 0 },
     devices: []
   });
+  const [virtualModels, setVirtualModels] = useState<VirtualDeviceModel[]>([]);
+  const [selectedVirtualModelId, setSelectedVirtualModelId] = useState<string>("");
   const [selectedVirtualId, setSelectedVirtualId] = useState<string>("");
   const [virtualDraft, setVirtualDraft] = useState<VirtualDevice | null>(null);
   const [virtualTraitsText, setVirtualTraitsText] = useState<string>("{}");
@@ -623,6 +701,18 @@ export default function FloorplanPage() {
     }
   };
 
+  const loadVirtualModels = async () => {
+    const res = await fetch("/api/virtual-devices/models");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.reason || data?.error || "加载模拟设备型号失败");
+    const items = Array.isArray(data?.items) ? data.items : [];
+    setVirtualModels(items);
+    setSelectedVirtualModelId((current) => {
+      if (current && items.some((item: VirtualDeviceModel) => item.id === current)) return current;
+      return items[0]?.id || "";
+    });
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -654,6 +744,9 @@ export default function FloorplanPage() {
       setStatus(`加载设备失败: ${(err as Error).message}`);
     });
     loadVirtualConfig().catch((err) => {
+      setVirtualStatus((err as Error).message);
+    });
+    loadVirtualModels().catch((err) => {
       setVirtualStatus((err as Error).message);
     });
     loadScenes();
@@ -798,13 +891,10 @@ export default function FloorplanPage() {
     if (!selectedVirtualId) return;
     const found = virtualConfig.devices.find((item) => item.id === selectedVirtualId);
     if (!found) return;
-    setVirtualDraft(JSON.parse(JSON.stringify(found)));
+    setVirtualDraft(cloneValue(found));
     setVirtualTraitsText(JSON.stringify(found.traits || {}, null, 2));
-    setVirtualActionsText(
-      Array.isArray(found.capabilities) && found.capabilities.length
-        ? found.capabilities.map((item) => item.action).filter(Boolean).join(", ")
-        : "turn_on, turn_off"
-    );
+    setVirtualActionsText(serializeCapabilityActions(found.capabilities));
+    if (found.model_template_id) setSelectedVirtualModelId(String(found.model_template_id));
   }, [selectedVirtualId, virtualConfig.devices]);
 
   const imageWidth = draft?.image?.width || imageDims?.width || 1000;
@@ -1041,23 +1131,16 @@ export default function FloorplanPage() {
 
   const startNewVirtualDevice = () => {
     const id = `sim_${Date.now()}`;
-    const next: VirtualDevice = {
+    const model = virtualModels.find((item) => item.id === selectedVirtualModelId);
+    const next = buildVirtualDraftFromModel({
       id,
-      name: "",
-      placement: { room: "living_room", zone: "" },
-      protocol: "virtual",
-      bindings: {},
-      traits: { switch: { state: "off" } },
-      capabilities: [{ action: "turn_on" }, { action: "turn_off" }],
-      simulation: {
-        latency_ms: Number(virtualConfig.defaults.latency_ms || 120),
-        failure_rate: Number(virtualConfig.defaults.failure_rate || 0)
-      }
-    };
+      defaults: virtualConfig.defaults,
+      model: model || null
+    });
     setSelectedVirtualId("");
     setVirtualDraft(next);
     setVirtualTraitsText(JSON.stringify(next.traits || {}, null, 2));
-    setVirtualActionsText("turn_on, turn_off");
+    setVirtualActionsText(serializeCapabilityActions(next.capabilities));
     setVirtualStatus("");
   };
 
@@ -1087,9 +1170,16 @@ export default function FloorplanPage() {
     setVirtualSaving(true);
     setVirtualStatus("保存中...");
     try {
+      const existingCaps = new Map(
+        (Array.isArray(virtualDraft.capabilities) ? virtualDraft.capabilities : [])
+          .filter((item) => item && item.action)
+          .map((item) => [String(item.action), item])
+      );
+      const dedupActions = Array.from(new Set(actions));
       const payload: VirtualDevice = {
         id,
         name: String(virtualDraft.name || id).trim() || id,
+        model_template_id: String(virtualDraft.model_template_id || "").trim() || undefined,
         placement: {
           room: String(virtualDraft.placement?.room || "").trim(),
           zone: String(virtualDraft.placement?.zone || "").trim(),
@@ -1098,7 +1188,12 @@ export default function FloorplanPage() {
         protocol: String(virtualDraft.protocol || "virtual").trim() || "virtual",
         bindings: virtualDraft.bindings || {},
         traits: parsedTraits || {},
-        capabilities: actions.map((action) => ({ action })),
+        capabilities: dedupActions.map((action) => {
+          const existing = existingCaps.get(action);
+          if (existing?.parameters) return { action, parameters: existing.parameters };
+          return { action };
+        }),
+        semantics: virtualDraft.semantics || {},
         simulation: {
           latency_ms: Number(virtualDraft.simulation?.latency_ms ?? virtualConfig.defaults.latency_ms ?? 120),
           failure_rate: Number(virtualDraft.simulation?.failure_rate ?? virtualConfig.defaults.failure_rate ?? 0)
@@ -1530,6 +1625,19 @@ export default function FloorplanPage() {
                         </button>
 
                         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <select
+                            value={selectedVirtualModelId}
+                            onChange={(e) => setSelectedVirtualModelId(e.target.value)}
+                            style={inputStyle}
+                            data-testid="virtual-model-select"
+                          >
+                            <option value="">选择设备型号模板</option>
+                            {virtualModels.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name} ({item.id})
+                              </option>
+                            ))}
+                          </select>
                           <button type="button" style={secondaryButtonStyle} onClick={startNewVirtualDevice} data-testid="virtual-new">
                             新建模拟设备
                           </button>

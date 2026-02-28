@@ -34,6 +34,28 @@ const scenesPayload = {
   count: 1
 };
 
+const virtualModels = [
+  {
+    id: "plug.switch.v1",
+    name: "智能插座（开关）",
+    traits: { switch: { state: "off" } },
+    capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+  },
+  {
+    id: "light.dimmer.v1",
+    name: "可调光灯",
+    traits: { switch: { state: "off" }, dimmer: { state: "off", brightness: 0 } },
+    capabilities: [
+      { action: "turn_on" },
+      { action: "turn_off" },
+      {
+        action: "set_brightness",
+        parameters: [{ name: "brightness", type: "number", minimum: 0, maximum: 100, required: true }]
+      }
+    ]
+  }
+];
+
 const expandedScene = {
   id: "scene1",
   steps: [{ type: "device", deviceId: "light1", action: "turn_on", params: {} }],
@@ -57,6 +79,12 @@ test.describe("floorplan editor", () => {
     await page.route("**/api/devices", (route) => route.fulfill({ json: { items: devices } }));
     await page.route("**/api/scenes", (route) => route.fulfill({ json: scenesPayload }));
     await page.route("**/api/scenes/scene1/expanded", (route) => route.fulfill({ json: expandedScene }));
+    await page.route("**/api/virtual-devices/models", (route) =>
+      route.fulfill({
+        status: 200,
+        json: { items: virtualModels, count: virtualModels.length }
+      })
+    );
     await page.route("**/api/scenes/scene1/run", (route) =>
       route.fulfill({
         json: {
@@ -88,6 +116,10 @@ test.describe("floorplan editor", () => {
       const method = route.request().method();
       const url = route.request().url();
       const id = decodeURIComponent(url.split("/api/virtual-devices/")[1] || "");
+      if (id === "models" && method === "GET") {
+        route.fulfill({ status: 200, json: { items: virtualModels, count: virtualModels.length } });
+        return;
+      }
       if (id === "config") {
         if (method === "GET") {
           route.fulfill({ status: 200, json: virtualConfig });
@@ -158,7 +190,7 @@ test.describe("floorplan editor", () => {
     await expect(page.getByText("一层")).toBeVisible();
 
     await page.getByTestId("mode-devices").click();
-    await expect(page.getByText("选择设备")).toBeVisible();
+    await expect(page.getByTestId("virtual-enabled")).toBeVisible();
 
     await page.getByTestId("mode-rooms").click();
     await expect(page.getByText("新建房间")).toBeVisible();
@@ -184,10 +216,10 @@ test.describe("floorplan editor", () => {
   test("can create simulated device in floorplan editor", async ({ page }) => {
     await page.goto("/floorplan");
     await page.getByTestId("mode-devices").click();
+    await page.getByTestId("virtual-model-select").selectOption("light.dimmer.v1");
     await page.getByTestId("virtual-new").click();
+    await expect(page.getByTestId("virtual-actions")).toHaveValue("turn_on, turn_off, set_brightness");
     await page.getByTestId("virtual-id").fill("sim_light_lr");
-    await page.getByTestId("virtual-actions").fill("turn_on, turn_off");
-    await page.getByTestId("virtual-traits").fill(`{"switch":{"state":"off"}}`);
     await page.getByTestId("virtual-save").click();
     await page.getByTestId("virtual-select").selectOption("sim_light_lr");
     await expect(page.getByTestId("virtual-id")).toHaveValue("sim_light_lr");

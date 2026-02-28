@@ -26,6 +26,14 @@ test("virtual devices routes support config update and preserve envelope", async
         {
           devices: [{ id: "kettle_plug", name: "烧水壶插座" }],
           voice_control: { defaults: { ack_keywords: ["我在"] } },
+          virtual_models: [
+            {
+              id: "light.dimmer.v1",
+              name: "可调光灯",
+              traits: { switch: { state: "off" }, dimmer: { state: "off", brightness: 0 } },
+              capabilities: [{ action: "turn_on" }, { action: "turn_off" }, { action: "set_brightness" }]
+            }
+          ],
           virtual: {
             enabled: true,
             defaults: { latency_ms: 50, failure_rate: 0.01 },
@@ -56,6 +64,13 @@ test("virtual devices routes support config update and preserve envelope", async
     assert.equal(listed.defaults.latency_ms, 50);
     assert.equal(Array.isArray(listed.devices), true);
     assert.equal(listed.devices.length, 0);
+
+    const modelsRes = await app.inject({ method: "GET", url: "/virtual-devices/models" });
+    assert.equal(modelsRes.statusCode, 200);
+    const models = modelsRes.json();
+    assert.equal(models.count, 1);
+    assert.equal(models.items[0].id, "light.dimmer.v1");
+    assert.equal(models.items[0].capabilities[2].action, "set_brightness");
 
     const upsertRes = await app.inject({
       method: "PUT",
@@ -95,6 +110,7 @@ test("virtual devices routes support config update and preserve envelope", async
     const saved = JSON.parse(await fs.readFile(filePath, "utf8"));
     assert.equal(saved.voice_control.defaults.ack_keywords[0], "我在");
     assert.equal(saved.devices.length, 1);
+    assert.equal(saved.virtual_models[0].id, "light.dimmer.v1");
     assert.equal(saved.virtual.defaults.failure_rate, 0.03);
     assert.equal(Array.isArray(saved.virtual.devices), true);
     assert.equal(saved.virtual.devices.length, 0);

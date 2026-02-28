@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 
-const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "$schema", "version"]);
+const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "virtual_models", "$schema", "version"]);
 
 export async function loadDeviceOverrides(filePath, logger) {
   if (!filePath) return new Map();

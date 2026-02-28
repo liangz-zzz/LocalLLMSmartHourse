@@ -21,6 +21,7 @@
 - `pages/api/floorplans.ts`/`pages/api/floorplans/[id].ts`：代理户型 CRUD。
 - `pages/api/assets.ts`：代理资产上传；`pages/api/assets/[...path].ts` 代理资产访问。
 - `pages/api/scenes.ts`/`pages/api/scenes/[id]/expanded.ts`：代理场景列表与展开。
+- `pages/api/virtual-devices/models.ts`：代理虚拟设备型号模板列表（`/virtual-devices/models`），供户型页创建模拟设备时选择型号。
 - `pages/api/chat.ts`：代理 llm-bridge `/v1/chat/completions`（支持 `LLM_HTTP_BASE`/`LLM_API_KEY`）。
 - `pages/api/intent.ts`：代理 llm-bridge `/v1/intent`，返回解析后的动作。
 - `lib/api-client.ts`：轻量 API SDK（devices/actions/rules）供前端/集成复用，默认基址 `API_HTTP_BASE`/`NEXT_PUBLIC_API_HTTP_BASE`。

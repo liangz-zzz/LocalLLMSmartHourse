@@ -355,6 +355,45 @@ components:
               maximum: 1
             transitions:
               type: object
+    VirtualDeviceModel:
+      type: object
+      required: [id, name, protocol, bindings, traits, capabilities]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        placement:
+          $ref: "#/components/schemas/Placement"
+        protocol:
+          type: string
+          example: virtual
+        bindings:
+          type: object
+        traits:
+          type: object
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        semantics:
+          type: object
+        simulation:
+          type: object
+          properties:
+            latency_ms:
+              type: integer
+              minimum: 0
+            failure_rate:
+              type: number
+              minimum: 0
+              maximum: 1
+            transitions:
+              type: object
     VirtualDevicesConfig:
       type: object
       required: [enabled, defaults, devices]
@@ -367,6 +406,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VirtualDevice"
+    VirtualDeviceModelsResponse:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualDeviceModel"
+        count:
+          type: integer
     VirtualDevicesConfigUpdate:
       type: object
       properties:
@@ -1054,6 +1103,22 @@ paths:
                 $ref: "#/components/schemas/VirtualDevicesConfig"
         "400":
           description: Invalid virtual config
+        "503":
+          description: Virtual device store unavailable
+  /virtual-devices/models:
+    get:
+      summary: List virtual device model templates
+      security:
+        - ApiKey: []
+      responses:
+        "200":
+          description: Virtual device model templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualDeviceModelsResponse"
+        "400":
+          description: Invalid virtual models config
         "503":
           description: Virtual device store unavailable
   /virtual-devices/{id}:
