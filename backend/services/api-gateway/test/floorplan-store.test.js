@@ -33,6 +33,13 @@ function buildPlan(overrides = {}) {
       mime: "model/gltf-binary",
       size: 3456
     },
+    imageScale: {
+      points: [
+        { x: 0.1, y: 0.1 },
+        { x: 0.3, y: 0.1 }
+      ],
+      distanceMeters: 3.2
+    },
     rooms: [
       {
         id: "living",
@@ -110,6 +117,19 @@ test("floorplan store validates rooms and devices", async () => {
                 y: 0.2
               }
             ]
+          })
+        ),
+      (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan"
+    );
+
+    await assert.rejects(
+      () =>
+        store.create(
+          buildPlan({
+            imageScale: {
+              points: [{ x: 0.1, y: 0.1 }],
+              distanceMeters: 0
+            }
           })
         ),
       (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan"

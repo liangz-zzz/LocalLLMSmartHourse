@@ -29,6 +29,13 @@ function buildPlan() {
       mime: "image/png",
       size: 1234
     },
+    imageScale: {
+      points: [
+        { x: 0.12, y: 0.12 },
+        { x: 0.42, y: 0.12 }
+      ],
+      distanceMeters: 4.6
+    },
     rooms: [],
     devices: []
   };
@@ -67,6 +74,7 @@ test("floorplan routes support CRUD", async () => {
     assert.equal(detailRes.status, 200);
     const detail = await detailRes.json();
     assert.equal(detail.id, "floor1");
+    assert.equal(detail.imageScale.distanceMeters, 4.6);
 
     const updateRes = await fetch(`${baseUrl}/floorplans/floor1`, {
       method: "PUT",

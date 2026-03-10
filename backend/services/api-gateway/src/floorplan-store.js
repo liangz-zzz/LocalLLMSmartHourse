@@ -171,6 +171,10 @@ function validateFloorplanList(list) {
       validateCalibrationPoints(plan.calibrationPoints, `${prefix}.calibrationPoints`, errors);
     }
 
+    if (plan.imageScale !== undefined && plan.imageScale !== null) {
+      validateImageScaleReference(plan.imageScale, `${prefix}.imageScale`, errors);
+    }
+
     if (!Array.isArray(plan.rooms)) {
       errors.push(`${prefix}.rooms must be an array`);
     }
@@ -309,6 +313,23 @@ function validateCalibrationPoints(calibration, prefix, errors) {
     calibration.model.forEach((point, idx) => {
       validatePoint3d(point, `${prefix}.model[${idx}]`, errors);
     });
+  }
+}
+
+function validateImageScaleReference(scale, prefix, errors) {
+  if (!isPlainObject(scale)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  if (!Array.isArray(scale.points) || scale.points.length !== 2) {
+    errors.push(`${prefix}.points must be an array of 2 points`);
+  } else {
+    scale.points.forEach((point, idx) => {
+      validatePoint2d(point, `${prefix}.points[${idx}]`, errors, true);
+    });
+  }
+  if (!Number.isFinite(scale.distanceMeters) || scale.distanceMeters <= 0) {
+    errors.push(`${prefix}.distanceMeters must be a positive number`);
   }
 }
 

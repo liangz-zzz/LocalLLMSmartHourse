@@ -126,24 +126,14 @@ export function buildServer({
       return reply.code(400).send({ error: "asset_invalid", reason: "multipart_required" });
     }
 
-    let filePart = null;
-    let kind = "";
-    for await (const part of req.parts()) {
-      if (part.type === "file") {
-        if (!filePart) {
-          filePart = part;
-        } else {
-          await drainStream(part.file);
-        }
-      } else if (part.type === "field" && part.fieldname === "kind") {
-        kind = String(part.value || "");
-      }
-    }
-
+    const filePart = await req.file();
     if (!filePart) {
       return reply.code(400).send({ error: "asset_invalid", reason: "file_required" });
     }
-    const normalizedKind = String(kind || "").trim();
+
+    const rawKindField = filePart.fields?.kind;
+    const rawKind = Array.isArray(rawKindField) ? rawKindField[0]?.value : rawKindField?.value;
+    const normalizedKind = String(rawKind || "").trim();
     if (!normalizedKind) {
       await drainStream(filePart.file);
       return reply.code(400).send({ error: "asset_invalid", reason: "kind_required" });

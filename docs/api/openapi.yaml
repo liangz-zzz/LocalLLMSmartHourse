@@ -250,6 +250,19 @@ components:
           type: number
         roomId:
           type: string
+    ImageScaleReference:
+      type: object
+      required: [points, distanceMeters]
+      properties:
+        points:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/Point2D"
+        distanceMeters:
+          type: number
+          minimum: 0
     Floorplan:
       type: object
       required: [id, name, image, rooms, devices]
@@ -266,6 +279,8 @@ components:
           $ref: "#/components/schemas/ModelTransform"
         calibrationPoints:
           $ref: "#/components/schemas/CalibrationPoints"
+        imageScale:
+          $ref: "#/components/schemas/ImageScaleReference"
         rooms:
           type: array
           items:

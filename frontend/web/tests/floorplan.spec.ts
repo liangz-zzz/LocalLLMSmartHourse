@@ -1,16 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const floorplanList = {
-  items: [
-    {
-      id: "floor1",
-      name: "一层",
-      image: { url: "/assets/floorplans/floor1.png", width: 100, height: 80 }
-    }
-  ],
-  count: 1
-};
-
 const floorplanDetail = {
   id: "floor1",
   name: "一层",
@@ -24,6 +13,13 @@ const baseDevices = [
     id: "light1",
     name: "客厅灯",
     placement: { room: "living_room" },
+    traits: { switch: { state: "off" } },
+    capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
+  },
+  {
+    id: "plug1",
+    name: "玄关插座",
+    placement: { room: "entryway", zone: "north_wall" },
     traits: { switch: { state: "off" } },
     capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
   }
@@ -65,9 +61,53 @@ const expandedScene = {
 const tinyPngBase64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAJk3nSAAAAAASUVORK5CYII=";
 
+function buildFloorplanSummary(plan: any) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    image: plan.image,
+    model: plan.model,
+    roomCount: Array.isArray(plan.rooms) ? plan.rooms.length : 0,
+    deviceCount: Array.isArray(plan.devices) ? plan.devices.length : 0
+  };
+}
+
+async function openFloorplanEditor(page: any, id = "floor1") {
+  await page.goto("/floorplan");
+  await page.getByTestId(`select-floorplan-${id}`).click();
+  await expect(page.getByTestId("floorplan-stage-editor")).toBeVisible();
+}
+
+async function clickCanvasPoint(page: any, xRatio: number, yRatio: number) {
+  const canvas = page.getByTestId("floorplan-canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("floorplan canvas not visible");
+  await canvas.dispatchEvent("pointerdown", {
+    bubbles: true,
+    clientX: box.x + box.width * xRatio,
+    clientY: box.y + box.height * yRatio,
+    pointerType: "mouse",
+    isPrimary: true
+  });
+  await canvas.dispatchEvent("pointerup", {
+    bubbles: true,
+    clientX: box.x + box.width * xRatio,
+    clientY: box.y + box.height * yRatio,
+    pointerType: "mouse",
+    isPrimary: true
+  });
+}
+
 test.describe("floorplan editor", () => {
   test.beforeEach(async ({ page }) => {
+    page.on("dialog", (dialog) => dialog.accept());
+
+    const floorplanStore: Record<string, any> = {
+      floor1: JSON.parse(JSON.stringify(floorplanDetail))
+    };
+    let floorplanOrder = ["floor1"];
     const devices = [...baseDevices];
+    const deviceOverrides: Record<string, any> = {};
     const modelTemplates: any[] = JSON.parse(JSON.stringify(virtualModels));
     const virtualConfig: any = {
       enabled: true,
@@ -75,11 +115,65 @@ test.describe("floorplan editor", () => {
       devices: []
     };
 
-    await page.route("**/api/floorplans", (route) => route.fulfill({ json: floorplanList }));
-    await page.route("**/api/floorplans/floor1", (route) => route.fulfill({ json: floorplanDetail }));
+    await page.route("**/api/floorplans", async (route) => {
+      const method = route.request().method();
+      if (method === "GET") {
+        route.fulfill({
+          json: {
+            items: floorplanOrder.map((id) => buildFloorplanSummary(floorplanStore[id])),
+            count: floorplanOrder.length
+          }
+        });
+        return;
+      }
+      if (method === "POST") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        floorplanStore[body.id] = body;
+        floorplanOrder = [...floorplanOrder, body.id];
+        route.fulfill({ status: 200, json: body });
+        return;
+      }
+      route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
+    });
+    await page.route("**/api/floorplans/*", async (route) => {
+      const method = route.request().method();
+      const url = route.request().url();
+      const id = decodeURIComponent(url.split("/api/floorplans/")[1] || "");
+      if (method === "GET") {
+        const found = floorplanStore[id];
+        route.fulfill(found ? { status: 200, json: found } : { status: 404, json: { error: "floorplan_not_found" } });
+        return;
+      }
+      if (method === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        floorplanStore[id] = body;
+        if (!floorplanOrder.includes(id)) floorplanOrder = [...floorplanOrder, id];
+        route.fulfill({ status: 200, json: body });
+        return;
+      }
+      if (method === "DELETE") {
+        delete floorplanStore[id];
+        floorplanOrder = floorplanOrder.filter((item) => item !== id);
+        route.fulfill({ status: 200, json: { status: "deleted", removed: id } });
+        return;
+      }
+      route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
+    });
     await page.route("**/api/devices", (route) => route.fulfill({ json: { items: devices } }));
     await page.route("**/api/scenes", (route) => route.fulfill({ json: scenesPayload }));
     await page.route("**/api/scenes/scene1/expanded", (route) => route.fulfill({ json: expandedScene }));
+    await page.route("**/api/assets", (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          assetId: `asset_${Date.now()}`,
+          url: "/assets/floorplans/uploaded.png",
+          width: 100,
+          height: 80,
+          kind: "floorplan_image"
+        }
+      })
+    );
     await page.route("**/api/virtual-devices/models", (route) =>
       route.fulfill({
         status: 200,
@@ -183,13 +277,20 @@ test.describe("floorplan editor", () => {
       }
       route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
     });
-    await page.route("**/api/device-overrides/light1", (route) => {
+    await page.route("**/api/device-overrides/*", (route) => {
+      const url = route.request().url();
+      const id = decodeURIComponent(url.split("/api/device-overrides/")[1] || "");
       if (route.request().method() === "GET") {
-        route.fulfill({ status: 404, json: { error: "device_override_not_found" } });
+        if (!deviceOverrides[id]) {
+          route.fulfill({ status: 404, json: { error: "device_override_not_found" } });
+          return;
+        }
+        route.fulfill({ status: 200, json: deviceOverrides[id] });
         return;
       }
       if (route.request().method() === "PUT") {
         const body = JSON.parse(route.request().postData() || "{}");
+        deviceOverrides[id] = body;
         route.fulfill({ status: 200, json: body });
         return;
       }
@@ -204,17 +305,27 @@ test.describe("floorplan editor", () => {
     );
   });
 
-  test("loads floorplan and toggles modes", async ({ page }) => {
-    page.on("dialog", (dialog) => dialog.accept());
+  test("loads browse stage, enters editor, zooms canvas, and toggles modes", async ({ page }) => {
     await page.goto("/floorplan");
     await expect(page.getByTestId("floorplan-page")).toBeVisible();
-    await expect(page.getByText("一层")).toBeVisible();
+    await expect(page.getByTestId("floorplan-stage-browse")).toBeVisible();
+    await expect(page.getByTestId("browse-select")).toBeVisible();
+    await page.getByTestId("select-floorplan-floor1").click();
+    await expect(page.getByTestId("floorplan-stage-editor")).toBeVisible();
+    await expect(page.getByTestId("create-floorplan-form")).toHaveCount(0);
+
+    await page.getByTestId("canvas-zoom-in").click();
+    await expect
+      .poll(async () =>
+        page.getByTestId("canvas-scroll-region").evaluate((node) => node.scrollWidth > node.clientWidth || node.scrollHeight > node.clientHeight)
+      )
+      .toBe(true);
 
     await page.getByTestId("mode-devices").click();
     await expect(page.getByTestId("virtual-enabled")).toBeVisible();
 
     await page.getByTestId("mode-rooms").click();
-    await expect(page.getByText("新建房间")).toBeVisible();
+    await expect(page.getByTestId("start-room-drawing")).toBeVisible();
 
     await page.getByTestId("mode-view").click();
     await page.getByTestId("scene-select").selectOption("scene1");
@@ -223,8 +334,62 @@ test.describe("floorplan editor", () => {
     await expect(page.getByTestId("scene-run-status")).toContainText("status=ok");
   });
 
-  test("can save device override from floorplan device panel", async ({ page }) => {
+  test("can create a floorplan and enter editor directly", async ({ page }) => {
     await page.goto("/floorplan");
+    await page.getByTestId("browse-create").click();
+    await expect(page.getByTestId("create-floorplan-form")).toBeVisible();
+    await page.getByPlaceholder("例如：一层").fill("二层");
+    await page.getByTestId("create-floorplan-form").locator('input[type="file"]').first().setInputFiles({
+      name: "floor2.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(tinyPngBase64, "base64")
+    });
+    await page.getByRole("button", { name: "创建户型并进入编辑" }).click();
+    await expect(page.getByTestId("floorplan-stage-editor")).toBeVisible();
+    await expect(page.getByText("二层")).toBeVisible();
+  });
+
+  test("can delete current floorplan and return to browse stage", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("delete-floorplan").click();
+    await expect(page.getByTestId("floorplan-stage-browse")).toBeVisible();
+    await expect(page.getByTestId("select-floorplan-floor1")).toHaveCount(0);
+  });
+
+  test("can undo room drawing points step by step", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-rooms").click();
+    await page.getByTestId("start-room-drawing").click();
+    await clickCanvasPoint(page, 0.2, 0.2);
+    await expect(page.getByTestId("room-point-count")).toContainText("已选择 1 个点");
+    await clickCanvasPoint(page, 0.45, 0.2);
+    await expect(page.getByTestId("room-point-count")).toContainText("已选择 2 个点");
+    await clickCanvasPoint(page, 0.45, 0.45);
+    await expect(page.getByTestId("room-point-count")).toContainText("已选择 3 个点");
+    await page.getByTestId("undo-room-point").click();
+    await expect(page.getByTestId("room-point-count")).toContainText("已选择 2 个点");
+    await page.getByTestId("undo-room-point").click();
+    await expect(page.getByTestId("room-point-count")).toContainText("已选择 1 个点");
+  });
+
+  test("can define image scale and persist it after save", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("start-image-scale").click();
+    await clickCanvasPoint(page, 0.2, 0.25);
+    await expect(page.getByTestId("scale-point-count")).toContainText("1/2");
+    await clickCanvasPoint(page, 0.65, 0.25);
+    await expect(page.getByTestId("scale-point-count")).toContainText("2/2");
+    await page.getByTestId("image-scale-distance").fill("3.5");
+    await page.getByTestId("image-scale-save").click();
+    await expect(page.getByText("比例尺参考线 3.5 米")).toBeVisible();
+    await page.getByTestId("save-floorplan").click();
+    await page.getByTestId("back-to-browser").click();
+    await page.getByTestId("select-floorplan-floor1").click();
+    await expect(page.getByText("比例尺参考线 3.5 米")).toBeVisible();
+  });
+
+  test("can save device override from floorplan device panel", async ({ page }) => {
+    await openFloorplanEditor(page);
     await page.getByTestId("mode-devices").click();
     await page.getByTestId("floorplan-device-light1").click();
 
@@ -234,8 +399,39 @@ test.describe("floorplan editor", () => {
     await expect(page.getByText("已保存（约 1~2 秒后生效）")).toBeVisible();
   });
 
+  test("can place a real device from the placement list and see it on canvas", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await expect(page.getByTestId("start-place-plug1")).toBeVisible();
+    await expect(page.getByTestId("placement-device-summary")).toContainText("待布点 1 个");
+    await page.getByTestId("start-place-plug1").click();
+    await expect(page.getByTestId("placing-device-banner")).toContainText("当前待放置：玄关插座");
+    await clickCanvasPoint(page, 0.62, 0.48);
+    await expect(page.getByTestId("floorplan-device-plug1")).toBeVisible();
+    await expect(page.getByText("当前选中：玄关插座")).toBeVisible();
+    await expect(page.getByTestId("placement-empty")).toBeVisible();
+  });
+
+  test("can place a device inside an already defined room area", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-rooms").click();
+    await page.getByTestId("start-room-drawing").click();
+    await clickCanvasPoint(page, 0.2, 0.2);
+    await clickCanvasPoint(page, 0.5, 0.2);
+    await clickCanvasPoint(page, 0.5, 0.5);
+    await clickCanvasPoint(page, 0.2, 0.5);
+    await page.getByRole("button", { name: "完成房间" }).click();
+
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("start-place-plug1").click();
+    await clickCanvasPoint(page, 0.32, 0.32);
+
+    await expect(page.getByTestId("floorplan-device-plug1")).toBeVisible();
+    await expect(page.getByText("当前选中：玄关插座")).toBeVisible();
+  });
+
   test("can create simulated device in floorplan editor", async ({ page }) => {
-    await page.goto("/floorplan");
+    await openFloorplanEditor(page);
     await page.getByTestId("mode-devices").click();
     await page.getByTestId("virtual-model-select").selectOption("light.dimmer.v1");
     await page.getByTestId("virtual-new").click();
@@ -246,8 +442,32 @@ test.describe("floorplan editor", () => {
     await expect(page.getByTestId("virtual-id")).toHaveValue("sim_light_lr");
   });
 
+  test("new simulated device can be saved into placement list from step 2", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("virtual-model-select").selectOption("light.dimmer.v1");
+    await page.getByTestId("virtual-new").click();
+    await page.getByTestId("virtual-id").fill("sim_step2_list");
+    await expect(page.getByTestId("pending-virtual-placement-card")).toBeVisible();
+    await page.getByTestId("virtual-save-to-placement").click();
+    await expect(page.getByTestId("start-place-sim_step2_list")).toBeVisible();
+  });
+
+  test("can save a simulated device and enter placement mode immediately", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("virtual-model-select").selectOption("light.dimmer.v1");
+    await page.getByTestId("virtual-new").click();
+    await page.getByTestId("virtual-id").fill("sim_light_entry");
+    await page.getByTestId("virtual-save-and-place").click();
+    await expect(page.getByTestId("placing-device-banner")).toContainText("当前待放置：可调光灯");
+    await clickCanvasPoint(page, 0.52, 0.55);
+    await expect(page.getByTestId("floorplan-device-sim_light_entry")).toBeVisible();
+    await expect(page.getByText("当前选中：可调光灯")).toBeVisible();
+  });
+
   test("can manage virtual model templates in floorplan editor", async ({ page }) => {
-    await page.goto("/floorplan");
+    await openFloorplanEditor(page);
     await page.getByTestId("mode-devices").click();
     await page.getByTestId("virtual-model-new").click();
     await page.getByTestId("virtual-model-id").fill("light.rgb.v1");

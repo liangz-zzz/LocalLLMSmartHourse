@@ -25,6 +25,11 @@ type CalibrationPoints = {
   model: Point3D[];
 };
 
+type ImageScaleReference = {
+  points: [Point2D, Point2D];
+  distanceMeters: number;
+};
+
 type FloorplanRoom = {
   id: string;
   name: string;
@@ -48,6 +53,7 @@ type Floorplan = {
   model?: FloorplanAsset;
   modelTransform?: ModelTransform | null;
   calibrationPoints?: CalibrationPoints | null;
+  imageScale?: ImageScaleReference | null;
   rooms: FloorplanRoom[];
   devices: FloorplanDevice[];
 };
@@ -142,6 +148,8 @@ type SceneRunResult = {
 };
 
 type Mode = "view" | "rooms" | "devices" | "calibration";
+type PageStage = "browse" | "editor";
+type BrowseView = "select" | "create";
 
 const MODE_LABELS: Record<Mode, string> = {
   view: "视图",
@@ -198,6 +206,26 @@ function findRoomForPoint(rooms: FloorplanRoom[], point: Point2D) {
     .map((room) => ({ room, area: polygonArea(room.polygon) }))
     .sort((a, b) => a.area - b.area);
   return hits.length ? hits[0].room.id : "";
+}
+
+function getPointDistanceInPixels(a: Point2D, b: Point2D, imageWidth: number, imageHeight: number) {
+  const dx = (b.x - a.x) * imageWidth;
+  const dy = (b.y - a.y) * imageHeight;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getImageScaleMetrics(scale: ImageScaleReference | null | undefined, imageWidth: number, imageHeight: number) {
+  if (!scale?.points?.length || scale.points.length !== 2) return null;
+  const pixelDistance = getPointDistanceInPixels(scale.points[0], scale.points[1], imageWidth, imageHeight);
+  if (!Number.isFinite(pixelDistance) || pixelDistance <= 0) return null;
+  const distanceMeters = Number(scale.distanceMeters);
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
+  return {
+    pixelDistance,
+    distanceMeters,
+    metersPerPixel: distanceMeters / pixelDistance,
+    pixelsPerMeter: pixelDistance / distanceMeters
+  };
 }
 
 function slugify(name: string) {
@@ -609,6 +637,8 @@ function ThreePreview({
 
 export default function FloorplanPage() {
   const router = useRouter();
+  const [pageStage, setPageStage] = useState<PageStage>("browse");
+  const [browseView, setBrowseView] = useState<BrowseView>("select");
   const [mode, setMode] = useState<Mode>("view");
   const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -658,10 +688,23 @@ export default function FloorplanPage() {
   const [newPlanId, setNewPlanId] = useState<string>("");
   const [newImageAsset, setNewImageAsset] = useState<FloorplanAsset | null>(null);
   const [newModelAsset, setNewModelAsset] = useState<FloorplanAsset | null>(null);
+  const [newImageUploading, setNewImageUploading] = useState<boolean>(false);
+  const [newModelUploading, setNewModelUploading] = useState<boolean>(false);
+  const [newImageUploadError, setNewImageUploadError] = useState<string>("");
+  const [newModelUploadError, setNewModelUploadError] = useState<string>("");
+  const [show3dPanel, setShow3dPanel] = useState<boolean>(false);
+  const [canvasZoom, setCanvasZoom] = useState<number>(1);
+  const [canvasViewportSize, setCanvasViewportSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [isSettingImageScale, setIsSettingImageScale] = useState<boolean>(false);
+  const [draftScalePoints, setDraftScalePoints] = useState<Point2D[]>([]);
+  const [scaleDistanceInput, setScaleDistanceInput] = useState<string>("");
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const draggingDeviceRef = useRef<string | null>(null);
   const draggingHandleRef = useRef<{ roomId: string; index: number } | null>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceModelInputRef = useRef<HTMLInputElement | null>(null);
 
   const deviceMap = useMemo(() => {
     const map: Record<string, Device> = {};
@@ -676,11 +719,65 @@ export default function FloorplanPage() {
     return JSON.stringify(draft) !== savedSnapshot;
   }, [draft, savedSnapshot]);
 
+  const refreshFloorplans = async () => {
+    const res = await fetch("/api/floorplans");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.reason || data?.error || "加载户型失败");
+    const items = Array.isArray(data?.items) ? data.items : [];
+    setFloorplans(items);
+    return items;
+  };
+
   const refreshDevices = async () => {
     const res = await fetch("/api/devices");
     const data = await res.json();
     if (!res.ok) throw new Error(data?.reason || data?.error || "加载设备失败");
     setDevices(data.items || []);
+  };
+
+  const resetEditorTransientState = () => {
+    setDraftRoomPoints([]);
+    setDraftRoomName("");
+    setIsDrawingRoom(false);
+    setPlacingDeviceId(null);
+    setSelectedRoomId(null);
+    setSelectedDeviceId(null);
+    setScenePreview(null);
+    setSceneEffects({});
+    setSceneRunResult(null);
+    setDeviceOverrideDraft(null);
+    setDeviceOverrideStatus("");
+    setCanvasZoom(1);
+    setShow3dPanel(false);
+    setIsSettingImageScale(false);
+    setDraftScalePoints([]);
+    setScaleDistanceInput("");
+  };
+
+  const clearEditorState = () => {
+    resetEditorTransientState();
+    setDraft(null);
+    setSavedSnapshot("");
+    setActiveId(null);
+    setCalibration({ image: [], model: [] });
+    setImageDims(null);
+    setMode("view");
+  };
+
+  const enterEditor = (floorplanId: string) => {
+    resetEditorTransientState();
+    setActiveId(floorplanId);
+    setPageStage("editor");
+    setBrowseView("select");
+    setMode("view");
+    setStatus("");
+  };
+
+  const returnToBrowse = () => {
+    if (isDirty && !window.confirm("当前户型有未保存修改，确认返回户型选择吗？")) return;
+    clearEditorState();
+    setPageStage("browse");
+    setStatus("");
   };
 
   const loadVirtualConfig = async (preferredId?: string) => {
@@ -729,13 +826,7 @@ export default function FloorplanPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("/api/floorplans");
-        const data = await res.json();
-        const items = data.items || [];
-        setFloorplans(items);
-        if (!activeId && items.length) {
-          setActiveId(items[0].id);
-        }
+        await refreshFloorplans();
       } catch (err) {
         setStatus(`加载户型失败: ${(err as Error).message}`);
       }
@@ -766,7 +857,7 @@ export default function FloorplanPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (pageStage !== "editor" || !activeId) return;
     const loadFloorplan = async () => {
       try {
         const res = await fetch(`/api/floorplans/${encodeURIComponent(activeId)}`);
@@ -778,19 +869,15 @@ export default function FloorplanPage() {
         setDraft(data);
         setSavedSnapshot(JSON.stringify(data));
         setCalibration(data.calibrationPoints || { image: [], model: [] });
-        setDraftRoomPoints([]);
-        setIsDrawingRoom(false);
-        setSelectedRoomId(null);
-        setSelectedDeviceId(null);
-        setScenePreview(null);
-        setSceneEffects({});
-        setSceneRunResult(null);
+        setImageDims(data?.image?.width && data?.image?.height ? { width: data.image.width, height: data.image.height } : null);
+        resetEditorTransientState();
+        setScaleDistanceInput(data?.imageScale?.distanceMeters ? String(data.imageScale.distanceMeters) : "");
       } catch (err) {
         setStatus(`加载户型失败: ${(err as Error).message}`);
       }
     };
     loadFloorplan();
-  }, [activeId]);
+  }, [activeId, pageStage]);
 
   useEffect(() => {
     if (!draft?.image?.url) return;
@@ -802,7 +889,24 @@ export default function FloorplanPage() {
   }, [draft?.image?.url]);
 
   useEffect(() => {
-    if (mode !== "view") return;
+    if (!canvasViewportRef.current) return;
+    const node = canvasViewportRef.current;
+    const updateSize = () => {
+      setCanvasViewportSize({
+        width: node.clientWidth,
+        height: node.clientHeight
+      });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [pageStage, draft?.id]);
+
+  useEffect(() => {
+    if (pageStage !== "editor" || mode !== "view") return;
     let ws: WebSocket | null = null;
     let active = true;
     const connect = () => {
@@ -827,7 +931,7 @@ export default function FloorplanPage() {
         }
       };
       ws.onclose = () => {
-        if (active && mode === "view") setTimeout(connect, 2000);
+        if (active && pageStage === "editor" && mode === "view") setTimeout(connect, 2000);
       };
     };
     connect();
@@ -835,7 +939,7 @@ export default function FloorplanPage() {
       active = false;
       ws?.close();
     };
-  }, [mode]);
+  }, [mode, pageStage]);
 
   useEffect(() => {
     if (calibration.image.length === 3 && calibration.model.length === 3) {
@@ -861,6 +965,19 @@ export default function FloorplanPage() {
   useEffect(() => {
     if (mode !== "devices") {
       setPlacingDeviceId(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== "view") {
+      setIsSettingImageScale(false);
+      setDraftScalePoints([]);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode === "calibration") {
+      setShow3dPanel(true);
     }
   }, [mode]);
 
@@ -921,15 +1038,69 @@ export default function FloorplanPage() {
 
   const imageWidth = draft?.image?.width || imageDims?.width || 1000;
   const imageHeight = draft?.image?.height || imageDims?.height || 800;
+  const availableCanvasWidth = canvasViewportSize.width || 1;
+  const availableCanvasHeight = canvasViewportSize.height || 1;
+  const fitScale = Math.min(availableCanvasWidth / imageWidth, availableCanvasHeight / imageHeight);
+  const effectiveCanvasScale = Math.max(0.2, fitScale * canvasZoom);
+  const canvasRenderWidth = Math.max(320, Math.round(imageWidth * effectiveCanvasScale));
+  const canvasRenderHeight = Math.max(240, Math.round(imageHeight * effectiveCanvasScale));
+  const effectiveShow3dPanel = pageStage === "editor" && (show3dPanel || mode === "calibration");
+  const selectedRoom = draft?.rooms.find((room) => room.id === selectedRoomId) || null;
+  const selectedPlacedDevice = draft?.devices.find((device) => device.deviceId === selectedDeviceId) || null;
+  const availablePlacementDevices = draft ? devices.filter((device) => !draft.devices.some((item) => item.deviceId === device.id)) : devices;
+  const availablePlacementDeviceIds = new Set(availablePlacementDevices.map((device) => device.id));
+  const persistedImageScale = draft?.imageScale || null;
+  const imageScaleMetrics = getImageScaleMetrics(persistedImageScale, imageWidth, imageHeight);
+  const activeScalePoints = isSettingImageScale ? draftScalePoints : persistedImageScale?.points || [];
+  const activeScaleMetrics =
+    isSettingImageScale && draftScalePoints.length === 2
+      ? getImageScaleMetrics({ points: [draftScalePoints[0], draftScalePoints[1]], distanceMeters: Number(scaleDistanceInput) || 0 }, imageWidth, imageHeight)
+      : imageScaleMetrics;
+  const selectedVirtualPlacementId = String(virtualDraft?.id || selectedVirtualId || "").trim();
+  const isSelectedVirtualPersisted = Boolean(selectedVirtualPlacementId) && Boolean(devices.some((device) => device.id === selectedVirtualPlacementId));
+  const isSelectedVirtualPlaced = Boolean(selectedVirtualPlacementId) && Boolean(draft?.devices.some((device) => device.deviceId === selectedVirtualPlacementId));
+  const canPlaceSelectedVirtual = Boolean(selectedVirtualPlacementId) && availablePlacementDeviceIds.has(selectedVirtualPlacementId);
+  const placingDeviceLabel = placingDeviceId
+    ? deviceMap[placingDeviceId]?.name || (placingDeviceId === selectedVirtualPlacementId ? virtualDraft?.name || selectedVirtualId : "") || placingDeviceId
+    : "";
+  const selectedVirtualPlacementHint = !selectedVirtualPlacementId
+    ? ""
+    : isSelectedVirtualPlaced
+      ? "已存在于当前户型图中。"
+      : canPlaceSelectedVirtual
+        ? "尚未布点。"
+        : "还未保存到设备列表，保存后才能布点。";
 
   const updateDraft = (fn: (prev: Floorplan) => Floorplan) => {
     setDraft((prev) => (prev ? fn(prev) : prev));
+  };
+
+  const startPlacingDevice = (deviceId: string) => {
+    const found = devices.find((device) => device.id === deviceId);
+    if (!found) {
+      setStatus(`未找到设备 ${deviceId}，请先保存设备并刷新列表`);
+      return;
+    }
+    if (draft?.devices.some((device) => device.deviceId === deviceId)) {
+      setPlacingDeviceId(null);
+      setSelectedDeviceId(deviceId);
+      setStatus(`${found.name || deviceId} 已经放置过了，请直接点击平面图中的设备点位调整位置`);
+      return;
+    }
+    setSelectedDeviceId(null);
+    setPlacingDeviceId(deviceId);
+    setStatus(`已选中 ${found.name || deviceId}，请在 2D 户型图上点击要放置的位置`);
   };
 
   const handleSvgClick = (evt: ReactPointerEvent) => {
     if (!draft || !svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     const point = toNormalizedPoint(evt, rect);
+
+    if (mode === "view" && isSettingImageScale && draftScalePoints.length < 2) {
+      setDraftScalePoints((prev) => [...prev, point]);
+      return;
+    }
 
     if (mode === "rooms" && isDrawingRoom) {
       setDraftRoomPoints((prev) => [...prev, point]);
@@ -945,6 +1116,7 @@ export default function FloorplanPage() {
     }
 
     if (mode === "devices" && placingDeviceId) {
+      const placedDeviceId = placingDeviceId;
       updateDraft((prev) => {
         const roomId = findRoomForPoint(prev.rooms || [], point);
         return {
@@ -952,7 +1124,7 @@ export default function FloorplanPage() {
           devices: [
             ...(prev.devices || []),
             {
-              deviceId: placingDeviceId,
+              deviceId: placedDeviceId,
               x: point.x,
               y: point.y,
               height: 0,
@@ -964,6 +1136,8 @@ export default function FloorplanPage() {
         };
       });
       setPlacingDeviceId(null);
+      setSelectedDeviceId(placedDeviceId);
+      setStatus("设备点位已添加，可在右侧继续调整高度、旋转和语义信息");
       return;
     }
   };
@@ -979,6 +1153,67 @@ export default function FloorplanPage() {
     setDraftRoomPoints([]);
     setDraftRoomName("");
     setIsDrawingRoom(false);
+  };
+
+  const undoDraftRoomPoint = () => {
+    setDraftRoomPoints((prev) => prev.slice(0, -1));
+  };
+
+  const startImageScaleSelection = () => {
+    if (!draft) return;
+    setIsSettingImageScale(true);
+    setDraftScalePoints([]);
+    setScaleDistanceInput(draft.imageScale?.distanceMeters ? String(draft.imageScale.distanceMeters) : "");
+    setStatus("请在 2D 户型图上依次点击比例尺的两个端点");
+  };
+
+  const undoImageScalePoint = () => {
+    setDraftScalePoints((prev) => prev.slice(0, -1));
+  };
+
+  const cancelImageScaleSelection = () => {
+    setIsSettingImageScale(false);
+    setDraftScalePoints([]);
+    setScaleDistanceInput(draft?.imageScale?.distanceMeters ? String(draft.imageScale.distanceMeters) : "");
+  };
+
+  const clearImageScale = () => {
+    updateDraft((prev) => ({
+      ...prev,
+      imageScale: null
+    }));
+    setIsSettingImageScale(false);
+    setDraftScalePoints([]);
+    setScaleDistanceInput("");
+    setStatus("比例尺已清除，请记得保存户型");
+  };
+
+  const saveImageScale = () => {
+    if (!draft || draftScalePoints.length !== 2) {
+      setStatus("请先在 2D 户型图上选择两个端点");
+      return;
+    }
+    const distanceMeters = Number(scaleDistanceInput);
+    if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+      setStatus("请输入有效的实际距离（米）");
+      return;
+    }
+    const pixelDistance = getPointDistanceInPixels(draftScalePoints[0], draftScalePoints[1], imageWidth, imageHeight);
+    if (!Number.isFinite(pixelDistance) || pixelDistance < 1) {
+      setStatus("比例尺两点过近，请重新选择");
+      return;
+    }
+    updateDraft((prev) => ({
+      ...prev,
+      imageScale: {
+        points: [draftScalePoints[0], draftScalePoints[1]],
+        distanceMeters
+      }
+    }));
+    setIsSettingImageScale(false);
+    setDraftScalePoints([]);
+    setScaleDistanceInput(String(distanceMeters));
+    setStatus("比例尺已更新，请保存户型");
   };
 
   const removeRoom = (roomId: string) => {
@@ -1015,12 +1250,16 @@ export default function FloorplanPage() {
     const form = new FormData();
     form.set("kind", kind);
     form.set("file", file);
-    const res = await fetch("/api/assets", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data?.reason || data?.error || "upload_failed");
+    try {
+      const res = await fetch("/api/assets", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.reason || data?.error || `upload_failed(${res.status})`);
+      }
+      return data as FloorplanAsset & { kind: string };
+    } catch (err) {
+      throw err;
     }
-    return data as FloorplanAsset & { kind: string };
   };
 
   const saveFloorplan = async () => {
@@ -1039,6 +1278,7 @@ export default function FloorplanPage() {
       }
       setDraft(data);
       setSavedSnapshot(JSON.stringify(data));
+      setScaleDistanceInput(data?.imageScale?.distanceMeters ? String(data.imageScale.distanceMeters) : "");
       setFloorplans((prev) =>
         prev.map((plan) =>
           plan.id === data.id
@@ -1061,7 +1301,13 @@ export default function FloorplanPage() {
 
   const createFloorplan = async () => {
     if (!newPlanName.trim() || !newImageAsset) {
-      setStatus("需要名称与 2D 图片");
+      if (newImageUploading) {
+        setStatus("2D 图片上传中，请等待完成后再创建");
+      } else if (newImageUploadError) {
+        setStatus(`2D 图片未上传成功: ${newImageUploadError}`);
+      } else {
+        setStatus("需要名称与 2D 图片");
+      }
       return;
     }
     const id = newPlanId.trim() || slugify(newPlanName);
@@ -1089,14 +1335,48 @@ export default function FloorplanPage() {
       setNewPlanId("");
       setNewImageAsset(null);
       setNewModelAsset(null);
-      const listRes = await fetch("/api/floorplans");
-      const listData = await listRes.json();
-      setFloorplans(listData.items || []);
+      await refreshFloorplans();
+      resetEditorTransientState();
       setActiveId(data.id);
+      setPageStage("editor");
+      setMode("view");
       setStatus("创建成功");
     } catch (err) {
       setStatus(`创建失败: ${(err as Error).message}`);
     }
+  };
+
+  const deleteFloorplan = async () => {
+    if (!draft) return;
+    if (!window.confirm(`确认删除户型 ${draft.name} (${draft.id})？`)) return;
+    setStatus("删除中...");
+    try {
+      const res = await fetch(`/api/floorplans/${encodeURIComponent(draft.id)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(`删除失败: ${data?.reason || data?.error || res.status}`);
+        return;
+      }
+      await refreshFloorplans();
+      clearEditorState();
+      setPageStage("browse");
+      setBrowseView("select");
+      setStatus("户型已删除");
+    } catch (err) {
+      setStatus(`删除失败: ${(err as Error).message}`);
+    }
+  };
+
+  const zoomInCanvas = () => {
+    setCanvasZoom((prev) => Math.min(prev + 0.25, 4));
+  };
+
+  const zoomOutCanvas = () => {
+    setCanvasZoom((prev) => Math.max(prev - 0.25, 0.5));
+  };
+
+  const resetCanvasZoom = () => {
+    setCanvasZoom(1);
   };
 
   const loadScenePreview = async (sceneId: string) => {
@@ -1285,7 +1565,7 @@ export default function FloorplanPage() {
     }
   };
 
-  const saveVirtualDevice = async () => {
+  const saveVirtualDevice = async ({ placeAfterSave = false }: { placeAfterSave?: boolean } = {}) => {
     if (!virtualDraft) return;
     const id = String(virtualDraft.id || "").trim();
     if (!id) {
@@ -1354,7 +1634,20 @@ export default function FloorplanPage() {
       setSelectedVirtualId(id);
       setVirtualDraft(data);
       await Promise.all([loadVirtualConfig(id), refreshDevices()]);
-      setVirtualStatus("模拟设备已保存");
+      if (placeAfterSave) {
+        if (draft?.devices.some((device) => device.deviceId === id)) {
+          setSelectedDeviceId(id);
+          setPlacingDeviceId(null);
+          setVirtualStatus("模拟设备已保存。该设备已在户型图中，右侧可直接编辑属性");
+        } else {
+          setSelectedDeviceId(null);
+          setPlacingDeviceId(id);
+          setStatus(`已保存模拟设备 ${String(data?.name || id)}，请在 2D 户型图上点击放置位置`);
+          setVirtualStatus("模拟设备已保存并进入布点模式。下一步去中间 2D 户型图点击一次完成布点。");
+        }
+        return;
+      }
+      setVirtualStatus("模拟设备已保存。若要加到户型图，请点击“保存并去平面图布点”或左侧待放置设备清单");
     } catch (err) {
       setVirtualStatus((err as Error).message);
     } finally {
@@ -1466,6 +1759,1257 @@ export default function FloorplanPage() {
     return { device, color, label };
   });
 
+  const renderScenePreviewPanel = () => (
+    <div style={panelStyle}>
+      <h3 style={panelTitleStyle}>场景预览</h3>
+      <p style={{ ...hintStyle, marginBottom: 12 }}>先查看设备动作，再决定是否执行场景。</p>
+      <select
+        value={scenePreview?.sceneId || ""}
+        onChange={(e) => loadScenePreview(e.target.value)}
+        data-testid="scene-select"
+        style={inputStyle}
+      >
+        <option value="">选择场景</option>
+        {scenes.map((scene) => (
+          <option key={scene.id} value={scene.id}>
+            {scene.name}
+          </option>
+        ))}
+      </select>
+      {scenePreview && (
+        <div style={{ marginTop: 12 }}>
+          <p style={hintStyle}>共 {scenePreview.steps.length} 步设备动作</p>
+          <button onClick={executeScene} style={primaryButtonStyle} disabled={sceneRunLoading} data-testid="scene-run">
+            {sceneRunLoading ? "执行中..." : "执行场景"}
+          </button>
+          {sceneRunResult && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+              <p style={hintStyle} data-testid="scene-run-status">
+                run={sceneRunResult.runId} status={sceneRunResult.status} 耗时 {sceneRunResult.durationMs ?? 0}ms
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {sceneRunResult.steps.map((step) => (
+                  <div
+                    key={`${sceneRunResult.runId}-${step.index}`}
+                    style={{
+                      fontSize: 12,
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      padding: "6px 8px",
+                      background:
+                        step.status === "ok"
+                          ? "#ecfdf5"
+                          : step.status === "timeout"
+                            ? "#eff6ff"
+                            : step.status === "error"
+                              ? "#fef2f2"
+                              : "white"
+                    }}
+                  >
+                    #{step.index + 1} {step.deviceId}.{step.action} 状态 {step.status}
+                    {step.reason ? ` (${step.reason})` : ""}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderRoomInspector = () => (
+    <div style={panelStyle}>
+      <h3 style={panelTitleStyle}>房间属性</h3>
+      {selectedRoom ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={labelStyle}>名称</label>
+          <input
+            value={selectedRoom.name}
+            onChange={(e) =>
+              updateDraft((prev) => ({
+                ...prev,
+                rooms: prev.rooms.map((room) => (room.id === selectedRoom.id ? { ...room, name: e.target.value } : room))
+              }))
+            }
+            style={inputStyle}
+          />
+          <p style={hintStyle}>房间 ID：{selectedRoom.id}</p>
+          <button onClick={() => removeRoom(selectedRoom.id)} style={dangerButtonStyle}>
+            删除房间
+          </button>
+        </div>
+      ) : (
+        <p style={hintStyle}>先从左侧开始绘制房间，或点击平面图中已存在的房间来编辑名称。</p>
+      )}
+    </div>
+  );
+
+  const renderVirtualQuickSelector = () => (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8
+      }}
+    >
+      <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>步骤 1：选择设备型号 / 模拟设备</h4>
+      <p style={hintStyle}>真实设备会直接出现在下面的待放置设备清单里；如果缺少设备，可以先在这里从型号模板创建一个模拟设备。</p>
+      <div
+        style={{
+          padding: "12px 14px",
+          borderRadius: 14,
+          border: "1px solid #cbd5e1",
+          background: "#f8fafc"
+        }}
+      >
+        <p style={{ ...hintStyle, margin: 0 }}>操作顺序：1. 选型号模板 2. 新建或选择模拟设备 3. 保存并去平面图布点 4. 回到中间 2D 户型图点击一次完成布点。</p>
+        {selectedVirtualPlacementId && (
+          <p style={{ ...hintStyle, margin: "8px 0 0" }}>
+            当前设备：{deviceMap[selectedVirtualPlacementId]?.name || virtualDraft?.name || selectedVirtualPlacementId}
+            ，{selectedVirtualPlacementHint}
+          </p>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+        <select
+          value={selectedVirtualModelId}
+          onChange={(e) => setSelectedVirtualModelId(e.target.value)}
+          style={{ ...inputStyle, marginTop: 0, flex: "1 1 200px" }}
+          data-testid="virtual-model-select"
+        >
+          <option value="">选择设备型号模板</option>
+          {virtualModels.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name} ({item.id})
+            </option>
+          ))}
+        </select>
+        <button type="button" style={secondaryButtonStyle} onClick={startNewVirtualDevice} data-testid="virtual-new">
+          新建模拟设备
+        </button>
+      </div>
+
+      <select
+        value={selectedVirtualId}
+        onChange={(e) => setSelectedVirtualId(e.target.value)}
+        style={inputStyle}
+        data-testid="virtual-select"
+      >
+        <option value="">选择已有模拟设备</option>
+        {virtualConfig.devices.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name || item.id} ({item.id})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const renderVirtualDeviceManager = ({
+    embedded = false,
+    title = "模拟设备详情与高级配置",
+    description = "需要修改模拟设备参数、保存并布点，或者维护模拟器全局配置与型号模板时，再展开下面这些内容。"
+  }: {
+    embedded?: boolean;
+    title?: string;
+    description?: string;
+  } = {}) => (
+    <div
+      style={
+        embedded
+          ? {
+              display: "flex",
+              flexDirection: "column",
+              gap: 8
+            }
+          : panelStyle
+      }
+    >
+      {embedded ? <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h4> : <h3 style={panelTitleStyle}>{title}</h3>}
+      <p style={hintStyle}>{description}</p>
+
+      {virtualDraft && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+          <label style={labelStyle}>id</label>
+          <input
+            value={virtualDraft.id || ""}
+            onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), id: e.target.value }))}
+            style={inputStyle}
+            data-testid="virtual-id"
+          />
+          <label style={labelStyle}>name</label>
+          <input
+            value={virtualDraft.name || ""}
+            onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), name: e.target.value }))}
+            style={inputStyle}
+          />
+          <label style={labelStyle}>placement.room</label>
+          <input
+            value={virtualDraft.placement?.room || ""}
+            onChange={(e) =>
+              setVirtualDraft((prev) => ({
+                ...(prev || {}),
+                placement: { ...(prev?.placement || {}), room: e.target.value }
+              }))
+            }
+            style={inputStyle}
+          />
+          <label style={labelStyle}>placement.zone</label>
+          <input
+            value={virtualDraft.placement?.zone || ""}
+            onChange={(e) =>
+              setVirtualDraft((prev) => ({
+                ...(prev || {}),
+                placement: { ...(prev?.placement || {}), zone: e.target.value }
+              }))
+            }
+            style={inputStyle}
+          />
+          <label style={labelStyle}>capabilities（逗号分隔）</label>
+          <input
+            value={virtualActionsText}
+            onChange={(e) => setVirtualActionsText(e.target.value)}
+            style={inputStyle}
+            placeholder="turn_on, turn_off, set_brightness"
+            data-testid="virtual-actions"
+          />
+          <label style={labelStyle}>traits(JSON)</label>
+          <textarea
+            value={virtualTraitsText}
+            onChange={(e) => setVirtualTraitsText(e.target.value)}
+            style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+            data-testid="virtual-traits"
+          />
+          <label style={labelStyle}>simulation.latency_ms</label>
+          <input
+            type="number"
+            min={0}
+            value={virtualDraft.simulation?.latency_ms ?? virtualConfig.defaults.latency_ms}
+            onChange={(e) =>
+              setVirtualDraft((prev) => ({
+                ...(prev || {}),
+                simulation: { ...(prev?.simulation || {}), latency_ms: Number(e.target.value || 0) }
+              }))
+            }
+            style={inputStyle}
+          />
+          <label style={labelStyle}>simulation.failure_rate</label>
+          <input
+            type="number"
+            min={0}
+            max={1}
+            step="0.01"
+            value={virtualDraft.simulation?.failure_rate ?? virtualConfig.defaults.failure_rate}
+            onChange={(e) =>
+              setVirtualDraft((prev) => ({
+                ...(prev || {}),
+                simulation: { ...(prev?.simulation || {}), failure_rate: Number(e.target.value || 0) }
+              }))
+            }
+            style={inputStyle}
+          />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => saveVirtualDevice()}
+              style={primaryButtonStyle}
+              disabled={virtualSaving}
+              data-testid="virtual-save"
+            >
+              {virtualSaving ? "保存中..." : "保存模拟设备"}
+            </button>
+            <button
+              type="button"
+              onClick={() => saveVirtualDevice({ placeAfterSave: true })}
+              style={secondaryButtonStyle}
+              disabled={virtualSaving}
+              data-testid="virtual-save-and-place"
+            >
+              {virtualSaving ? "保存中..." : "保存并去平面图布点"}
+            </button>
+            <button
+              type="button"
+              onClick={() => startPlacingDevice(selectedVirtualPlacementId)}
+              style={secondaryButtonStyle}
+              disabled={!canPlaceSelectedVirtual || virtualSaving}
+              data-testid="virtual-place"
+            >
+              将当前模拟设备放到户型图
+            </button>
+            <button
+              type="button"
+              onClick={deleteVirtualDevice}
+              style={dangerButtonStyle}
+              disabled={virtualSaving}
+              data-testid="virtual-delete"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px dashed #e2e8f0" }}>
+        <label style={labelStyle}>模拟器全局配置</label>
+        <label style={labelStyle}>模拟器启用</label>
+        <input
+          type="checkbox"
+          checked={virtualConfig.enabled}
+          onChange={(e) => setVirtualConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+          data-testid="virtual-enabled"
+        />
+
+        <label style={labelStyle}>默认 latency_ms</label>
+        <input
+          type="number"
+          min={0}
+          value={virtualConfig.defaults.latency_ms}
+          onChange={(e) =>
+            setVirtualConfig((prev) => ({
+              ...prev,
+              defaults: { ...prev.defaults, latency_ms: Number(e.target.value || 0) }
+            }))
+          }
+          style={inputStyle}
+        />
+
+        <label style={labelStyle}>默认 failure_rate (0~1)</label>
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step="0.01"
+          value={virtualConfig.defaults.failure_rate}
+          onChange={(e) =>
+            setVirtualConfig((prev) => ({
+              ...prev,
+              defaults: { ...prev.defaults, failure_rate: Number(e.target.value || 0) }
+            }))
+          }
+          style={inputStyle}
+        />
+
+        <button
+          type="button"
+          style={secondaryButtonStyle}
+          onClick={saveVirtualGlobalConfig}
+          disabled={virtualSaving}
+          data-testid="virtual-save-global"
+        >
+          保存全局配置
+        </button>
+      </div>
+
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px dashed #e2e8f0" }}>
+        <label style={labelStyle}>型号模板维护</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" style={secondaryButtonStyle} onClick={startNewVirtualModel} data-testid="virtual-model-new">
+            新建型号模板
+          </button>
+          <select
+            value={selectedVirtualModelEditId}
+            onChange={(e) => setSelectedVirtualModelEditId(e.target.value)}
+            style={{ ...inputStyle, marginTop: 0, flex: "1 1 200px" }}
+            data-testid="virtual-model-edit-select"
+          >
+            <option value="">选择已有型号模板</option>
+            {virtualModels.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} ({item.id})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {virtualModelDraft && (
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={labelStyle}>model.id</label>
+            <input
+              value={virtualModelDraft.id || ""}
+              onChange={(e) => setVirtualModelDraft((prev) => (prev ? { ...prev, id: e.target.value } : prev))}
+              style={inputStyle}
+              data-testid="virtual-model-id"
+            />
+            <label style={labelStyle}>model.name</label>
+            <input
+              value={virtualModelDraft.name || ""}
+              onChange={(e) => setVirtualModelDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+              style={inputStyle}
+            />
+            <label style={labelStyle}>model.category</label>
+            <input
+              value={virtualModelDraft.category || ""}
+              onChange={(e) => setVirtualModelDraft((prev) => (prev ? { ...prev, category: e.target.value } : prev))}
+              style={inputStyle}
+            />
+            <label style={labelStyle}>model.description</label>
+            <textarea
+              value={virtualModelDraft.description || ""}
+              onChange={(e) => setVirtualModelDraft((prev) => (prev ? { ...prev, description: e.target.value } : prev))}
+              style={{ ...inputStyle, minHeight: 72 }}
+            />
+            <label style={labelStyle}>model.capabilities（逗号分隔）</label>
+            <input
+              value={virtualModelActionsText}
+              onChange={(e) => setVirtualModelActionsText(e.target.value)}
+              style={inputStyle}
+              placeholder="turn_on, turn_off, set_brightness"
+              data-testid="virtual-model-actions"
+            />
+            <label style={labelStyle}>model.traits(JSON)</label>
+            <textarea
+              value={virtualModelTraitsText}
+              onChange={(e) => setVirtualModelTraitsText(e.target.value)}
+              style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+              data-testid="virtual-model-traits"
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={saveVirtualModel}
+                style={primaryButtonStyle}
+                disabled={virtualModelSaving}
+                data-testid="virtual-model-save"
+              >
+                {virtualModelSaving ? "保存中..." : "保存型号模板"}
+              </button>
+              <button
+                type="button"
+                onClick={deleteVirtualModel}
+                style={dangerButtonStyle}
+                disabled={virtualModelSaving}
+                data-testid="virtual-model-delete"
+              >
+                删除型号模板
+              </button>
+            </div>
+          </div>
+        )}
+
+        {virtualModelStatus && <p style={hintStyle}>{virtualModelStatus}</p>}
+      </div>
+
+      {virtualStatus && <p style={hintStyle}>{virtualStatus}</p>}
+    </div>
+  );
+
+  const renderDeviceInspector = () => (
+    <div style={panelStyle}>
+      <h3 style={panelTitleStyle}>设备属性</h3>
+      {selectedPlacedDevice ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <p style={{ ...hintStyle, margin: 0 }}>
+            当前选中：{deviceMap[selectedPlacedDevice.deviceId]?.name || selectedPlacedDevice.deviceId}。新布点成功后这里会自动切换到对应设备。
+          </p>
+          <label style={labelStyle}>高度 (m)</label>
+          <input
+            type="number"
+            step="0.05"
+            value={selectedPlacedDevice.height ?? 0}
+            onChange={(e) =>
+              updateDraft((prev) => ({
+                ...prev,
+                devices: prev.devices.map((device) =>
+                  device.deviceId === selectedPlacedDevice.deviceId ? { ...device, height: Number(e.target.value) } : device
+                )
+              }))
+            }
+            style={inputStyle}
+          />
+          <label style={labelStyle}>旋转</label>
+          <input
+            type="number"
+            step="1"
+            value={selectedPlacedDevice.rotation ?? 0}
+            onChange={(e) =>
+              updateDraft((prev) => ({
+                ...prev,
+                devices: prev.devices.map((device) =>
+                  device.deviceId === selectedPlacedDevice.deviceId ? { ...device, rotation: Number(e.target.value) } : device
+                )
+              }))
+            }
+            style={inputStyle}
+          />
+          <label style={labelStyle}>缩放</label>
+          <input
+            type="number"
+            step="0.1"
+            value={selectedPlacedDevice.scale ?? 1}
+            onChange={(e) =>
+              updateDraft((prev) => ({
+                ...prev,
+                devices: prev.devices.map((device) =>
+                  device.deviceId === selectedPlacedDevice.deviceId ? { ...device, scale: Number(e.target.value) } : device
+                )
+              }))
+            }
+            style={inputStyle}
+          />
+          <button onClick={() => removeDevice(selectedPlacedDevice.deviceId)} style={dangerButtonStyle}>
+            移除设备
+          </button>
+
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>设备元信息覆盖（devices.config.json）</h4>
+            <p style={hintStyle}>用于覆盖 name / placement / semantics；保存后由 device-adapter 热更新（约 1~2 秒生效）。</p>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={() => router.push(`/scenes?deviceId=${encodeURIComponent(selectedPlacedDevice.deviceId)}`)}
+                style={secondaryButtonStyle}
+                type="button"
+              >
+                去场景编辑
+              </button>
+              <button
+                onClick={() => router.push(`/automations?deviceId=${encodeURIComponent(selectedPlacedDevice.deviceId)}`)}
+                style={secondaryButtonStyle}
+                type="button"
+              >
+                去联动编辑
+              </button>
+            </div>
+
+            <label style={labelStyle}>覆盖名称（name）</label>
+            <input
+              value={deviceOverrideDraft?.name || ""}
+              onChange={(e) =>
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  name: e.target.value
+                }))
+              }
+              style={inputStyle}
+              placeholder={deviceMap[selectedPlacedDevice.deviceId]?.name || selectedPlacedDevice.deviceId}
+            />
+
+            <label style={labelStyle}>placement.room</label>
+            <input
+              value={deviceOverrideDraft?.placement?.room || ""}
+              onChange={(e) =>
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  placement: { ...(prev?.placement || {}), room: e.target.value }
+                }))
+              }
+              style={inputStyle}
+              placeholder={deviceMap[selectedPlacedDevice.deviceId]?.placement?.room || ""}
+            />
+
+            <label style={labelStyle}>placement.zone</label>
+            <input
+              value={deviceOverrideDraft?.placement?.zone || ""}
+              onChange={(e) =>
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  placement: { ...(prev?.placement || {}), zone: e.target.value }
+                }))
+              }
+              style={inputStyle}
+              placeholder={deviceMap[selectedPlacedDevice.deviceId]?.placement?.zone || ""}
+            />
+
+            <label style={labelStyle}>placement.description</label>
+            <input
+              value={deviceOverrideDraft?.placement?.description || ""}
+              onChange={(e) =>
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  placement: { ...(prev?.placement || {}), description: e.target.value }
+                }))
+              }
+              style={inputStyle}
+              placeholder={deviceMap[selectedPlacedDevice.deviceId]?.placement?.description || ""}
+            />
+
+            <label style={labelStyle}>semantics.aliases（逗号分隔）</label>
+            <input
+              value={Array.isArray(deviceOverrideDraft?.semantics?.aliases) ? deviceOverrideDraft.semantics.aliases.join(", ") : ""}
+              onChange={(e) => {
+                const list = e.target.value
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean);
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  semantics: { ...(prev?.semantics || {}), aliases: list }
+                }));
+              }}
+              style={inputStyle}
+              placeholder="例如：主灯, 客厅主灯"
+            />
+
+            <label style={labelStyle}>semantics.tags（逗号分隔）</label>
+            <input
+              value={Array.isArray(deviceOverrideDraft?.semantics?.tags) ? deviceOverrideDraft.semantics.tags.join(", ") : ""}
+              onChange={(e) => {
+                const list = e.target.value
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean);
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  semantics: { ...(prev?.semantics || {}), tags: list }
+                }));
+              }}
+              style={inputStyle}
+              placeholder="例如：living_room, dimmable"
+            />
+
+            <label style={labelStyle}>semantics.preferred_scenes</label>
+            <select
+              multiple
+              value={Array.isArray(deviceOverrideDraft?.semantics?.preferred_scenes) ? deviceOverrideDraft.semantics.preferred_scenes : []}
+              onChange={(e) => {
+                const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                setDeviceOverrideDraft((prev: any) => ({
+                  ...(prev || {}),
+                  id: selectedPlacedDevice.deviceId,
+                  semantics: { ...(prev?.semantics || {}), preferred_scenes: selected }
+                }));
+              }}
+              style={{ ...inputStyle, height: 110 }}
+            >
+              {scenes.map((scene) => (
+                <option key={scene.id} value={scene.id}>
+                  {scene.name} ({scene.id})
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={async () => {
+                if (!selectedPlacedDevice.deviceId) return;
+                setDeviceOverrideSaving(true);
+                setDeviceOverrideStatus("保存中...");
+                try {
+                  const payload = {
+                    id: selectedPlacedDevice.deviceId,
+                    name: String(deviceOverrideDraft?.name || "").trim() || undefined,
+                    placement: deviceOverrideDraft?.placement || undefined,
+                    semantics: deviceOverrideDraft?.semantics || undefined
+                  };
+                  const resp = await fetch(`/api/device-overrides/${encodeURIComponent(selectedPlacedDevice.deviceId)}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                  });
+                  const data = await resp.json().catch(() => ({}));
+                  if (!resp.ok) {
+                    setDeviceOverrideStatus(data?.reason || data?.error || "保存失败");
+                    return;
+                  }
+                  setDeviceOverrideDraft(data);
+                  setDeviceOverrideStatus("已保存（约 1~2 秒后生效）");
+                } catch (err) {
+                  setDeviceOverrideStatus((err as Error).message);
+                } finally {
+                  setDeviceOverrideSaving(false);
+                }
+              }}
+              style={primaryButtonStyle}
+              disabled={deviceOverrideSaving}
+              type="button"
+              data-testid="device-override-save"
+            >
+              {deviceOverrideSaving ? "保存中..." : "保存覆盖配置"}
+            </button>
+
+            {deviceOverrideStatus && <p style={hintStyle}>{deviceOverrideStatus}</p>}
+          </div>
+        </div>
+      ) : (
+        <p style={hintStyle}>先从左侧待放置设备里点一个设备，再到中间户型图点击布点；完成后这里会自动打开该设备的属性。</p>
+      )}
+    </div>
+  );
+
+  const renderCalibrationInspector = () => (
+    <div style={panelStyle}>
+      <h3 style={panelTitleStyle}>校准步骤</h3>
+      <ol style={{ margin: "0 0 0 18px", padding: 0, color: "#334155", fontSize: 14, lineHeight: 1.7 }}>
+        <li>先在 2D 户型图上点击 3 个位置清晰、尽量分散的点。</li>
+        <li>再在 3D 模型里点击与之对应的 3 个点。</li>
+        <li>校准完成后会生成 2D 到 3D 的映射，设备点位将出现在 3D 预览中。</li>
+      </ol>
+      <p style={{ ...hintStyle, marginTop: 12 }}>
+        当前进度：2D 点 {calibration.image.length}/3，3D 点 {calibration.model.length}/3
+      </p>
+      <p style={hintStyle}>{draft?.modelTransform ? "已存在校准结果，可继续微调或重置。" : "尚未完成三点校准。"}</p>
+      <button onClick={resetCalibration} style={secondaryButtonStyle}>
+        重置校准
+      </button>
+    </div>
+  );
+
+  const renderFloorplanSummaryPanel = () => (
+    <div style={panelStyle}>
+      <h3 style={panelTitleStyle}>当前户型</h3>
+      <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{draft?.name}</p>
+      <p style={hintStyle}>ID：{draft?.id}</p>
+      <p style={hintStyle}>
+        房间 {draft?.rooms.length || 0} 个 · 设备 {draft?.devices.length || 0} 个 · {draft?.model?.url ? "已上传 3D 模型" : "仅 2D 户型图"}
+      </p>
+      <p style={hintStyle}>{draft?.imageScale ? `比例尺已设置：参考线 ${draft.imageScale.distanceMeters} 米` : "尚未设置 2D 比例尺"}</p>
+      <p style={hintStyle}>{draft?.modelTransform ? "三点校准已完成" : "尚未完成三点校准"}</p>
+    </div>
+  );
+
+  const renderEditorTools = () => {
+    if (!draft) {
+      return (
+        <div style={panelStyle}>
+          <h3 style={panelTitleStyle}>编辑工具</h3>
+          <p style={hintStyle}>正在加载户型配置...</p>
+        </div>
+      );
+    }
+
+    if (mode === "devices") {
+      return (
+        <div className="floorplan-sticky" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {renderFloorplanSummaryPanel()}
+
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>添加设备</h3>
+            <p style={hintStyle}>“添加设备”和“设备编辑”分开。先选择设备来源或型号，再从待放置设备清单里选一个设备，到中间 2D 户型图点击一次完成布点。</p>
+            {renderVirtualQuickSelector()}
+
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={labelStyle}>步骤 2：选择待放置设备</label>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 16,
+                  border: placingDeviceId ? "1px solid #2563eb" : "1px solid #cbd5e1",
+                  background: placingDeviceId ? "rgba(219, 234, 254, 0.72)" : "#f8fafc"
+                }}
+                data-testid="placing-device-banner"
+              >
+                <p style={{ ...labelStyle, marginBottom: 6 }}>设备布点流程</p>
+                <p style={{ ...hintStyle, margin: 0 }}>1. 先在下面点一个待放置设备。2. 再去中间 2D 户型图点击一次完成布点。3. 布点成功后右侧只显示该设备的属性编辑。</p>
+                {placingDeviceId ? (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+                    <strong style={{ fontSize: 14, color: "#0f172a" }}>当前待放置：{placingDeviceLabel}</strong>
+                    <button
+                      type="button"
+                      onClick={() => setPlacingDeviceId(null)}
+                      style={secondaryButtonStyle}
+                      data-testid="cancel-device-placement"
+                    >
+                      取消布点
+                    </button>
+                  </div>
+                ) : (
+                  <p style={{ ...hintStyle, margin: "10px 0 0" }}>还没有选中待放置设备。点击下面任意一项后，画布会进入布点状态。</p>
+                )}
+              </div>
+
+              <div>
+                <label style={labelStyle}>待放置设备</label>
+                <p style={hintStyle}>真实设备和已经保存的模拟设备都会出现在这里。点击后再去中间户型图上落点。</p>
+                <p style={hintStyle} data-testid="placement-device-summary">
+                  当前已布点 {draft.devices.length} 个，待布点 {availablePlacementDevices.length} 个
+                </p>
+                {selectedVirtualPlacementId && !isSelectedVirtualPersisted && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: "12px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #fdba74",
+                      background: "#fff7ed",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10
+                    }}
+                    data-testid="pending-virtual-placement-card"
+                  >
+                    <p style={{ ...hintStyle, margin: 0, color: "#9a3412" }}>
+                      当前模拟设备 {virtualDraft?.name || selectedVirtualPlacementId} 还没加入待放置设备列表，所以这里暂时看不到它。先保存后，它就会出现在下面。
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => saveVirtualDevice()}
+                        style={secondaryButtonStyle}
+                        disabled={virtualSaving || !virtualDraft}
+                        data-testid="virtual-save-to-placement"
+                      >
+                        {virtualSaving ? "保存中..." : "保存到待放置列表"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveVirtualDevice({ placeAfterSave: true })}
+                        style={primaryButtonStyle}
+                        disabled={virtualSaving || !virtualDraft}
+                        data-testid="virtual-save-to-placement-and-place"
+                      >
+                        {virtualSaving ? "保存中..." : "保存并立即布点"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                  {availablePlacementDevices.map((device) => (
+                    <button
+                      key={device.id}
+                      type="button"
+                      onClick={() => startPlacingDevice(device.id)}
+                      style={{
+                        ...secondaryButtonStyle,
+                        width: "100%",
+                        textAlign: "left",
+                        borderColor: device.id === placingDeviceId ? "#2563eb" : "#cbd5e1",
+                        background: device.id === placingDeviceId ? "#eff6ff" : "white"
+                      }}
+                      data-testid={`start-place-${device.id}`}
+                    >
+                      <span style={{ display: "block", fontWeight: 700, color: "#0f172a" }}>{device.name || device.id}</span>
+                      <span style={{ display: "block", marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                        {device.id}
+                        {device.placement?.room ? ` · room=${device.placement.room}` : ""}
+                        {device.placement?.zone ? ` · zone=${device.placement.zone}` : ""}
+                      </span>
+                    </button>
+                  ))}
+                  {!availablePlacementDevices.length && (
+                    <p style={hintStyle} data-testid="placement-empty">
+                      当前所有已知设备都已布点。若还需要补充设备，请先在上方创建模拟设备，然后点击“保存并去平面图布点”。
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #e2e8f0" }}>
+              {renderVirtualDeviceManager({
+                embedded: true,
+                title: "步骤 3：编辑当前模拟设备 / 高级配置",
+                description: "只有在需要修改模拟设备参数、保存并布点、或者维护型号模板时，才需要继续操作下面这些内容。"
+              })}
+            </div>
+          </div>
+
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>设备编辑</h3>
+            <p style={hintStyle}>已放置设备会出现在这里。点击某个设备后，右侧只显示它的属性编辑；添加新设备请回到上面的“添加设备”。</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+              {draft.devices.map((device) => (
+                <button
+                  key={device.deviceId}
+                  type="button"
+                  onClick={() => setSelectedDeviceId(device.deviceId)}
+                  style={{
+                    ...secondaryButtonStyle,
+                    width: "100%",
+                    textAlign: "left",
+                    borderColor: device.deviceId === selectedDeviceId ? "#0f172a" : "#cbd5e1",
+                    background: device.deviceId === selectedDeviceId ? "#f8fafc" : "white"
+                  }}
+                >
+                  {deviceMap[device.deviceId]?.name || device.deviceId}
+                </button>
+              ))}
+              {!draft.devices.length && <p style={hintStyle}>还没有设备点位，先在上面的“添加设备”里选一个设备并在 2D 图中点击放置。</p>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="floorplan-sticky" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {renderFloorplanSummaryPanel()}
+
+        <div style={panelStyle}>
+          <h3 style={panelTitleStyle}>编辑工具</h3>
+          <p style={hintStyle}>当前模式：{MODE_LABELS[mode]}</p>
+
+          {mode === "view" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={hintStyle}>先浏览平面图与设备布点，需要看 3D 时再展开预览或切换到校准模式。</p>
+              <p style={hintStyle}>
+                {draft.imageScale
+                  ? activeScaleMetrics
+                    ? `当前比例尺 ${draft.imageScale.distanceMeters} 米，约 1 米 = ${activeScaleMetrics.pixelsPerMeter.toFixed(1)} 像素`
+                    : `当前比例尺 ${draft.imageScale.distanceMeters} 米`
+                  : "建议上传底图后先设置比例尺，再继续做房间、设备和校准。"}
+              </p>
+              <button type="button" style={secondaryButtonStyle} onClick={() => setShow3dPanel((prev) => !prev)}>
+                {effectiveShow3dPanel ? "收起 3D 预览" : "打开 3D 预览"}
+              </button>
+              <button
+                type="button"
+                style={secondaryButtonStyle}
+                onClick={startImageScaleSelection}
+                data-testid="start-image-scale"
+              >
+                {draft.imageScale ? "重新设置比例尺" : "开始设置比例尺"}
+              </button>
+
+              {isSettingImageScale && (
+                <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12 }}>
+                  <p style={hintStyle} data-testid="scale-point-count">
+                    取点进度：{draftScalePoints.length}/2
+                  </p>
+                  <label style={labelStyle}>实际距离（米）</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={scaleDistanceInput}
+                    onChange={(e) => setScaleDistanceInput(e.target.value)}
+                    style={inputStyle}
+                    placeholder="例如：3.5"
+                    data-testid="image-scale-distance"
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={saveImageScale}
+                      style={primaryButtonStyle}
+                      disabled={draftScalePoints.length !== 2}
+                      data-testid="image-scale-save"
+                    >
+                      保存比例尺
+                    </button>
+                    <button
+                      type="button"
+                      onClick={undoImageScalePoint}
+                      style={secondaryButtonStyle}
+                      disabled={!draftScalePoints.length}
+                      data-testid="undo-image-scale-point"
+                    >
+                      撤销上一步
+                    </button>
+                    <button type="button" onClick={cancelImageScaleSelection} style={secondaryButtonStyle}>
+                      取消
+                    </button>
+                  </div>
+                  <p style={hintStyle}>请在户型图上依次点击两点，并输入这段线在真实房间中的长度。</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === "rooms" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                style={secondaryButtonStyle}
+                type="button"
+                onClick={() => {
+                  setDraftRoomPoints([]);
+                  setDraftRoomName("");
+                  setSelectedRoomId(null);
+                  setIsDrawingRoom(true);
+                }}
+                data-testid="start-room-drawing"
+              >
+                {isDrawingRoom ? "继续绘制房间" : "开始绘制房间"}
+              </button>
+              {isDrawingRoom && (
+                <div>
+                  <label style={labelStyle}>房间名称</label>
+                  <input value={draftRoomName} onChange={(e) => setDraftRoomName(e.target.value)} style={inputStyle} />
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button
+                      onClick={undoDraftRoomPoint}
+                      style={secondaryButtonStyle}
+                      type="button"
+                      disabled={!draftRoomPoints.length}
+                      data-testid="undo-room-point"
+                    >
+                      撤销上一步
+                    </button>
+                    <button onClick={finishRoom} style={primaryButtonStyle} type="button">
+                      完成房间
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDraftRoomPoints([]);
+                        setDraftRoomName("");
+                        setIsDrawingRoom(false);
+                      }}
+                      style={secondaryButtonStyle}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </div>
+                  <p style={hintStyle} data-testid="room-point-count">
+                    已选择 {draftRoomPoints.length} 个点，请在平面图上连续点击至少 3 个点，完成后保存房间。
+                  </p>
+                </div>
+              )}
+
+              <div style={{ marginTop: 4 }}>
+                <label style={labelStyle}>已定义房间</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                  {draft.rooms.map((room) => (
+                    <button
+                      key={room.id}
+                      type="button"
+                      onClick={() => setSelectedRoomId(room.id)}
+                      style={{
+                        ...secondaryButtonStyle,
+                        width: "100%",
+                        textAlign: "left",
+                        borderColor: room.id === selectedRoomId ? "#0f172a" : "#cbd5e1",
+                        background: room.id === selectedRoomId ? "#f8fafc" : "white"
+                      }}
+                    >
+                      {room.name}
+                    </button>
+                  ))}
+                  {!draft.rooms.length && <p style={hintStyle}>还没有房间，先开始绘制一个区域。</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "calibration" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={hintStyle}>校准时会自动打开 3D 预览。建议先在 2D 中选角点，再去 3D 中选对应点。</p>
+              <p style={hintStyle}>当前进度：2D 点 {calibration.image.length}/3，3D 点 {calibration.model.length}/3</p>
+              <button onClick={resetCalibration} style={secondaryButtonStyle} type="button">
+                重置校准
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderContextPanels = () => {
+    if (!draft) {
+      return (
+        <div style={panelStyle}>
+          <h3 style={panelTitleStyle}>上下文面板</h3>
+          <p style={hintStyle}>正在加载当前户型内容...</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="floorplan-sticky" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {mode === "view" && (
+          <>
+            <div style={panelStyle}>
+              <h3 style={panelTitleStyle}>查看信息</h3>
+              <p style={hintStyle}>当前户型只展示与预览相关的内容；房间、设备、校准入口都在顶部模式切换中。</p>
+              <p style={hintStyle}>
+                图片分辨率：{draft.image.width || imageDims?.width || "-"} × {draft.image.height || imageDims?.height || "-"}
+              </p>
+              <p style={hintStyle}>
+                {persistedImageScale
+                  ? `比例尺参考线 ${persistedImageScale.distanceMeters} 米`
+                  : "尚未设置比例尺，真实距离相关能力暂时无法建立统一长度基准。"}
+              </p>
+              {imageScaleMetrics && (
+                <p style={hintStyle}>
+                  估算换算：1 米约等于 {imageScaleMetrics.pixelsPerMeter.toFixed(1)} 像素，每像素约 {imageScaleMetrics.metersPerPixel.toFixed(4)} 米
+                </p>
+              )}
+              <p style={hintStyle}>{draft.model?.url ? "已挂载 3D 模型，可随时展开预览。" : "尚未上传 3D 模型。"}</p>
+              {persistedImageScale && !isSettingImageScale && (
+                <button type="button" onClick={clearImageScale} style={dangerButtonStyle} data-testid="clear-image-scale">
+                  清除比例尺
+                </button>
+              )}
+            </div>
+            {renderScenePreviewPanel()}
+          </>
+        )}
+        {mode === "rooms" && renderRoomInspector()}
+        {mode === "devices" && renderDeviceInspector()}
+        {mode === "calibration" && renderCalibrationInspector()}
+      </div>
+    );
+  };
+
+  const renderBrowseStage = () => (
+    <section data-testid="floorplan-stage-browse" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ ...panelStyle, background: "rgba(255,255,255,0.92)" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 18 }}>先选择入口，再进入编辑</h3>
+            <p style={{ margin: "6px 0 0", color: "#475569" }}>选择已有户型或新建一个新的户型；进入编辑后只保留与当前户型相关的工具。</p>
+          </div>
+          <div style={{ display: "flex", gap: 10 }} data-testid="floorplan-entry-tabs">
+            <button
+              type="button"
+              onClick={() => setBrowseView("select")}
+              style={{
+                ...secondaryButtonStyle,
+                borderColor: browseView === "select" ? "#0f172a" : "#cbd5e1",
+                background: browseView === "select" ? "#0f172a" : "white",
+                color: browseView === "select" ? "white" : "#0f172a"
+              }}
+              data-testid="browse-select"
+            >
+              选择户型
+            </button>
+            <button
+              type="button"
+              onClick={() => setBrowseView("create")}
+              style={{
+                ...secondaryButtonStyle,
+                borderColor: browseView === "create" ? "#0f172a" : "#cbd5e1",
+                background: browseView === "create" ? "#0f172a" : "white",
+                color: browseView === "create" ? "white" : "#0f172a"
+              }}
+              data-testid="browse-create"
+            >
+              新建户型
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="floorplan-browse-grid">
+        {browseView === "select" ? (
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>户型列表</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="floorplan-list">
+              {floorplans.map((plan) => (
+                <div
+                  key={plan.id}
+                  style={{
+                    border: "1px solid #dbe4ea",
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    background: "#fffdf9",
+                    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)"
+                  }}
+                >
+                  <div style={{ height: 180, background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "grid", placeItems: "center" }}>
+                    {plan.image?.url ? (
+                      <img
+                        src={resolveAssetUrl(plan.image.url)}
+                        alt={plan.name}
+                        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                      />
+                    ) : (
+                      <span style={{ color: "#94a3b8", fontSize: 13 }}>暂无预览图</span>
+                    )}
+                  </div>
+                  <div style={{ padding: 16 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{plan.name}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{plan.id}</div>
+                    <div style={{ fontSize: 12, color: "#475569", marginTop: 10 }}>
+                      房间 {plan.roomCount ?? 0} 个 · 设备 {plan.deviceCount ?? 0} 个 · {plan.model?.url ? "含 3D" : "仅 2D"}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => enterEditor(plan.id)}
+                      style={{ ...primaryButtonStyle, width: "100%" }}
+                      data-testid={`select-floorplan-${plan.id}`}
+                    >
+                      进入编辑
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!floorplans.length && <p style={hintStyle}>还没有任何户型，切换到“新建户型”开始上传底图。</p>}
+            </div>
+          </div>
+        ) : (
+          <div style={panelStyle} data-testid="create-floorplan-form">
+            <h3 style={panelTitleStyle}>新建户型</h3>
+            <label style={labelStyle}>名称</label>
+            <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} placeholder="例如：一层" style={inputStyle} />
+            <label style={labelStyle}>ID（可选）</label>
+            <input value={newPlanId} onChange={(e) => setNewPlanId(e.target.value)} placeholder="floor1" style={inputStyle} />
+            <label style={labelStyle}>上传 2D 户型图（PNG/JPG）</label>
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setNewImageUploadError("");
+                setNewImageAsset(null);
+                setNewImageUploading(true);
+                setStatus("2D 图片上传中...");
+                try {
+                  const asset = await uploadAsset(file, "floorplan_image");
+                  setNewImageAsset(asset);
+                  setStatus("2D 图片上传成功");
+                } catch (err) {
+                  const message = (err as Error).message;
+                  setNewImageUploadError(message);
+                  setStatus(`上传失败: ${message}`);
+                } finally {
+                  setNewImageUploading(false);
+                }
+              }}
+            />
+            {newImageUploading && <p style={hintStyle}>2D 图片上传中...</p>}
+            {newImageUploadError && !newImageUploading && <p style={{ ...hintStyle, color: "#b91c1c" }}>2D 上传失败：{newImageUploadError}</p>}
+            {newImageAsset && !newImageUploading && <p style={hintStyle}>已上传：{newImageAsset.url}</p>}
+
+            <label style={labelStyle}>上传 3D 模型（GLB，可选）</label>
+            <input
+              type="file"
+              accept=".glb,model/gltf-binary"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setNewModelUploadError("");
+                setNewModelAsset(null);
+                setNewModelUploading(true);
+                setStatus("3D 模型上传中...");
+                try {
+                  const asset = await uploadAsset(file, "floorplan_model");
+                  setNewModelAsset(asset);
+                  setStatus("3D 模型上传成功");
+                } catch (err) {
+                  const message = (err as Error).message;
+                  setNewModelUploadError(message);
+                  setStatus(`上传失败: ${message}`);
+                } finally {
+                  setNewModelUploading(false);
+                }
+              }}
+            />
+            {newModelUploading && <p style={hintStyle}>3D 模型上传中...</p>}
+            {newModelUploadError && !newModelUploading && <p style={{ ...hintStyle, color: "#b91c1c" }}>3D 上传失败：{newModelUploadError}</p>}
+            {newModelAsset && !newModelUploading && <p style={hintStyle}>已上传：{newModelAsset.url}</p>}
+
+            <button onClick={createFloorplan} style={primaryButtonStyle} disabled={newImageUploading || newModelUploading}>
+              {newImageUploading || newModelUploading ? "上传中..." : "创建户型并进入编辑"}
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>工作流说明</h3>
+            <p style={hintStyle}>1. 先选择已有户型，或者新建并上传底图。</p>
+            <p style={hintStyle}>2. 进入编辑后，顶部切换“视图 / 房间编辑 / 设备编辑 / 校准”。</p>
+            <p style={hintStyle}>3. 左侧只显示当前模式的工具，中间是可滚动的 2D 画布，右侧显示当前选中对象的属性。</p>
+          </div>
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>当前概况</h3>
+            <p style={hintStyle}>已保存户型：{floorplans.length} 个</p>
+            <p style={hintStyle}>优先推荐先完成 2D 房间与设备布点，再进行三点校准。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <>
       <Head>
@@ -1490,992 +3034,412 @@ export default function FloorplanPage() {
         }}
         data-testid="floorplan-page"
       >
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: "20px", flexWrap: "wrap" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "24px", letterSpacing: "-0.02em" }}>户型编辑与 3D 预览</h1>
-            <p style={{ margin: "6px 0 0", color: "#475569" }}>2D 编辑 + 三点校准 + 3D 预览</p>
+            <p style={{ margin: "6px 0 0", color: "#475569" }}>
+              {pageStage === "browse" ? "先选择或新建户型，再进入 2D 编辑、设备布点和三点校准。" : "2D 编辑优先，3D 预览在需要时展开。"}
+            </p>
           </div>
-          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            {Object.entries(MODE_LABELS).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setMode(key as Mode)}
-                data-testid={`mode-${key}`}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: "999px",
-                  border: "1px solid #cbd5f5",
-                  background: mode === key ? "#0f172a" : "white",
-                  color: mode === key ? "white" : "#0f172a",
-                  fontWeight: 600,
-                  cursor: "pointer"
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </header>
 
-        <section style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "20px" }}>
-          <aside style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div style={panelStyle}>
-              <h3 style={panelTitleStyle}>户型列表</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }} data-testid="floorplan-list">
-                {floorplans.map((plan) => (
+          {pageStage === "editor" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end", flex: "1 1 640px" }} data-testid="floorplan-stage-editor">
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button type="button" onClick={returnToBrowse} style={secondaryButtonStyle} data-testid="back-to-browser">
+                  返回户型选择
+                </button>
+                <button type="button" onClick={() => replaceImageInputRef.current?.click()} style={secondaryButtonStyle}>
+                  替换底图
+                </button>
+                <button type="button" onClick={() => replaceModelInputRef.current?.click()} style={secondaryButtonStyle}>
+                  替换 3D
+                </button>
+                <button type="button" onClick={() => setShow3dPanel((prev) => !prev)} style={secondaryButtonStyle}>
+                  {effectiveShow3dPanel ? "收起 3D" : "展开 3D"}
+                </button>
+                <button onClick={saveFloorplan} style={primaryButtonStyle} data-testid="save-floorplan" disabled={!isDirty}>
+                  {isDirty ? "保存户型" : "已保存"}
+                </button>
+                <button type="button" onClick={deleteFloorplan} style={dangerButtonStyle} data-testid="delete-floorplan">
+                  删除户型
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {Object.entries(MODE_LABELS).map(([key, label]) => (
                   <button
-                    key={plan.id}
-                    onClick={() => setActiveId(plan.id)}
+                    key={key}
+                    onClick={() => setMode(key as Mode)}
+                    data-testid={`mode-${key}`}
                     style={{
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      borderRadius: "10px",
-                      border: plan.id === activeId ? "1px solid #0f172a" : "1px solid #e2e8f0",
-                      background: plan.id === activeId ? "#0f172a" : "white",
-                      color: plan.id === activeId ? "white" : "#0f172a",
+                      padding: "8px 12px",
+                      borderRadius: "999px",
+                      border: "1px solid #cbd5f5",
+                      background: mode === key ? "#0f172a" : "white",
+                      color: mode === key ? "white" : "#0f172a",
+                      fontWeight: 600,
                       cursor: "pointer"
                     }}
                   >
-                    <div style={{ fontWeight: 600 }}>{plan.name}</div>
-                    <div style={{ fontSize: "12px", opacity: 0.7 }}>{plan.id}</div>
+                    {label}
                   </button>
                 ))}
-                {!floorplans.length && <p style={{ margin: 0, color: "#94a3b8" }}>暂无户型</p>}
               </div>
-            </div>
 
-            <div style={panelStyle}>
-              <h3 style={panelTitleStyle}>新建户型</h3>
-              <label style={labelStyle}>名称</label>
               <input
-                value={newPlanName}
-                onChange={(e) => setNewPlanName(e.target.value)}
-                placeholder="例如：一层"
-                style={inputStyle}
-              />
-              <label style={labelStyle}>ID（可选）</label>
-              <input
-                value={newPlanId}
-                onChange={(e) => setNewPlanId(e.target.value)}
-                placeholder="floor1"
-                style={inputStyle}
-              />
-              <label style={labelStyle}>上传 2D 户型图（PNG/JPG）</label>
-              <input
+                ref={replaceImageInputRef}
                 type="file"
                 accept="image/png,image/jpeg"
+                style={{ display: "none" }}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (!file) return;
+                  if (!file || !draft) return;
                   try {
                     const asset = await uploadAsset(file, "floorplan_image");
-                    setNewImageAsset(asset);
+                    updateDraft((prev) => ({
+                      ...prev,
+                      image: asset,
+                      modelTransform: null,
+                      calibrationPoints: null,
+                      imageScale: null
+                    }));
+                    setCalibration({ image: [], model: [] });
+                    setIsSettingImageScale(false);
+                    setDraftScalePoints([]);
+                    setScaleDistanceInput("");
+                    setCanvasZoom(1);
+                    setStatus("底图已替换，比例尺与校准结果已清空，请重新设置");
                   } catch (err) {
                     setStatus(`上传失败: ${(err as Error).message}`);
+                  } finally {
+                    e.currentTarget.value = "";
                   }
                 }}
               />
-              {newImageAsset && <p style={hintStyle}>已上传：{newImageAsset.url}</p>}
-              <label style={labelStyle}>上传 3D 模型（GLB，可选）</label>
+
               <input
+                ref={replaceModelInputRef}
                 type="file"
                 accept=".glb,model/gltf-binary"
+                style={{ display: "none" }}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (!file) return;
+                  if (!file || !draft) return;
                   try {
                     const asset = await uploadAsset(file, "floorplan_model");
-                    setNewModelAsset(asset);
+                    updateDraft((prev) => ({
+                      ...prev,
+                      model: asset,
+                      modelTransform: null,
+                      calibrationPoints: null
+                    }));
+                    setCalibration({ image: [], model: [] });
+                    setStatus("3D 模型已替换，请重新完成三点校准");
                   } catch (err) {
                     setStatus(`上传失败: ${(err as Error).message}`);
+                  } finally {
+                    e.currentTarget.value = "";
                   }
                 }}
               />
-              {newModelAsset && <p style={hintStyle}>已上传：{newModelAsset.url}</p>}
-              <button onClick={createFloorplan} style={primaryButtonStyle}>
-                创建户型
-              </button>
             </div>
+          )}
+        </header>
 
-            <div style={panelStyle}>
-              <h3 style={panelTitleStyle}>场景预览</h3>
-              <select
-                value={scenePreview?.sceneId || ""}
-                onChange={(e) => loadScenePreview(e.target.value)}
-                data-testid="scene-select"
-                style={inputStyle}
-              >
-                <option value="">选择场景</option>
-                {scenes.map((scene) => (
-                  <option key={scene.id} value={scene.id}>
-                    {scene.name}
-                  </option>
-                ))}
-              </select>
-              {scenePreview && (
-                <div style={{ marginTop: "8px" }}>
-                  <p style={hintStyle}>共 {scenePreview.steps.length} 步设备动作</p>
-                  <button onClick={executeScene} style={primaryButtonStyle} disabled={sceneRunLoading} data-testid="scene-run">
-                    {sceneRunLoading ? "执行中..." : "执行场景"}
-                  </button>
-                  {sceneRunResult && (
-                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
-                      <p style={hintStyle} data-testid="scene-run-status">
-                        run={sceneRunResult.runId} status={sceneRunResult.status} 耗时 {sceneRunResult.durationMs ?? 0}ms
-                      </p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {sceneRunResult.steps.map((step) => (
-                          <div
-                            key={`${sceneRunResult.runId}-${step.index}`}
-                            style={{
-                              fontSize: 12,
-                              border: "1px solid #e2e8f0",
-                              borderRadius: 8,
-                              padding: "6px 8px",
-                              background:
-                                step.status === "ok"
-                                  ? "#ecfdf5"
-                                  : step.status === "timeout"
-                                    ? "#eff6ff"
-                                    : step.status === "error"
-                                      ? "#fef2f2"
-                                      : "white"
-                            }}
-                          >
-                            #{step.index + 1} {step.deviceId}.{step.action} 状态 {step.status}
-                            {step.reason ? ` (${step.reason})` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+        {pageStage === "browse" ? (
+          renderBrowseStage()
+        ) : (
+          <section className="floorplan-editor-grid">
+            <aside className="floorplan-sidebar">{renderEditorTools()}</aside>
+
+            <section className="floorplan-editor-main" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+                <div style={panelHeaderStyle}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>2D 编辑工作区</h3>
+                    <p style={{ ...hintStyle, marginTop: 4 }}>
+                      {mode === "rooms"
+                        ? isDrawingRoom
+                          ? "正在绘制房间：在底图上连续点击至少 3 个点。"
+                          : "点击左侧开始绘制，或直接点选已有房间。"
+                        : mode === "devices"
+                          ? placingDeviceId
+                            ? `待放置设备：${placingDeviceLabel}。下一次点击 2D 户型图会创建点位，并自动打开右侧属性。`
+                            : "先在左侧点一个待放置设备，再到 2D 户型图点击完成布点；点击已放置设备可编辑，拖动设备点位可调整位置。"
+                          : mode === "calibration"
+                            ? "先在 2D 选 3 个点，再到 3D 选对应的 3 个点。"
+                            : "默认按图片比例自适应显示，可手动放大后滚动查看细节。"}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={zoomOutCanvas} style={secondaryButtonStyle} data-testid="canvas-zoom-out">
+                      缩小
+                    </button>
+                    <button type="button" onClick={resetCanvasZoom} style={secondaryButtonStyle} data-testid="canvas-zoom-reset">
+                      适配窗口
+                    </button>
+                    <button type="button" onClick={zoomInCanvas} style={secondaryButtonStyle} data-testid="canvas-zoom-in">
+                      放大
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {draft && (
-              <div style={panelStyle}>
-                <h3 style={panelTitleStyle}>编辑</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <label style={labelStyle}>名称</label>
-                  <input
-                    value={draft.name}
-                    onChange={(e) =>
-                      updateDraft((prev) => ({
-                        ...prev,
-                        name: e.target.value
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                  <p style={hintStyle}>ID：{draft.id}</p>
-                  <button onClick={saveFloorplan} style={primaryButtonStyle} data-testid="save-floorplan" disabled={!isDirty}>
-                    {isDirty ? "保存户型" : "已保存"}
-                  </button>
-                  <p style={hintStyle}>当前模式：{MODE_LABELS[mode]}</p>
-                  {mode === "rooms" && (
-                    <>
-                      <button
-                        style={secondaryButtonStyle}
-                        onClick={() => {
-                          setDraftRoomPoints([]);
-                          setDraftRoomName("");
-                          setIsDrawingRoom(true);
+                {draft ? (
+                  <div
+                    ref={canvasViewportRef}
+                    data-testid="canvas-scroll-region"
+                    style={{
+                      position: "relative",
+                      height: "clamp(420px, 68vh, 760px)",
+                      overflow: "auto",
+                      padding: 20,
+                      background:
+                        "radial-gradient(circle at top left, rgba(226, 232, 240, 0.75), rgba(248, 250, 252, 0.92) 38%, rgba(241, 245, 249, 0.95) 100%)"
+                    }}
+                  >
+                    <div style={{ minWidth: "100%", minHeight: "100%", display: "grid", placeItems: "center" }}>
+                      <div
+                        style={{
+                          width: canvasRenderWidth,
+                          height: canvasRenderHeight,
+                          borderRadius: 18,
+                          overflow: "hidden",
+                          boxShadow: "0 16px 34px rgba(15, 23, 42, 0.16)",
+                          background: "white"
                         }}
                       >
-                        新建房间
-                      </button>
-                      {isDrawingRoom && (
-                        <div>
-                          <label style={labelStyle}>房间名称</label>
-                          <input value={draftRoomName} onChange={(e) => setDraftRoomName(e.target.value)} style={inputStyle} />
-                          <button onClick={finishRoom} style={primaryButtonStyle}>
-                            完成房间
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {mode === "devices" && (
-                    <>
-                      <label style={labelStyle}>选择设备</label>
-                      <select
-                        value={placingDeviceId || ""}
-                        onChange={(e) => setPlacingDeviceId(e.target.value || null)}
-                        style={inputStyle}
-                      >
-                        <option value="">点击后在图上放置</option>
-                        {devices
-                          .filter((device) => !draft.devices.some((d) => d.deviceId === device.id))
-                          .map((device) => (
-                            <option key={device.id} value={device.id}>
-                              {device.name} ({device.id})
-                            </option>
-                          ))}
-                      </select>
-                      {placingDeviceId && <p style={hintStyle}>在 2D 图上点击放置设备</p>}
-
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
-                        <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>模拟设备</h4>
-                        <label style={labelStyle}>模拟器启用</label>
-                        <input
-                          type="checkbox"
-                          checked={virtualConfig.enabled}
-                          onChange={(e) => setVirtualConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
-                          data-testid="virtual-enabled"
-                        />
-
-                        <label style={labelStyle}>默认 latency_ms</label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={virtualConfig.defaults.latency_ms}
-                          onChange={(e) =>
-                            setVirtualConfig((prev) => ({
-                              ...prev,
-                              defaults: { ...prev.defaults, latency_ms: Number(e.target.value || 0) }
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-
-                        <label style={labelStyle}>默认 failure_rate (0~1)</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={1}
-                          step="0.01"
-                          value={virtualConfig.defaults.failure_rate}
-                          onChange={(e) =>
-                            setVirtualConfig((prev) => ({
-                              ...prev,
-                              defaults: { ...prev.defaults, failure_rate: Number(e.target.value || 0) }
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-
-                        <button
-                          type="button"
-                          style={secondaryButtonStyle}
-                          onClick={saveVirtualGlobalConfig}
-                          disabled={virtualSaving}
-                          data-testid="virtual-save-global"
+                        <svg
+                          ref={svgRef}
+                          viewBox={`0 0 ${imageWidth} ${imageHeight}`}
+                          preserveAspectRatio="xMidYMid meet"
+                          style={{
+                            width: canvasRenderWidth,
+                            height: canvasRenderHeight,
+                            display: "block",
+                            cursor:
+                              mode === "devices"
+                                ? placingDeviceId
+                                  ? "crosshair"
+                                  : "grab"
+                                : mode === "rooms" && isDrawingRoom
+                                  ? "crosshair"
+                                  : mode === "calibration"
+                                    ? "crosshair"
+                                    : "default"
+                          }}
+                          onPointerDown={(evt) => handleSvgClick(evt)}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={handlePointerUp}
+                          data-testid="floorplan-canvas"
                         >
-                          保存全局配置
-                        </button>
-
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                          <select
-                            value={selectedVirtualModelId}
-                            onChange={(e) => setSelectedVirtualModelId(e.target.value)}
-                            style={inputStyle}
-                            data-testid="virtual-model-select"
-                          >
-                            <option value="">选择设备型号模板</option>
-                            {virtualModels.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name} ({item.id})
-                              </option>
-                            ))}
-                          </select>
-                          <button type="button" style={secondaryButtonStyle} onClick={startNewVirtualDevice} data-testid="virtual-new">
-                            新建模拟设备
-                          </button>
-                          <select
-                            value={selectedVirtualId}
-                            onChange={(e) => setSelectedVirtualId(e.target.value)}
-                            style={inputStyle}
-                            data-testid="virtual-select"
-                          >
-                            <option value="">选择已有模拟设备</option>
-                            {virtualConfig.devices.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name || item.id} ({item.id})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e2e8f0" }}>
-                          <label style={labelStyle}>型号模板维护</label>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <button
-                              type="button"
-                              style={secondaryButtonStyle}
-                              onClick={startNewVirtualModel}
-                              data-testid="virtual-model-new"
-                            >
-                              新建型号模板
-                            </button>
-                            <select
-                              value={selectedVirtualModelEditId}
-                              onChange={(e) => setSelectedVirtualModelEditId(e.target.value)}
-                              style={inputStyle}
-                              data-testid="virtual-model-edit-select"
-                            >
-                              <option value="">选择已有型号模板</option>
-                              {virtualModels.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.name} ({item.id})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {virtualModelDraft && (
-                            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                              <label style={labelStyle}>model.id</label>
-                              <input
-                                value={virtualModelDraft.id || ""}
-                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), id: e.target.value }))}
-                                style={inputStyle}
-                                data-testid="virtual-model-id"
+                          <image href={resolveAssetUrl(draft.image.url)} width={imageWidth} height={imageHeight} />
+                          {activeScalePoints.length === 2 && (
+                            <g>
+                              <line
+                                x1={activeScalePoints[0].x * imageWidth}
+                                y1={activeScalePoints[0].y * imageHeight}
+                                x2={activeScalePoints[1].x * imageWidth}
+                                y2={activeScalePoints[1].y * imageHeight}
+                                stroke={isSettingImageScale ? "#f97316" : "#2563eb"}
+                                strokeWidth={3}
+                                strokeDasharray={isSettingImageScale ? "8 6" : "10 4"}
                               />
-                              <label style={labelStyle}>model.name</label>
-                              <input
-                                value={virtualModelDraft.name || ""}
-                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), name: e.target.value }))}
-                                style={inputStyle}
+                              <rect
+                                x={((activeScalePoints[0].x + activeScalePoints[1].x) / 2) * imageWidth - 42}
+                                y={((activeScalePoints[0].y + activeScalePoints[1].y) / 2) * imageHeight - 22}
+                                width={84}
+                                height={20}
+                                rx={10}
+                                fill="rgba(15, 23, 42, 0.86)"
                               />
-                              <label style={labelStyle}>model.category</label>
-                              <input
-                                value={virtualModelDraft.category || ""}
-                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), category: e.target.value }))}
-                                style={inputStyle}
-                              />
-                              <label style={labelStyle}>model.description</label>
-                              <textarea
-                                value={virtualModelDraft.description || ""}
-                                onChange={(e) => setVirtualModelDraft((prev) => ({ ...(prev || {}), description: e.target.value }))}
-                                style={{ ...inputStyle, minHeight: 72 }}
-                              />
-                              <label style={labelStyle}>model.capabilities（逗号分隔）</label>
-                              <input
-                                value={virtualModelActionsText}
-                                onChange={(e) => setVirtualModelActionsText(e.target.value)}
-                                style={inputStyle}
-                                placeholder="turn_on, turn_off, set_brightness"
-                                data-testid="virtual-model-actions"
-                              />
-                              <label style={labelStyle}>model.traits(JSON)</label>
-                              <textarea
-                                value={virtualModelTraitsText}
-                                onChange={(e) => setVirtualModelTraitsText(e.target.value)}
-                                style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
-                                data-testid="virtual-model-traits"
-                              />
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  type="button"
-                                  onClick={saveVirtualModel}
-                                  style={primaryButtonStyle}
-                                  disabled={virtualModelSaving}
-                                  data-testid="virtual-model-save"
-                                >
-                                  {virtualModelSaving ? "保存中..." : "保存型号模板"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={deleteVirtualModel}
-                                  style={dangerButtonStyle}
-                                  disabled={virtualModelSaving}
-                                  data-testid="virtual-model-delete"
-                                >
-                                  删除型号模板
-                                </button>
-                              </div>
-                            </div>
+                              <text
+                                x={((activeScalePoints[0].x + activeScalePoints[1].x) / 2) * imageWidth}
+                                y={((activeScalePoints[0].y + activeScalePoints[1].y) / 2) * imageHeight - 8}
+                                fontSize="11"
+                                fill="white"
+                                textAnchor="middle"
+                              >
+                                {(isSettingImageScale ? Number(scaleDistanceInput) || 0 : persistedImageScale?.distanceMeters || 0) > 0
+                                  ? `${(isSettingImageScale ? Number(scaleDistanceInput) || 0 : persistedImageScale?.distanceMeters || 0).toFixed(2)}m`
+                                  : "比例尺"}
+                              </text>
+                            </g>
                           )}
-
-                          {virtualModelStatus && <p style={hintStyle}>{virtualModelStatus}</p>}
-                        </div>
-
-                        {virtualDraft && (
-                          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                            <label style={labelStyle}>id</label>
-                            <input
-                              value={virtualDraft.id || ""}
-                              onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), id: e.target.value }))}
-                              style={inputStyle}
-                              data-testid="virtual-id"
-                            />
-                            <label style={labelStyle}>name</label>
-                            <input
-                              value={virtualDraft.name || ""}
-                              onChange={(e) => setVirtualDraft((prev) => ({ ...(prev || {}), name: e.target.value }))}
-                              style={inputStyle}
-                            />
-                            <label style={labelStyle}>placement.room</label>
-                            <input
-                              value={virtualDraft.placement?.room || ""}
-                              onChange={(e) =>
-                                setVirtualDraft((prev) => ({
-                                  ...(prev || {}),
-                                  placement: { ...(prev?.placement || {}), room: e.target.value }
-                                }))
-                              }
-                              style={inputStyle}
-                            />
-                            <label style={labelStyle}>placement.zone</label>
-                            <input
-                              value={virtualDraft.placement?.zone || ""}
-                              onChange={(e) =>
-                                setVirtualDraft((prev) => ({
-                                  ...(prev || {}),
-                                  placement: { ...(prev?.placement || {}), zone: e.target.value }
-                                }))
-                              }
-                              style={inputStyle}
-                            />
-                            <label style={labelStyle}>capabilities（逗号分隔）</label>
-                            <input
-                              value={virtualActionsText}
-                              onChange={(e) => setVirtualActionsText(e.target.value)}
-                              style={inputStyle}
-                              placeholder="turn_on, turn_off, set_brightness"
-                              data-testid="virtual-actions"
-                            />
-                            <label style={labelStyle}>traits(JSON)</label>
-                            <textarea
-                              value={virtualTraitsText}
-                              onChange={(e) => setVirtualTraitsText(e.target.value)}
-                              style={{ ...inputStyle, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
-                              data-testid="virtual-traits"
-                            />
-                            <label style={labelStyle}>simulation.latency_ms</label>
-                            <input
-                              type="number"
-                              min={0}
-                              value={virtualDraft.simulation?.latency_ms ?? virtualConfig.defaults.latency_ms}
-                              onChange={(e) =>
-                                setVirtualDraft((prev) => ({
-                                  ...(prev || {}),
-                                  simulation: { ...(prev?.simulation || {}), latency_ms: Number(e.target.value || 0) }
-                                }))
-                              }
-                              style={inputStyle}
-                            />
-                            <label style={labelStyle}>simulation.failure_rate</label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={1}
-                              step="0.01"
-                              value={virtualDraft.simulation?.failure_rate ?? virtualConfig.defaults.failure_rate}
-                              onChange={(e) =>
-                                setVirtualDraft((prev) => ({
-                                  ...(prev || {}),
-                                  simulation: { ...(prev?.simulation || {}), failure_rate: Number(e.target.value || 0) }
-                                }))
-                              }
-                              style={inputStyle}
-                            />
-                            <div style={{ display: "flex", gap: 8 }}>
-                              <button
-                                type="button"
-                                onClick={saveVirtualDevice}
-                                style={primaryButtonStyle}
-                                disabled={virtualSaving}
-                                data-testid="virtual-save"
-                              >
-                                {virtualSaving ? "保存中..." : "保存模拟设备"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={deleteVirtualDevice}
-                                style={dangerButtonStyle}
-                                disabled={virtualSaving}
-                                data-testid="virtual-delete"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {virtualStatus && <p style={hintStyle}>{virtualStatus}</p>}
-                      </div>
-                    </>
-                  )}
-                  {mode === "calibration" && (
-                    <>
-                      <p style={hintStyle}>2D 点 {calibration.image.length}/3，3D 点 {calibration.model.length}/3</p>
-                      <button onClick={resetCalibration} style={secondaryButtonStyle}>
-                        重置校准
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {selectedRoomId && draft && mode === "rooms" && (
-              <div style={panelStyle}>
-                <h3 style={panelTitleStyle}>房间设置</h3>
-                {draft.rooms
-                  .filter((room) => room.id === selectedRoomId)
-                  .map((room) => (
-                    <div key={room.id} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                      <label style={labelStyle}>名称</label>
-                      <input
-                        value={room.name}
-                        onChange={(e) =>
-                          updateDraft((prev) => ({
-                            ...prev,
-                            rooms: prev.rooms.map((r) => (r.id === room.id ? { ...r, name: e.target.value } : r))
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                      <button onClick={() => removeRoom(room.id)} style={dangerButtonStyle}>
-                        删除房间
-                      </button>
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            {selectedDeviceId && draft && mode === "devices" && (
-              <div style={panelStyle}>
-                <h3 style={panelTitleStyle}>设备设置</h3>
-                {draft.devices
-                  .filter((device) => device.deviceId === selectedDeviceId)
-                  .map((device) => (
-                    <div key={device.deviceId} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                      <label style={labelStyle}>高度 (m)</label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        value={device.height ?? 0}
-                        onChange={(e) =>
-                          updateDraft((prev) => ({
-                            ...prev,
-                            devices: prev.devices.map((d) =>
-                              d.deviceId === device.deviceId ? { ...d, height: Number(e.target.value) } : d
-                            )
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                      <label style={labelStyle}>旋转</label>
-                      <input
-                        type="number"
-                        step="1"
-                        value={device.rotation ?? 0}
-                        onChange={(e) =>
-                          updateDraft((prev) => ({
-                            ...prev,
-                            devices: prev.devices.map((d) =>
-                              d.deviceId === device.deviceId ? { ...d, rotation: Number(e.target.value) } : d
-                            )
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                      <label style={labelStyle}>缩放</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={device.scale ?? 1}
-                        onChange={(e) =>
-                          updateDraft((prev) => ({
-                            ...prev,
-                            devices: prev.devices.map((d) =>
-                              d.deviceId === device.deviceId ? { ...d, scale: Number(e.target.value) } : d
-                            )
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                      <button onClick={() => removeDevice(device.deviceId)} style={dangerButtonStyle}>
-                        移除设备
-                      </button>
-
-                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
-                        <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>设备元信息覆盖（devices.config.json）</h4>
-                        <p style={hintStyle}>用于覆盖 name / placement / semantics；保存后由 device-adapter 热更新（约 1~2 秒生效）。</p>
-
-                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                          <button
-                            onClick={() => router.push(`/scenes?deviceId=${encodeURIComponent(device.deviceId)}`)}
-                            style={secondaryButtonStyle}
-                            type="button"
-                          >
-                            去场景编辑
-                          </button>
-                          <button
-                            onClick={() => router.push(`/automations?deviceId=${encodeURIComponent(device.deviceId)}`)}
-                            style={secondaryButtonStyle}
-                            type="button"
-                          >
-                            去联动编辑
-                          </button>
-                        </div>
-
-                        <label style={labelStyle}>覆盖名称（name）</label>
-                        <input
-                          value={deviceOverrideDraft?.name || ""}
-                          onChange={(e) =>
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              name: e.target.value
-                            }))
-                          }
-                          style={inputStyle}
-                          placeholder={deviceMap[device.deviceId]?.name || device.deviceId}
-                        />
-
-                        <label style={labelStyle}>placement.room</label>
-                        <input
-                          value={deviceOverrideDraft?.placement?.room || ""}
-                          onChange={(e) =>
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              placement: { ...(prev?.placement || {}), room: e.target.value }
-                            }))
-                          }
-                          style={inputStyle}
-                          placeholder={deviceMap[device.deviceId]?.placement?.room || ""}
-                        />
-
-                        <label style={labelStyle}>placement.zone</label>
-                        <input
-                          value={deviceOverrideDraft?.placement?.zone || ""}
-                          onChange={(e) =>
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              placement: { ...(prev?.placement || {}), zone: e.target.value }
-                            }))
-                          }
-                          style={inputStyle}
-                          placeholder={deviceMap[device.deviceId]?.placement?.zone || ""}
-                        />
-
-                        <label style={labelStyle}>placement.description</label>
-                        <input
-                          value={deviceOverrideDraft?.placement?.description || ""}
-                          onChange={(e) =>
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              placement: { ...(prev?.placement || {}), description: e.target.value }
-                            }))
-                          }
-                          style={inputStyle}
-                          placeholder={deviceMap[device.deviceId]?.placement?.description || ""}
-                        />
-
-                        <label style={labelStyle}>semantics.aliases（逗号分隔）</label>
-                        <input
-                          value={Array.isArray(deviceOverrideDraft?.semantics?.aliases) ? deviceOverrideDraft.semantics.aliases.join(", ") : ""}
-                          onChange={(e) => {
-                            const list = e.target.value
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean);
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              semantics: { ...(prev?.semantics || {}), aliases: list }
-                            }));
-                          }}
-                          style={inputStyle}
-                          placeholder="例如：主灯, 客厅主灯"
-                        />
-
-                        <label style={labelStyle}>semantics.tags（逗号分隔）</label>
-                        <input
-                          value={Array.isArray(deviceOverrideDraft?.semantics?.tags) ? deviceOverrideDraft.semantics.tags.join(", ") : ""}
-                          onChange={(e) => {
-                            const list = e.target.value
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean);
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              semantics: { ...(prev?.semantics || {}), tags: list }
-                            }));
-                          }}
-                          style={inputStyle}
-                          placeholder="例如：living_room, dimmable"
-                        />
-
-                        <label style={labelStyle}>semantics.preferred_scenes</label>
-                        <select
-                          multiple
-                          value={Array.isArray(deviceOverrideDraft?.semantics?.preferred_scenes) ? deviceOverrideDraft.semantics.preferred_scenes : []}
-                          onChange={(e) => {
-                            const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                            setDeviceOverrideDraft((prev: any) => ({
-                              ...(prev || {}),
-                              id: device.deviceId,
-                              semantics: { ...(prev?.semantics || {}), preferred_scenes: selected }
-                            }));
-                          }}
-                          style={{ ...inputStyle, height: 110 }}
-                        >
-                          {scenes.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name} ({s.id})
-                            </option>
-                          ))}
-                        </select>
-
-                        <button
-                          onClick={async () => {
-                            if (!device.deviceId) return;
-                            setDeviceOverrideSaving(true);
-                            setDeviceOverrideStatus("保存中...");
-                            try {
-                              const payload = {
-                                id: device.deviceId,
-                                name: String(deviceOverrideDraft?.name || "").trim() || undefined,
-                                placement: deviceOverrideDraft?.placement || undefined,
-                                semantics: deviceOverrideDraft?.semantics || undefined
-                              };
-                              const resp = await fetch(`/api/device-overrides/${encodeURIComponent(device.deviceId)}`, {
-                                method: "PUT",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify(payload)
-                              });
-                              const data = await resp.json().catch(() => ({}));
-                              if (!resp.ok) {
-                                setDeviceOverrideStatus(data?.reason || data?.error || "保存失败");
-                                return;
-                              }
-                              setDeviceOverrideDraft(data);
-                              setDeviceOverrideStatus("已保存（约 1~2 秒后生效）");
-                            } catch (err) {
-                              setDeviceOverrideStatus((err as Error).message);
-                            } finally {
-                              setDeviceOverrideSaving(false);
-                            }
-                          }}
-                          style={primaryButtonStyle}
-                          disabled={deviceOverrideSaving}
-                          type="button"
-                          data-testid="device-override-save"
-                        >
-                          {deviceOverrideSaving ? "保存中..." : "保存覆盖配置"}
-                        </button>
-
-                        {deviceOverrideStatus && <p style={hintStyle}>{deviceOverrideStatus}</p>}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </aside>
-
-          <section style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: "16px", height: "calc(100vh - 140px)" }}>
-            <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
-              <div style={panelHeaderStyle}>
-                <h3 style={{ margin: 0 }}>2D 编辑</h3>
-                {draft && (
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                    <button
-                      style={secondaryButtonStyle}
-                      onClick={() => {
-                        const fileInput = document.getElementById("replace-image") as HTMLInputElement | null;
-                        fileInput?.click();
-                      }}
-                    >
-                      替换图片
-                    </button>
-                    <input
-                      id="replace-image"
-                      type="file"
-                      accept="image/png,image/jpeg"
-                      style={{ display: "none" }}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file || !draft) return;
-                        try {
-                          const asset = await uploadAsset(file, "floorplan_image");
-                          updateDraft((prev) => ({
-                            ...prev,
-                            image: asset,
-                            modelTransform: null,
-                            calibrationPoints: null
-                          }));
-                          setCalibration({ image: [], model: [] });
-                        } catch (err) {
-                          setStatus(`上传失败: ${(err as Error).message}`);
-                        }
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-              {draft ? (
-                <div style={{ position: "relative", width: "100%", height: "100%" }}>
-                  <svg
-                    ref={svgRef}
-                    viewBox={`0 0 ${imageWidth} ${imageHeight}`}
-                    preserveAspectRatio="xMidYMid meet"
-                    style={{ width: "100%", height: "100%", cursor: mode === "devices" ? "crosshair" : "default" }}
-                    onPointerDown={(evt) => handleSvgClick(evt)}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    data-testid="floorplan-canvas"
-                  >
-                    <image href={resolveAssetUrl(draft.image.url)} width={imageWidth} height={imageHeight} />
-                    {svgRoomPaths?.map(({ room, points }) => (
-                      <g key={room.id}>
-                        <polygon
-                          points={points}
-                          fill={room.id === selectedRoomId ? "rgba(14, 116, 144, 0.2)" : "rgba(14, 116, 144, 0.12)"}
-                          stroke={room.id === selectedRoomId ? "#0e7490" : "#0ea5a4"}
-                          strokeWidth={2}
-                          onPointerDown={(evt) => {
-                            evt.stopPropagation();
-                            if (mode === "rooms") setSelectedRoomId(room.id);
-                          }}
-                        />
-                        <text
-                          x={room.polygon[0].x * imageWidth + 6}
-                          y={room.polygon[0].y * imageHeight + 16}
-                          fontSize="12"
-                          fill="#0f172a"
-                        >
-                          {room.name}
-                        </text>
-                        {mode === "rooms" &&
-                          room.polygon.map((point, idx) => (
+                          {activeScalePoints.map((point, idx) => (
                             <circle
-                              key={`${room.id}-${idx}`}
+                              key={`scale-point-${idx}`}
                               cx={point.x * imageWidth}
                               cy={point.y * imageHeight}
-                              r={5}
-                              fill="#0f172a"
-                              onPointerDown={(evt) => {
-                                evt.stopPropagation();
-                                draggingHandleRef.current = { roomId: room.id, index: idx };
-                              }}
+                              r={6}
+                              fill={isSettingImageScale ? "#f97316" : "#2563eb"}
+                              stroke="white"
+                              strokeWidth={2}
                             />
                           ))}
-                      </g>
-                    ))}
-                    {draftRoomPoints.length > 0 && (
-                      <polyline
-                        points={draftRoomPoints.map((p) => `${p.x * imageWidth},${p.y * imageHeight}`).join(" ")}
-                        fill="none"
-                        stroke="#f97316"
-                        strokeWidth={2}
-                      />
-                    )}
-                    {svgDevices?.map(({ device, color, label }) => (
-                      <g key={device.deviceId}>
-                        <circle
-                          cx={device.x * imageWidth}
-                          cy={device.y * imageHeight}
-                          r={8}
-                          fill={color}
-                          stroke={device.deviceId === selectedDeviceId ? "#0f172a" : "white"}
-                          strokeWidth={2}
-                          data-testid={`floorplan-device-${device.deviceId}`}
-                          onPointerDown={(evt) => {
-                            evt.stopPropagation();
-                            if (mode === "devices") {
-                              draggingDeviceRef.current = device.deviceId;
-                            }
-                            setSelectedDeviceId(device.deviceId);
-                          }}
-                        />
-                        <text x={device.x * imageWidth + 12} y={device.y * imageHeight - 6} fontSize="12" fill="#0f172a">
-                          {deviceMap[device.deviceId]?.name || device.deviceId}
-                        </text>
-                        {label && (
-                          <text x={device.x * imageWidth + 12} y={device.y * imageHeight + 10} fontSize="11" fill="#64748b">
-                            {label}
-                          </text>
-                        )}
-                      </g>
-                    ))}
-                    {mode === "calibration" &&
-                      calibration.image.map((point, idx) => (
-                        <circle
-                          key={`calib-${idx}`}
-                          cx={point.x * imageWidth}
-                          cy={point.y * imageHeight}
-                          r={6}
-                          fill="#f97316"
-                        />
-                      ))}
-                  </svg>
-                </div>
-              ) : (
-                <div style={{ padding: "20px" }}>请先创建或选择户型。</div>
-              )}
-            </div>
-
-            <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
-              <div style={panelHeaderStyle}>
-                <h3 style={{ margin: 0 }}>3D 预览</h3>
-                {draft && (
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                    <button
-                      style={secondaryButtonStyle}
-                      onClick={() => {
-                        const fileInput = document.getElementById("replace-model") as HTMLInputElement | null;
-                        fileInput?.click();
-                      }}
-                    >
-                      替换模型
-                    </button>
-                    <input
-                      id="replace-model"
-                      type="file"
-                      accept=".glb,model/gltf-binary"
-                      style={{ display: "none" }}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file || !draft) return;
-                        try {
-                          const asset = await uploadAsset(file, "floorplan_model");
-                          updateDraft((prev) => ({
-                            ...prev,
-                            model: asset,
-                            modelTransform: null,
-                            calibrationPoints: null
-                          }));
-                          setCalibration({ image: [], model: [] });
-                        } catch (err) {
-                          setStatus(`上传失败: ${(err as Error).message}`);
-                        }
-                      }}
-                    />
+                          {svgRoomPaths?.map(({ room, points }) => (
+                            <g key={room.id}>
+                              <polygon
+                                points={points}
+                                fill={room.id === selectedRoomId ? "rgba(14, 116, 144, 0.2)" : "rgba(14, 116, 144, 0.12)"}
+                                stroke={room.id === selectedRoomId ? "#0e7490" : "#0ea5a4"}
+                                strokeWidth={2}
+                                onPointerDown={(evt) => {
+                                  if (mode !== "rooms") return;
+                                  evt.stopPropagation();
+                                  setSelectedRoomId(room.id);
+                                }}
+                              />
+                              <text x={room.polygon[0].x * imageWidth + 6} y={room.polygon[0].y * imageHeight + 16} fontSize="12" fill="#0f172a">
+                                {room.name}
+                              </text>
+                              {mode === "rooms" &&
+                                room.polygon.map((point, idx) => (
+                                  <circle
+                                    key={`${room.id}-${idx}`}
+                                    cx={point.x * imageWidth}
+                                    cy={point.y * imageHeight}
+                                    r={5}
+                                    fill="#0f172a"
+                                    onPointerDown={(evt) => {
+                                      evt.stopPropagation();
+                                      draggingHandleRef.current = { roomId: room.id, index: idx };
+                                    }}
+                                  />
+                                ))}
+                            </g>
+                          ))}
+                          {draftRoomPoints.length > 0 && (
+                            <polyline
+                              points={draftRoomPoints.map((point) => `${point.x * imageWidth},${point.y * imageHeight}`).join(" ")}
+                              fill="none"
+                              stroke="#f97316"
+                              strokeWidth={2}
+                            />
+                          )}
+                          {svgDevices?.map(({ device, color, label }) => (
+                            <g key={device.deviceId}>
+                              <circle
+                                cx={device.x * imageWidth}
+                                cy={device.y * imageHeight}
+                                r={8}
+                                fill={color}
+                                stroke={device.deviceId === selectedDeviceId ? "#0f172a" : "white"}
+                                strokeWidth={2}
+                                data-testid={`floorplan-device-${device.deviceId}`}
+                                onPointerDown={(evt) => {
+                                  evt.stopPropagation();
+                                  if (mode === "devices") {
+                                    draggingDeviceRef.current = device.deviceId;
+                                  }
+                                  setSelectedDeviceId(device.deviceId);
+                                }}
+                              />
+                              <text x={device.x * imageWidth + 12} y={device.y * imageHeight - 6} fontSize="12" fill="#0f172a">
+                                {deviceMap[device.deviceId]?.name || device.deviceId}
+                              </text>
+                              {label && (
+                                <text x={device.x * imageWidth + 12} y={device.y * imageHeight + 10} fontSize="11" fill="#64748b">
+                                  {label}
+                                </text>
+                              )}
+                            </g>
+                          ))}
+                          {mode === "calibration" &&
+                            calibration.image.map((point, idx) => (
+                              <circle key={`calib-${idx}`} cx={point.x * imageWidth} cy={point.y * imageHeight} r={6} fill="#f97316" />
+                            ))}
+                        </svg>
+                      </div>
+                    </div>
                   </div>
+                ) : (
+                  <div style={{ padding: 20 }}>正在加载户型...</div>
                 )}
               </div>
-              {draft?.model?.url ? (
-                <ThreePreview
-                  modelUrl={resolveAssetUrl(draft.model.url)}
-                  transform={draft.modelTransform}
-                  devices={draft.devices}
-                  calibrationPoints={calibration}
-                  mode={mode}
-                  sceneEffects={sceneEffects}
-                  onPickPoint={handlePick3dPoint}
-                  selectedDeviceId={selectedDeviceId}
-                />
-              ) : (
-                <div style={{ padding: "20px" }}>暂无 3D 模型。</div>
+
+              {effectiveShow3dPanel && (
+                <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+                  <div style={panelHeaderStyle}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>3D 预览</h3>
+                      <p style={{ ...hintStyle, marginTop: 4 }}>校准模式下会在 3D 模型里拾取点位；其他模式仅用于辅助核对空间关系。</p>
+                    </div>
+                    {mode !== "calibration" && (
+                      <button type="button" onClick={() => setShow3dPanel(false)} style={secondaryButtonStyle}>
+                        收起
+                      </button>
+                    )}
+                  </div>
+                  {draft?.model?.url ? (
+                    <div style={{ height: 320 }}>
+                      <ThreePreview
+                        modelUrl={resolveAssetUrl(draft.model.url)}
+                        transform={draft.modelTransform}
+                        devices={draft.devices}
+                        calibrationPoints={calibration}
+                        mode={mode}
+                        sceneEffects={sceneEffects}
+                        onPickPoint={handlePick3dPoint}
+                        selectedDeviceId={selectedDeviceId}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ padding: 20 }}>暂无 3D 模型，请先在顶部上传 GLB 文件。</div>
+                  )}
+                </div>
               )}
-            </div>
+            </section>
+
+            <aside className="floorplan-sidebar">{renderContextPanels()}</aside>
           </section>
-        </section>
+        )}
 
         {status && (
           <div style={{ marginTop: "16px", padding: "12px 16px", borderRadius: "12px", background: "#0f172a", color: "white" }}>
             {status}
           </div>
         )}
+
+        <style jsx>{`
+          .floorplan-browse-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+            align-items: start;
+          }
+
+          .floorplan-editor-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(300px, 360px);
+            align-items: start;
+          }
+
+          .floorplan-editor-main,
+          .floorplan-sidebar {
+            min-width: 0;
+          }
+
+          .floorplan-sticky {
+            position: sticky;
+            top: 24px;
+            max-height: calc(100vh - 48px);
+            overflow: auto;
+          }
+
+          @media (max-width: 1180px) {
+            .floorplan-browse-grid,
+            .floorplan-editor-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .floorplan-sticky {
+              position: static;
+              max-height: none;
+              overflow: visible;
+            }
+          }
+        `}</style>
       </main>
     </>
   );
