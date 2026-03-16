@@ -1,27 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
-type CapabilityParam = {
-  name: string;
-  type: "boolean" | "number" | "string" | "enum";
-  minimum?: number;
-  maximum?: number;
-  enum?: string[];
-  required?: boolean;
-};
-
-type Capability = {
-  action: string;
-  description?: string;
-  parameters?: CapabilityParam[];
-};
-
-type Device = {
-  id: string;
-  name: string;
-  placement?: { room?: string; zone?: string; floor?: string; mount?: string; description?: string };
-  capabilities?: Capability[];
-};
+import type { Capability, CapabilityParam, Device } from "../lib/device-types";
+import { getHaHubLinks } from "../lib/integrations";
 
 type SceneSummary = { id: string; name: string; description?: string };
 
@@ -122,6 +103,7 @@ function toDisplayValue(value: any) {
 export default function ScenesPage() {
   const router = useRouter();
   const prefillDeviceId = typeof router.query.deviceId === "string" ? router.query.deviceId : "";
+  const haLinks = getHaHubLinks();
 
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -408,10 +390,10 @@ export default function ScenesPage() {
     >
       <header style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-end" }}>
         <div>
-          <div style={{ letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.8, fontSize: 12 }}>Scenes</div>
-          <h1 style={{ margin: "0.2rem 0 0.4rem 0", fontSize: "2rem" }}>场景编辑</h1>
+          <div style={{ letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.8, fontSize: 12 }}>Advanced Scenes</div>
+          <h1 style={{ margin: "0.2rem 0 0.4rem 0", fontSize: "2rem" }}>高级场景编排</h1>
           <div style={{ opacity: 0.75, maxWidth: 780, fontSize: 13 }}>
-            可视化编辑并保存到 <span style={monoStyle}>scenes.json</span>（由 API Gateway 管理）。支持 device step / scene 引用 / wait_for。
+            这里保留 step-based、wait_for 和 scene 引用等高阶编排。基础状态快照型场景建议放到 Home Assistant。
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -423,6 +405,41 @@ export default function ScenesPage() {
           </button>
         </div>
       </header>
+
+      <section
+        style={{
+          ...panelStyle,
+          marginTop: "1rem",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          alignItems: "center",
+          flexWrap: "wrap"
+        }}
+      >
+        <div style={{ maxWidth: 720 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>与 HA 的边界</h2>
+          <p style={{ margin: "8px 0 0", opacity: 0.78, fontSize: 13, lineHeight: 1.6 }}>
+            Home Assistant 负责基础 Scenes / Scripts；这里只有需要条件等待、组合步骤、可审计执行链路的高级场景。
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {haLinks.scenes ? (
+            <a href={haLinks.scenes} target="_blank" rel="noreferrer" style={secondaryButtonStyle} data-testid="ha-scenes-link">
+              打开 HA Scenes
+            </a>
+          ) : (
+            <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>HA Scenes 未配置</span>
+          )}
+          {haLinks.automations ? (
+            <a href={haLinks.automations} target="_blank" rel="noreferrer" style={secondaryButtonStyle}>
+              打开 HA Automations
+            </a>
+          ) : (
+            <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>HA Automations 未配置</span>
+          )}
+        </div>
+      </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "1.2rem", marginTop: "1.4rem" }}>
         <aside style={{ ...panelStyle, height: "calc(100vh - 220px)", overflow: "auto" }}>

@@ -3,6 +3,9 @@ import Script from "next/script";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
+import type { Device } from "../lib/device-types";
+import { getDeviceExternalLinks } from "../lib/integrations";
+
 type Point2D = { x: number; y: number };
 type Point3D = { x: number; y: number; z: number };
 
@@ -65,14 +68,6 @@ type FloorplanSummary = {
   model?: FloorplanAsset;
   roomCount?: number;
   deviceCount?: number;
-};
-
-type Device = {
-  id: string;
-  name: string;
-  placement?: { room?: string; zone?: string; description?: string };
-  traits?: Record<string, any>;
-  capabilities?: { action: string; parameters?: any[] }[];
 };
 
 type SceneSummary = {
@@ -1047,6 +1042,8 @@ export default function FloorplanPage() {
   const effectiveShow3dPanel = pageStage === "editor" && (show3dPanel || mode === "calibration");
   const selectedRoom = draft?.rooms.find((room) => room.id === selectedRoomId) || null;
   const selectedPlacedDevice = draft?.devices.find((device) => device.deviceId === selectedDeviceId) || null;
+  const selectedDevice = selectedPlacedDevice ? deviceMap[selectedPlacedDevice.deviceId] : null;
+  const selectedDeviceLinks = getDeviceExternalLinks(selectedDevice);
   const availablePlacementDevices = draft ? devices.filter((device) => !draft.devices.some((item) => item.deviceId === device.id)) : devices;
   const availablePlacementDeviceIds = new Set(availablePlacementDevices.map((device) => device.id));
   const persistedImageScale = draft?.imageScale || null;
@@ -2251,6 +2248,44 @@ export default function FloorplanPage() {
           <button onClick={() => removeDevice(selectedPlacedDevice.deviceId)} style={dangerButtonStyle}>
             移除设备
           </button>
+
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>外部系统入口</h4>
+            <p style={hintStyle}>布点和空间属性继续在本平台维护；通用设备管理、历史和协议调试跳转到 HA / Zigbee2MQTT。</p>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              {selectedDeviceLinks.haUrl ? (
+                <a
+                  href={selectedDeviceLinks.haUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={secondaryButtonStyle}
+                  data-testid="floorplan-open-ha"
+                >
+                  Open in HA
+                </a>
+              ) : (
+                <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>HA 未绑定</span>
+              )}
+              {selectedDeviceLinks.zigbee2mqttUrl ? (
+                <a
+                  href={selectedDeviceLinks.zigbee2mqttUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={secondaryButtonStyle}
+                  data-testid="floorplan-open-z2m"
+                >
+                  Open in Zigbee2MQTT
+                </a>
+              ) : (
+                <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>Z2M 未绑定</span>
+              )}
+            </div>
+            <p style={{ ...hintStyle, marginTop: 10 }}>
+              protocol={selectedDevice?.protocol || "unknown"}
+              {selectedDevice?.placement?.room ? ` · room=${selectedDevice.placement.room}` : ""}
+              {selectedDevice?.placement?.zone ? ` · zone=${selectedDevice.placement.zone}` : ""}
+            </p>
+          </div>
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
             <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>设备元信息覆盖（devices.config.json）</h4>

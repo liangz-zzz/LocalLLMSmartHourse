@@ -12,6 +12,11 @@ const baseDevices = [
   {
     id: "light1",
     name: "客厅灯",
+    protocol: "zigbee",
+    bindings: {
+      ha: { entity_id: "light.living_room_main" },
+      zigbee2mqtt: { topic: "zigbee2mqtt/light1" }
+    },
     placement: { room: "living_room" },
     traits: { switch: { state: "off" } },
     capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
@@ -19,6 +24,11 @@ const baseDevices = [
   {
     id: "plug1",
     name: "玄关插座",
+    protocol: "zigbee",
+    bindings: {
+      ha: { entity_id: "switch.entry_plug" },
+      zigbee2mqtt: { topic: "zigbee2mqtt/plug1" }
+    },
     placement: { room: "entryway", zone: "north_wall" },
     traits: { switch: { state: "off" } },
     capabilities: [{ action: "turn_on" }, { action: "turn_off" }]
@@ -410,6 +420,14 @@ test.describe("floorplan editor", () => {
     await expect(page.getByTestId("floorplan-device-plug1")).toBeVisible();
     await expect(page.getByText("当前选中：玄关插座")).toBeVisible();
     await expect(page.getByTestId("placement-empty")).toBeVisible();
+  });
+
+  test("selected placed device exposes HA and Zigbee2MQTT links", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("floorplan-device-light1").click();
+    await expect(page.getByTestId("floorplan-open-ha")).toHaveAttribute("href", "http://ha.local/history?entity_id=light.living_room_main");
+    await expect(page.getByTestId("floorplan-open-z2m")).toHaveAttribute("href", "http://z2m.local");
   });
 
   test("can place a device inside an already defined room area", async ({ page }) => {

@@ -192,6 +192,31 @@ services:
       - "5000:5000"
     command: ["sleep", "infinity"]
 
+  web:
+    image: node:20-bookworm
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+      - llm-bridge
+    working_dir: /app
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PORT=${WEB_HTTP_PORT:-3000}
+      - HOSTNAME=0.0.0.0
+      - API_HTTP_BASE=http://api-gateway:${API_HTTP_PORT:-4000}
+      - LLM_HTTP_BASE=http://llm-bridge:5000
+      - NEXT_PUBLIC_WS_PORT=${API_WS_PORT:-4001}
+      - NEXT_PUBLIC_HA_BASE_URL=${NEXT_PUBLIC_HA_BASE_URL:-http://localhost:${HA_HTTP_PORT:-8123}}
+      - NEXT_PUBLIC_Z2M_BASE_URL=${NEXT_PUBLIC_Z2M_BASE_URL:-http://localhost:${Z2M_FRONTEND_PORT:-8080}}
+      - NEXT_PUBLIC_HA_LINKS_JSON=${NEXT_PUBLIC_HA_LINKS_JSON:-}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ../frontend/web:/app
+      - web_node_modules:/app/node_modules
+    ports:
+      - "${WEB_HTTP_PORT:-3000}:3000"
+    command: ["sleep", "infinity"]
+
   smart-house-mcp-server:
     build:
       context: ../backend/services/smart-house-mcp-server
@@ -302,5 +327,6 @@ volumes:
   device_simulator_node_modules:
   rules_engine_node_modules:
   llm_bridge_node_modules:
+  web_node_modules:
   smart_house_mcp_server_node_modules:
   smart_house_agent_node_modules:

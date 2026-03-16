@@ -1,27 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
-type CapabilityParam = {
-  name: string;
-  type: "boolean" | "number" | "string" | "enum";
-  minimum?: number;
-  maximum?: number;
-  enum?: string[];
-  required?: boolean;
-};
-
-type Capability = {
-  action: string;
-  description?: string;
-  parameters?: CapabilityParam[];
-};
-
-type Device = {
-  id: string;
-  name: string;
-  placement?: { room?: string; zone?: string; floor?: string; mount?: string; description?: string };
-  capabilities?: Capability[];
-};
+import type { Capability, CapabilityParam, Device } from "../lib/device-types";
+import { getHaHubLinks } from "../lib/integrations";
 
 type SceneSummary = { id: string; name: string; description?: string };
 
@@ -144,6 +125,7 @@ function isPlainObject(v: any) {
 export default function AutomationsPage() {
   const router = useRouter();
   const prefillDeviceId = typeof router.query.deviceId === "string" ? router.query.deviceId : "";
+  const haLinks = getHaHubLinks();
 
   const [automationList, setAutomationList] = useState<Automation[]>([]);
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
@@ -818,10 +800,10 @@ export default function AutomationsPage() {
     >
       <header style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-end" }}>
         <div>
-          <div style={{ letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.8, fontSize: 12 }}>Automations</div>
+          <div style={{ letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.8, fontSize: 12 }}>Legacy Automation Editor</div>
           <h1 style={{ margin: "0.2rem 0 0.4rem 0", fontSize: "2rem" }}>联动（Automation）编辑</h1>
           <div style={{ opacity: 0.75, maxWidth: 860, fontSize: 13 }}>
-            编辑并保存到 <span style={monoStyle}>automations.json</span>（由 API Gateway 写入，rules-engine 热加载执行）。
+            这是兼容和调试入口。基础自动化建议交给 Home Assistant；当前编辑器继续保留已有规则和高级链路联调能力。
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -833,6 +815,41 @@ export default function AutomationsPage() {
           </button>
         </div>
       </header>
+
+      <section
+        style={{
+          ...panelStyle,
+          marginTop: "1rem",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          alignItems: "center",
+          flexWrap: "wrap"
+        }}
+      >
+        <div style={{ maxWidth: 720 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>迁移建议</h2>
+          <p style={{ margin: "8px 0 0", opacity: 0.78, fontSize: 13, lineHeight: 1.6 }}>
+            HA 的 Automations / Scripts 更适合日常联动配置。本页保留，主要用于兼容已有配置和验证复杂执行链路。
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {haLinks.automations ? (
+            <a href={haLinks.automations} target="_blank" rel="noreferrer" style={secondaryButtonStyle} data-testid="ha-automations-link">
+              打开 HA Automations
+            </a>
+          ) : (
+            <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>HA Automations 未配置</span>
+          )}
+          {haLinks.scenes ? (
+            <a href={haLinks.scenes} target="_blank" rel="noreferrer" style={secondaryButtonStyle}>
+              打开 HA Scenes
+            </a>
+          ) : (
+            <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "default" }}>HA Scenes 未配置</span>
+          )}
+        </div>
+      </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "1.2rem", marginTop: "1.4rem" }}>
         <aside style={{ ...panelStyle, height: "calc(100vh - 220px)", overflow: "auto" }}>

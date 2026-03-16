@@ -1,12 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
-type Device = {
-  id: string;
-  name: string;
-  traits?: any;
-  capabilities?: { action: string; parameters?: any[] }[];
-};
+import type { Device } from "../../lib/device-types";
+import { getDeviceExternalLinks } from "../../lib/integrations";
 
 type ActionResult = {
   id: string;
@@ -15,6 +11,8 @@ type ActionResult = {
   transport: string;
   createdAt?: string;
 };
+
+const pageBg = "linear-gradient(135deg, #f8fafc 0%, #eef4ff 45%, #f4faf6 100%)";
 
 export default function DevicePage() {
   const router = useRouter();
@@ -29,25 +27,27 @@ export default function DevicePage() {
   useEffect(() => {
     if (!id || Array.isArray(id)) return;
     const load = async () => {
-      const dRes = await fetch(`/api/devices/${encodeURIComponent(id)}`);
-      const d = await dRes.json();
-      setDevice(d);
-      const hRes = await fetch(`/api/devices/${encodeURIComponent(id)}/history?limit=10`);
-      const h = await hRes.json();
-      setHistory(h.items || []);
+      const deviceRes = await fetch(`/api/devices/${encodeURIComponent(id)}`);
+      const nextDevice = await deviceRes.json();
+      setDevice(nextDevice);
+      const historyRes = await fetch(`/api/devices/${encodeURIComponent(id)}/history?limit=10`);
+      const nextHistory = await historyRes.json();
+      setHistory(nextHistory.items || []);
     };
     load();
   }, [id]);
+
+  const links = useMemo(() => getDeviceExternalLinks(device), [device]);
 
   const sendAction = async () => {
     if (!id || Array.isArray(id) || !action) return;
     setLoading(true);
     setMessage("");
     try {
-      const body = { action };
+      const body: { action: string; params?: Record<string, any> } = { action };
       if (params) {
         try {
-          Object.assign(body, { params: JSON.parse(params) });
+          body.params = JSON.parse(params);
         } catch {
           setMessage("参数必须是 JSON 对象");
           setLoading(false);
@@ -73,45 +73,162 @@ export default function DevicePage() {
   };
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
-      {!device && <p>Loading...</p>}
-      {device && (
-        <>
-          <h1>{device.name}</h1>
-          <p>ID: {device.id}</p>
-          <section>
-            <h3>动作</h3>
-            <select value={action} onChange={(e) => setAction(e.target.value)}>
+    <main
+      style={{
+        minHeight: "calc(100vh - 80px)",
+        padding: "2rem",
+        fontFamily: "'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif",
+        background: pageBg,
+        color: "#0f172a"
+      }}
+    >
+      {!device ? <p>Loading...</p> : null}
+
+      {device ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 920 }}>
+          <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b" }}>Legacy Device Detail</div>
+              <h1 style={{ margin: "0.2rem 0 0.35rem" }}>{device.name}</h1>
+              <p style={{ margin: 0, color: "#475569", lineHeight: 1.6 }}>
+                设备详情页保留为过渡入口。完整设备管理、历史和实体运维建议优先在 Home Assistant 中进行。
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {links.haUrl ? (
+                <a
+                  href={links.haUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={externalButtonStyle("#0f172a", "#f8fafc")}
+                  data-testid="device-page-open-ha"
+                >
+                  Open in HA
+                </a>
+              ) : (
+                <span style={disabledBadgeStyle}>HA 未绑定</span>
+              )}
+              {links.zigbee2mqttUrl ? (
+                <a
+                  href={links.zigbee2mqttUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={externalButtonStyle("#dbeafe", "#0f172a")}
+                  data-testid="device-page-open-z2m"
+                >
+                  Open in Zigbee2MQTT
+                </a>
+              ) : (
+                <span style={disabledBadgeStyle}>Z2M 未绑定</span>
+              )}
+            </div>
+          </header>
+
+          <section
+            style={{
+              borderRadius: 18,
+              border: "1px solid rgba(148, 163, 184, 0.2)",
+              background: "rgba(255,255,255,0.86)",
+              padding: "1rem 1.1rem"
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: 16 }}>设备摘要</h2>
+            <p style={{ margin: "10px 0 0", color: "#475569" }}>ID: {device.id}</p>
+            <p style={{ margin: "6px 0 0", color: "#475569" }}>protocol: {device.protocol || "unknown"}</p>
+            <p style={{ margin: "6px 0 0", color: "#475569" }}>
+              placement: {[device.placement?.room, device.placement?.zone, device.placement?.description].filter(Boolean).join(" / ") || "未配置"}
+            </p>
+          </section>
+
+          <section
+            style={{
+              borderRadius: 18,
+              border: "1px solid rgba(148, 163, 184, 0.2)",
+              background: "rgba(255,255,255,0.86)",
+              padding: "1rem 1.1rem"
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>动作调试</h2>
+            <p style={{ marginTop: 0, color: "#475569" }}>保留当前调试能力，但不再作为主设备控制入口。</p>
+
+            <select value={action} onChange={(e) => setAction(e.target.value)} style={inputStyle}>
               <option value="">选择动作</option>
-              {device.capabilities?.map((c) => (
-                <option key={c.action} value={c.action}>
-                  {c.action}
+              {device.capabilities?.map((capability) => (
+                <option key={capability.action} value={capability.action}>
+                  {capability.action}
                 </option>
               ))}
             </select>
+
             <textarea
               placeholder='参数 JSON (可选，如 {"brightness":80})'
               value={params}
               onChange={(e) => setParams(e.target.value)}
-              style={{ display: "block", width: "300px", height: "80px", marginTop: "8px" }}
+              style={{ ...inputStyle, display: "block", width: "100%", minHeight: "92px", marginTop: "10px" }}
             />
-            <button onClick={sendAction} disabled={loading || !action}>
+
+            <button onClick={sendAction} disabled={loading || !action} style={{ ...externalButtonStyle("#0f766e", "#f8fafc"), marginTop: "10px" }}>
               {loading ? "发送中..." : "发送动作"}
             </button>
-            {message && <p>{message}</p>}
+
+            {message ? <p style={{ color: "#475569" }}>{message}</p> : null}
           </section>
-          <section style={{ marginTop: "1.5rem" }}>
-            <h3>动作历史 (最近)</h3>
-            <ul>
-              {history.map((h) => (
-                <li key={h.id}>
-                  {h.action} - {h.status} ({h.transport}) {h.createdAt ? new Date(h.createdAt).toLocaleString() : ""}
+
+          <section
+            style={{
+              borderRadius: 18,
+              border: "1px solid rgba(148, 163, 184, 0.2)",
+              background: "rgba(255,255,255,0.86)",
+              padding: "1rem 1.1rem"
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>最近动作历史</h2>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "#334155" }}>
+              {history.map((item) => (
+                <li key={item.id} style={{ marginTop: 8 }}>
+                  {item.action} - {item.status} ({item.transport}) {item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}
                 </li>
               ))}
+              {!history.length ? <li>暂无动作历史</li> : null}
             </ul>
           </section>
-        </>
-      )}
+        </div>
+      ) : null}
     </main>
   );
 }
+
+const inputStyle: CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid rgba(148, 163, 184, 0.4)",
+  padding: "0.7rem 0.8rem",
+  font: "inherit",
+  background: "#fff"
+};
+
+function externalButtonStyle(background: string, color: string): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0.7rem 1rem",
+    borderRadius: 12,
+    textDecoration: "none",
+    fontWeight: 700,
+    background,
+    color,
+    border: "none"
+  };
+}
+
+const disabledBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "0.7rem 1rem",
+  borderRadius: 12,
+  color: "#94a3b8",
+  background: "rgba(148, 163, 184, 0.12)",
+  border: "1px dashed rgba(148, 163, 184, 0.4)"
+};

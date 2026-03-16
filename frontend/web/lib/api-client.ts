@@ -1,26 +1,6 @@
-export type CapabilityParam = {
-  name: string;
-  type: "boolean" | "number" | "string" | "enum";
-  minimum?: number;
-  maximum?: number;
-  enum?: string[];
-  required?: boolean;
-};
+import type { Capability, CapabilityParam, Device } from "./device-types";
 
-export type Capability = {
-  action: string;
-  description?: string;
-  parameters?: CapabilityParam[];
-};
-
-export type Device = {
-  id: string;
-  name: string;
-  placement?: { room?: string; zone?: string; description?: string };
-  traits?: Record<string, any>;
-  capabilities?: Capability[];
-  semantics?: Record<string, any>;
-};
+export type { Capability, CapabilityParam, Device };
 
 export type ActionResult = {
   id: string;

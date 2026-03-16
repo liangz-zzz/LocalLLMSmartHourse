@@ -5,6 +5,11 @@ const devicesPayload = {
     {
       id: "light1",
       name: "客厅灯",
+      protocol: "zigbee",
+      bindings: {
+        ha: { entity_id: "light.living_room_main" },
+        zigbee2mqtt: { topic: "zigbee2mqtt/light1" }
+      },
       placement: { room: "living_room" },
       traits: { switch: { state: "off" } },
       capabilities: [
@@ -30,18 +35,14 @@ test.describe("device dashboard", () => {
     );
   });
 
-  test("can trigger quick action and param action, parse and execute intent", async ({ page }) => {
+  test("shows summary links and can parse and execute intent", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByTestId("device-card-light1")).toBeVisible();
-
-    // quick action
-    await page.getByTestId("quick-light1-turn_on").click();
-    await expect(page.getByText("queued", { exact: false })).toBeVisible();
-
-    // param action
-    await page.getByTestId("param-light1-set_brightness-brightness").fill("30");
-    await page.getByTestId("send-light1-set_brightness").click();
-    await expect(page.getByText("queued", { exact: false })).toBeVisible();
+    await expect(page.getByTestId("home-page")).toBeVisible();
+    await expect(page.getByTestId("device-summary-card-light1")).toBeVisible();
+    await expect(page.getByTestId("summary-ha-bound")).toContainText("1");
+    await expect(page.getByTestId("summary-z2m-bound")).toContainText("1");
+    await expect(page.getByTestId("device-open-ha-light1")).toHaveAttribute("href", "http://ha.local/history?entity_id=light.living_room_main");
+    await expect(page.getByTestId("device-open-z2m-light1")).toHaveAttribute("href", "http://z2m.local");
 
     // intent parse + execute
     await page.getByTestId("intent-input").fill("打开客厅灯");
