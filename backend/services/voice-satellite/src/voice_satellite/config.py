@@ -85,7 +85,19 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class SatelliteServerConfig:
+    host: str = "0.0.0.0"
+    port: int = 8765
+    path: str = "/ws"
+    auth_token: str = ""
+    ping_interval_s: int = 20
+    ping_timeout_s: int = 20
+    max_message_bytes: int = 524288
+
+
+@dataclass(frozen=True)
 class AppConfig:
+    mode: str
     audio: AudioConfig
     wake: WakeConfig
     vad: VadConfig
@@ -94,11 +106,16 @@ class AppConfig:
     api_gateway: ApiGatewayConfig
     agent: AgentConfig
     runtime: RuntimeConfig
+    satellite_server: SatelliteServerConfig
 
 
 def load_config(path: str) -> AppConfig:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+
+    mode = str(raw.get("mode") or "local").strip().lower()
+    if mode not in ("local", "ws_server"):
+        raise SystemExit("mode must be one of: local | ws_server")
 
     audio_raw = raw.get("audio") or {}
     beep_raw = (audio_raw.get("beep") or {}) if isinstance(audio_raw, dict) else {}
@@ -171,7 +188,18 @@ def load_config(path: str) -> AppConfig:
         log_level=str(runtime_raw.get("log_level") or "info"),
     )
 
-    if not wake.vosk.model_path:
+    satellite_raw = raw.get("satellite_server") or {}
+    satellite_server = SatelliteServerConfig(
+        host=str(satellite_raw.get("host") or "0.0.0.0"),
+        port=int(satellite_raw.get("port") or 8765),
+        path=str(satellite_raw.get("path") or "/ws"),
+        auth_token=str(satellite_raw.get("auth_token") or ""),
+        ping_interval_s=int(satellite_raw.get("ping_interval_s") or 20),
+        ping_timeout_s=int(satellite_raw.get("ping_timeout_s") or 20),
+        max_message_bytes=int(satellite_raw.get("max_message_bytes") or 524288),
+    )
+
+    if mode == "local" and not wake.vosk.model_path:
         raise SystemExit("Missing required config: wake.vosk.model_path")
     if not stt.whisper_model:
         raise SystemExit("Missing required config: stt.whisper_model")
@@ -179,6 +207,7 @@ def load_config(path: str) -> AppConfig:
         raise SystemExit("Missing required config: tts.model_path / tts.config_path")
 
     return AppConfig(
+        mode=mode,
         audio=audio,
         wake=wake,
         vad=vad,
@@ -187,4 +216,5 @@ def load_config(path: str) -> AppConfig:
         api_gateway=api_gateway,
         agent=agent,
         runtime=runtime,
+        satellite_server=satellite_server,
     )

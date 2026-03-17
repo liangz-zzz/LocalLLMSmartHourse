@@ -53,6 +53,63 @@ test("validateDevice accepts voice_control binding", () => {
   assert.equal(result.success, true);
 });
 
+test("validateDevice accepts ws_satellite voice binding", () => {
+  const remoteVoice = {
+    ...sample,
+    protocol: "wifi",
+    bindings: {
+      voice_control: {
+        transport: "ws_satellite",
+        priority: "prefer",
+        satellite: {
+          endpoint: "ws://voice-gateway.local:8765/ws",
+          device_id: "living-room-respeaker",
+          protocol_version: "v1",
+          input_audio: {
+            encoding: "pcm_s16le",
+            sample_rate_hz: 16000,
+            channels: 1,
+            frame_samples: 512
+          },
+          output_audio: {
+            encoding: "pcm_s16le",
+            sample_rate_hz: 16000,
+            channels: 1,
+            frame_samples: 512
+          }
+        },
+        wake: { utterances: ["你好，米奇"] },
+        actions: {
+          answer: { utterances: ["请回复"] }
+        }
+      }
+    }
+  };
+
+  const result = validateDevice(remoteVoice);
+  assert.equal(result.success, true);
+});
+
+test("validateDevice rejects ws_satellite binding without satellite config", () => {
+  const invalid = {
+    ...sample,
+    protocol: "wifi",
+    bindings: {
+      voice_control: {
+        transport: "ws_satellite",
+        wake: { utterances: ["你好，米奇"] },
+        actions: {
+          answer: { utterances: ["请回复"] }
+        }
+      }
+    }
+  };
+
+  const result = validateDevice(invalid);
+  assert.equal(result.success, false);
+  assert.ok(result.errors?.bindings?.voice_control?.satellite);
+});
+
 test("validateDevice accepts identity fields", () => {
   const withIdentity = {
     ...sample,

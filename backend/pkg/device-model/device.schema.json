@@ -56,10 +56,41 @@
           "type": "object",
           "required": ["wake", "actions"],
           "properties": {
-            "transport": { "type": "string", "enum": ["local_tts"] },
+            "transport": { "type": "string", "enum": ["local_tts", "ws_satellite"] },
             "priority": { "type": "string", "enum": ["prefer", "fallback"] },
             "audio_output": { "type": "string" },
             "preferred_mics": { "type": "array", "items": { "type": "string" } },
+            "satellite": {
+              "type": "object",
+              "required": ["endpoint", "device_id"],
+              "properties": {
+                "endpoint": { "type": "string", "minLength": 1 },
+                "device_id": { "type": "string", "minLength": 1 },
+                "auth_token": { "type": "string" },
+                "protocol_version": { "type": "string" },
+                "input_audio": {
+                  "type": "object",
+                  "properties": {
+                    "encoding": { "type": "string", "enum": ["pcm_s16le"] },
+                    "sample_rate_hz": { "type": "integer", "minimum": 1 },
+                    "channels": { "type": "integer", "minimum": 1 },
+                    "frame_samples": { "type": "integer", "minimum": 1 }
+                  },
+                  "additionalProperties": false
+                },
+                "output_audio": {
+                  "type": "object",
+                  "properties": {
+                    "encoding": { "type": "string", "enum": ["pcm_s16le"] },
+                    "sample_rate_hz": { "type": "integer", "minimum": 1 },
+                    "channels": { "type": "integer", "minimum": 1 },
+                    "frame_samples": { "type": "integer", "minimum": 1 }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
             "wake": {
               "type": "object",
               "required": ["utterances"],
@@ -117,6 +148,19 @@
               "additionalProperties": false
             }
           },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "transport": { "const": "ws_satellite" }
+                },
+                "required": ["transport"]
+              },
+              "then": {
+                "required": ["satellite"]
+              }
+            }
+          ],
           "additionalProperties": false
         },
         "vendor_extra": { "type": "object" }

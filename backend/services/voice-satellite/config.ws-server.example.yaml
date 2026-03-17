@@ -1,24 +1,24 @@
-# Voice Satellite config (example)
-mode: "local" # local | ws_server
+# Voice Satellite config for remote WebSocket satellites
+mode: "ws_server"
 
 audio:
   sample_rate: 16000
   block_size: 512
-  input_device: null     # int index or substring of device name
-  output_device: null    # int index or substring of device name
-  input_backend: "sounddevice"  # sounddevice | pulse | auto
-  output_backend: "sounddevice" # sounddevice | pulse | auto
-  pulse_source: "default"       # PulseAudio source name (when input_backend=pulse)
+  input_device: null
+  output_device: null
+  input_backend: "sounddevice"
+  output_backend: "sounddevice"
+  pulse_source: "default"
   beep:
-    enabled: true
+    enabled: false
     frequency_hz: 880
     duration_ms: 120
     volume: 0.2
 
 wake:
-  phrases: ["你好，米奇"]
+  phrases: ["你好，米奇"] # informational only in ws_server mode; wake word runs on the device
   vosk:
-    model_path: "/ABS/PATH/TO/vosk-model-small-cn-0.22" # required in local mode
+    model_path: ""
   cooldown_ms: 350
   timeout_ms: 8000
 
@@ -30,10 +30,9 @@ vad:
   min_utterance_ms: 300
 
 stt:
-  # Use a local Whisper model file to keep runtime offline, e.g. "/ABS/PATH/whisper-small.pt"
   whisper_model: "/ABS/PATH/TO/whisper-small.pt"
   language: "zh"
-  device: "cpu"  # "cpu" | "cuda"
+  device: "cpu"
 
 tts:
   piper_bin: "piper"
@@ -43,7 +42,7 @@ tts:
 
 api_gateway:
   base_url: "http://localhost:4000"
-  api_key: ""  # optional
+  api_key: ""
 
 agent:
   base_url: "http://localhost:6100"
@@ -53,15 +52,14 @@ agent:
   exit_phrases: ["再见", "拜拜", "退下", "结束对话", "退出对话"]
 
 runtime:
-  # End the wake session if no new user utterance occurs within this window.
   session_idle_timeout_ms: 30000
-  log_level: "info" # error | warn | info | debug
+  log_level: "info"
 
 satellite_server:
   host: "0.0.0.0"
   port: 8765
   path: "/ws"
-  auth_token: "" # optional shared secret for remote devices
+  auth_token: ""
   ping_interval_s: 20
   ping_timeout_s: 20
   max_message_bytes: 524288

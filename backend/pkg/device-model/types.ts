@@ -19,9 +19,25 @@ export interface HABinding {
   entity_id: string; // e.g. switch.living_room_plug
 }
 
-export type VoiceControlTransport = "local_tts";
+export type VoiceControlTransport = "local_tts" | "ws_satellite";
 export type VoiceControlPriority = "prefer" | "fallback";
 export type VoiceControlRisk = "low" | "medium" | "high";
+
+export interface VoiceSatelliteAudioFormat {
+  encoding?: "pcm_s16le";
+  sample_rate_hz?: number;
+  channels?: number;
+  frame_samples?: number;
+}
+
+export interface VoiceSatelliteBinding {
+  endpoint: string;
+  device_id: string;
+  auth_token?: string;
+  protocol_version?: string;
+  input_audio?: VoiceSatelliteAudioFormat;
+  output_audio?: VoiceSatelliteAudioFormat;
+}
 
 export interface VoiceControlWakeConfig {
   utterances: string[];
@@ -58,6 +74,7 @@ export interface VoiceControlBinding {
   priority?: VoiceControlPriority;
   audio_output?: string;
   preferred_mics?: string[];
+  satellite?: VoiceSatelliteBinding;
   wake: VoiceControlWakeConfig;
   ack?: VoiceControlAckConfig;
   actions: Record<string, VoiceControlActionSpec>;

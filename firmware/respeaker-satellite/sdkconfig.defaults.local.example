@@ -1,0 +1,9 @@
+# Copy this file to sdkconfig.defaults.local for local-only secrets.
+# This file is ignored by git and loaded automatically by CMakeLists.txt.
+
+CONFIG_SATELLITE_WIFI_SSID="YOUR_WIFI_SSID"
+CONFIG_SATELLITE_WIFI_PASSWORD="YOUR_WIFI_PASSWORD"
+CONFIG_SATELLITE_WS_URL="ws://192.168.18.228:8765/ws"
+CONFIG_SATELLITE_DEVICE_ID="YOUR_DEVICE_ID"
+CONFIG_SATELLITE_AUTH_TOKEN=""
+CONFIG_SATELLITE_WAKE_WORD="YOUR_WAKE_WORD"

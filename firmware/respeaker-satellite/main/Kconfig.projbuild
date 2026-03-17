@@ -1,0 +1,54 @@
+menu "ReSpeaker Satellite"
+
+config SATELLITE_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    help
+        Local Wi-Fi SSID used by the satellite device.
+
+config SATELLITE_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    help
+        Local Wi-Fi password. Keep it in local sdkconfig, not in git.
+
+config SATELLITE_WS_URL
+    string "Voice server WebSocket URL"
+    default ""
+    help
+        Example: ws://192.168.18.228:8765/ws
+
+config SATELLITE_DEVICE_ID
+    string "Device ID"
+    default "respeaker-satellite"
+    help
+        Stable identifier sent in the hello handshake.
+
+config SATELLITE_AUTH_TOKEN
+    string "Voice server auth token"
+    default ""
+    help
+        Optional shared secret for ws_server authentication.
+
+config SATELLITE_WAKE_WORD
+    string "Fixed wake word"
+    default "小鸭小鸭"
+    help
+        Reserved for local metadata. The current firmware build uses an official WakeNet model
+        compiled for "小鸭小鸭", regardless of this local string.
+
+config SATELLITE_PING_INTERVAL_SEC
+    int "WebSocket ping interval (seconds)"
+    range 5 300
+    default 20
+    help
+        Ping cadence once the WebSocket is connected.
+
+config SATELLITE_MANUAL_TEST_CAPTURE_MS
+    int "Manual serial test capture duration (milliseconds)"
+    range 1000 15000
+    default 4000
+    help
+        Duration of microphone uplink when the serial 'w' test command is used.
+
+endmenu

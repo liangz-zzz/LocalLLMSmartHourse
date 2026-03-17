@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import queue
-import re
 import subprocess
-import sys
+import asyncio
 import tempfile
 import threading
 import time
@@ -16,20 +14,25 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except ImportError:  # pragma: no cover - exercised only in environments without local audio deps
+    sd = None
 
 from .agent_client import AgentClient
+from .common import (
+    PROCESS_BLOCK_SIZE,
+    PROCESS_SAMPLE_RATE,
+    build_resampler,
+    clean_user_text,
+    match_short_phrase,
+    normalize_for_match,
+    resample_block,
+)
 from .config import AppConfig, load_config
-from .devices import DeviceCatalog
 from .log import Logger
-from .speech import compose_speech
-from .stt_whisper import WhisperStt
-from .tts_piper import PiperTts
-from .vad_silero import SileroVad
-from .wake_vosk import VoskWakeWord
-
-PROCESS_SAMPLE_RATE = 16000
-PROCESS_BLOCK_SIZE = 512
+from .remote_server import run_ws_server
 
 
 class AudioIn:
@@ -42,6 +45,8 @@ class AudioIn:
         self._stream: Optional[sd.InputStream] = None
 
     def start(self) -> None:
+        if sd is None:
+            raise SystemExit("sounddevice is required for local audio input; install backend/services/voice-satellite/requirements.txt")
         device = resolve_device(sd.query_devices(), self.input_device, kind="input")
         self.logger.info({"msg": "audio.input.open", "sample_rate": self.sample_rate, "block_size": self.block_size, "device": device})
         self._stream = sd.InputStream(
@@ -209,6 +214,8 @@ def resolve_device(devices: List[dict], selector: Optional[Any], *, kind: str) -
 
 
 def list_audio_devices() -> None:
+    if sd is None:
+        raise SystemExit("sounddevice is required to list local audio devices")
     devices = sd.query_devices()
     hostapis = sd.query_hostapis()
     print("Audio devices:")
@@ -230,6 +237,9 @@ def play_beep(cfg: AppConfig, logger: Logger) -> None:
         backend = "pulse" if os.environ.get("PULSE_SERVER") else "sounddevice"
     if backend == "pulse":
         _play_beep_pulse(tone, sr, logger)
+        return
+    if sd is None:
+        logger.warn({"msg": "beep.skipped", "error": "sounddevice_not_installed"})
         return
     try:
         device = resolve_device(sd.query_devices(), cfg.audio.output_device, kind="output")
@@ -254,25 +264,6 @@ def _play_beep_pulse(tone: np.ndarray, sample_rate: int, logger: Logger) -> None
             logger.warn({"msg": "beep.pulse_failed", "error": err})
 
 
-def _build_resampler(in_len: int, out_len: int) -> Optional[tuple[np.ndarray, np.ndarray]]:
-    if in_len == out_len:
-        return None
-    if in_len <= 1 or out_len <= 1:
-        return None
-    x_old = np.linspace(0.0, float(in_len - 1), num=in_len, dtype=np.float32)
-    x_new = np.linspace(0.0, float(in_len - 1), num=out_len, dtype=np.float32)
-    return (x_old, x_new)
-
-
-def _resample_block(block: np.ndarray, resampler: Optional[tuple[np.ndarray, np.ndarray]]) -> np.ndarray:
-    if resampler is None:
-        return block
-    x_old, x_new = resampler
-    y = np.interp(x_new, x_old, block.astype(np.float32))
-    y = np.clip(y, -32768, 32767).astype(np.int16)
-    return y
-
-
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="voice-satellite", description="Offline voice satellite for smart-house-agent.")
     parser.add_argument("--config", help="Path to YAML config.")
@@ -287,6 +278,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     cfg = load_config(args.config)
     logger = Logger(cfg.runtime.log_level)
+
+    if cfg.mode == "ws_server":
+        return asyncio.run(run_ws_server(cfg, logger))
+
+    from .devices import DeviceCatalog
+    from .speech import compose_speech
+    from .stt_whisper import WhisperStt
+    from .tts_piper import PiperTts
+    from .vad_silero import SileroVad
+    from .wake_vosk import VoskWakeWord
 
     input_backend = str(cfg.audio.input_backend or "sounddevice").lower()
     if input_backend == "auto":
@@ -313,7 +314,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "process_block": process_block,
             }
         )
-    resampler = _build_resampler(capture_block, process_block)
+    resampler = build_resampler(capture_block, process_block)
 
     # Core components
     wake = VoskWakeWord(model_path=cfg.wake.vosk.model_path, phrases=cfg.wake.phrases, sample_rate=process_rate, logger=logger)
@@ -374,7 +375,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     awaiting_first_utterance = False
                 continue
 
-            block = _resample_block(block, resampler)
+            block = resample_block(block, resampler)
 
             if now < ignore_until:
                 continue
@@ -523,37 +524,3 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     finally:
         audio.stop()
-
-
-_re_space = re.compile(r"\\s+")
-_re_trim_punct = re.compile(r"^[\\s\\u3000\\.,!?，。！？、；;：:]+|[\\s\\u3000\\.,!?，。！？、；;：:]+$")
-_re_punct_any = re.compile(r"[\\u3000\\.,!?，。！？、；;：:]+")
-
-
-def clean_user_text(text: str) -> str:
-    t = (text or "").strip()
-    t = _re_trim_punct.sub("", t)
-    # Keep internal spaces for non-Chinese; only collapse consecutive whitespace.
-    t = _re_space.sub(" ", t).strip()
-    return t
-
-
-def normalize_for_match(text: str) -> str:
-    # For comparing short control utterances like "确认/取消".
-    t = (text or "").strip()
-    t = _re_punct_any.sub("", t)
-    t = _re_space.sub("", t)
-    return t.lower()
-
-
-def match_short_phrase(text_normalized: str, phrases_normalized: set[str], *, max_extra_chars: int = 4) -> bool:
-    if not text_normalized:
-        return False
-    if text_normalized in phrases_normalized:
-        return True
-    for p in phrases_normalized:
-        if not p:
-            continue
-        if p in text_normalized and len(text_normalized) <= len(p) + max(0, int(max_extra_chars)):
-            return True
-    return False

@@ -11,6 +11,14 @@ __pycache__/
 .env
 *.local
 
+# Firmware local config & managed artifacts
+firmware/**/managed_components/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.*
+!firmware/**/sdkconfig.defaults
+!firmware/**/sdkconfig.defaults.local.example
+firmware/**/sdkconfig.defaults.local
+
 # Editor
 .idea/
 .vscode/
@@ -22,6 +30,7 @@ deploy/mosquitto/
 deploy/data/
 tmp/
 .next/
+*.tsbuildinfo
 playwright-report/
 test-results/
 

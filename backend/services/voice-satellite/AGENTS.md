@@ -1,6 +1,10 @@
 # AGENTS – Voice Satellite (Offline Voice I/O)
 
-职责：本地语音入口（主机端常驻进程）。完成：
+职责：语音入口服务（主机端常驻进程）。支持两种模式：
+- **本地模式**：主机直接使用本地麦克风/音箱。
+- **远端卫星模式**：远端设备本地做唤醒词，通过 WebSocket 把 PCM 音频发送到主机，主机完成 VAD/STT/Agent/TTS 并回传 PCM。
+
+完成：
 - **唤醒词**（Vosk，支持配置多个短语）
 - **端点检测**（silero-vad，离线 VAD）
 - **语音转文字 STT**（Whisper，本地模型文件）
@@ -11,6 +15,7 @@
 - 运行时不访问任何云服务；仅访问本机/局域网 HTTP（默认 `localhost`）。
 - 不增加二次 LLM 调用：语音播报的“执行内容”来自 agent 的 `actions/result` 结构化结果 + 本地设备名映射（`api-gateway /devices`）。
 - 唤醒词可配置，默认 `"你好，米奇"`。
+- 远端卫星模式的主机接口是 WebSocket，当前固定音频格式为 `PCM s16le / mono / 16kHz / 512 samples per frame`。
 
 运行
 - 配置文件：`config.yaml`（参考 `config.example.yaml`），启动：

@@ -42,43 +42,49 @@
 - 与 placement 互补，提供 LLM 更丰富的上下文；`aliases` 用于同义词/别名匹配（语音/口语更友好）。
 
 ### bindings.voice_control（语音外呼控制）
-用于“Agent 主动唤醒第三方语音设备并下发命令”的配置。典型流程：`wake -> ack -> command`。
+用于“Agent 主动唤醒第三方语音设备并下发命令”或“远端语音终端直连主机 Agent”的配置。
+
+- `transport=local_tts`：典型流程是 `wake -> ack -> command`。
+- `transport=ws_satellite`：设备本地做唤醒词，随后通过 WebSocket 把 PCM 音频发给主机；主机完成 VAD/STT/Agent/TTS，再把 PCM 语音回传设备。
 
 ```json
 {
   "voice_control": {
-    "transport": "local_tts",
+    "transport": "ws_satellite",
     "priority": "prefer",
-    "audio_output": "living_room_speaker",
-    "preferred_mics": ["mic_living_room"],
-    "wake": {
-      "utterances": ["小度小度"],
-      "retries": 1,
-      "gap_ms": 600
+    "satellite": {
+      "endpoint": "ws://voice-host.local:8765/ws",
+      "device_id": "living-room-respeaker",
+      "protocol_version": "v1",
+      "input_audio": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "frame_samples": 512
+      },
+      "output_audio": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "frame_samples": 512
+      }
     },
-    "ack": {
-      "keywords": ["我在", "请说"],
-      "timeout_ms": 4000,
-      "listen_window_ms": 3000
+    "wake": {
+      "utterances": ["你好，米奇"]
     },
     "actions": {
-      "turn_on": {
-        "utterances": ["打开{device_name}"],
+      "answer": {
+        "utterances": ["请回复"],
+        "deterministic": true,
         "risk": "low"
-      },
-      "set_temperature": {
-        "utterances": ["把{device_name}调到{value}度"],
-        "slot_schema": {
-          "value": { "type": "number", "minimum": 16, "maximum": 30, "required": true }
-        },
-        "risk": "medium"
       }
     }
   }
 }
 ```
 - `wake`: 唤醒词与重试策略。
-- `ack.keywords`: 设备应答判定关键词；未命中则阻断执行并返回错误原因。
+- `satellite`: 远端语音终端与主机的 WebSocket 绑定，包含终端标识、地址和音频格式。
+- `ack.keywords`: 当 `transport=local_tts` 时，用于设备应答判定关键词；未命中则阻断执行并返回错误原因。
 - `actions`: 动作到语音模板的映射，支持参数槽位（例如 `{value}`）。
 
 ## 常见能力与状态片段

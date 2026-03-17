@@ -42,27 +42,54 @@ const voiceControlActionSpec = z.object({
   risk: z.enum(["low", "medium", "high"]).optional()
 });
 
-const voiceControlBinding = z.object({
-  transport: z.enum(["local_tts"]).optional(),
-  priority: z.enum(["prefer", "fallback"]).optional(),
-  audio_output: z.string().optional(),
-  preferred_mics: z.array(z.string().min(1)).optional(),
-  wake: z.object({
-    utterances: z.array(z.string().min(1)).min(1),
-    retries: z.number().int().min(0).optional(),
-    gap_ms: z.number().int().min(0).optional()
-  }),
-  ack: z
-    .object({
-      keywords: z.array(z.string().min(1)).optional(),
-      timeout_ms: z.number().int().min(100).optional(),
-      listen_window_ms: z.number().int().min(100).optional()
-    })
-    .optional(),
-  actions: z.record(z.string().min(1), voiceControlActionSpec).refine((value) => Object.keys(value).length > 0, {
-    message: "at least one voice action is required"
-  })
+const voiceSatelliteAudioFormat = z.object({
+  encoding: z.enum(["pcm_s16le"]).optional(),
+  sample_rate_hz: z.number().int().min(1).optional(),
+  channels: z.number().int().min(1).optional(),
+  frame_samples: z.number().int().min(1).optional()
 });
+
+const voiceSatelliteBinding = z.object({
+  endpoint: z.string().min(1),
+  device_id: z.string().min(1),
+  auth_token: z.string().optional(),
+  protocol_version: z.string().optional(),
+  input_audio: voiceSatelliteAudioFormat.optional(),
+  output_audio: voiceSatelliteAudioFormat.optional()
+});
+
+const voiceControlBinding = z
+  .object({
+    transport: z.enum(["local_tts", "ws_satellite"]).optional(),
+    priority: z.enum(["prefer", "fallback"]).optional(),
+    audio_output: z.string().optional(),
+    preferred_mics: z.array(z.string().min(1)).optional(),
+    satellite: voiceSatelliteBinding.optional(),
+    wake: z.object({
+      utterances: z.array(z.string().min(1)).min(1),
+      retries: z.number().int().min(0).optional(),
+      gap_ms: z.number().int().min(0).optional()
+    }),
+    ack: z
+      .object({
+        keywords: z.array(z.string().min(1)).optional(),
+        timeout_ms: z.number().int().min(100).optional(),
+        listen_window_ms: z.number().int().min(100).optional()
+      })
+      .optional(),
+    actions: z.record(z.string().min(1), voiceControlActionSpec).refine((value) => Object.keys(value).length > 0, {
+      message: "at least one voice action is required"
+    })
+  })
+  .superRefine((value, ctx) => {
+    if (value.transport === "ws_satellite" && !value.satellite) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "satellite binding is required when transport=ws_satellite",
+        path: ["satellite"]
+      });
+    }
+  });
 
 const bindingsSchema = z.object({
   zigbee2mqtt: zigbeeBinding.optional(),

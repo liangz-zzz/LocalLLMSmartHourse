@@ -1,10 +1,12 @@
 # Voice Satellite（离线语音入口）
 
-目标：在主机本地完成唤醒词 + 端点检测 + STT + TTS，并把文本对话交给现有 `smart-house-agent`。
+目标：在主机侧完成 VAD + STT + TTS，并把文本对话交给现有 `smart-house-agent`。服务支持：
+- `local`：主机本地麦克风/音箱模式。
+- `ws_server`：远端语音终端通过 WebSocket 发送/接收 PCM 音频，适合 `ESP32 + ReSpeaker Lite` 一类设备。
 
 ## 数据流
 
-1. **IDLE**：持续监听唤醒词（Vosk grammar）
+1. **IDLE**：持续监听唤醒词（Vosk grammar，仅 `local` 模式）
 2. 唤醒后进入 **LISTEN**：silero-vad 识别一句话的开始/结束
 3. 对该句音频做 **Whisper STT** → 得到文本
 4. 调用 `POST http://localhost:6100/v1/agent/turn`
@@ -27,7 +29,7 @@
 
 4) 复制并修改配置
 - `cp backend/services/voice-satellite/config.example.yaml backend/services/voice-satellite/config.yaml`
-- 修改 `vosk.model_path / stt.whisper_model / tts.piper_*` 等路径
+- 修改 `mode`、`vosk.model_path / stt.whisper_model / tts.piper_*` 等路径
 
 5) 启动（确保 `api-gateway / smart-house-agent` 已在本机可访问）
 - `backend/services/voice-satellite/run.sh --config backend/services/voice-satellite/config.yaml`
@@ -44,6 +46,39 @@
 
 2) 启动（profile `voice`）
 - `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.autostart.yml --profile voice up -d --build voice-satellite`
+
+## 远端卫星模式（WebSocket）
+
+当 `mode: "ws_server"` 时，主机不再打开本地麦克风/音箱，而是监听 WebSocket：
+
+- `satellite_server.host / port / path`
+- 音频格式固定为 `pcm_s16le, mono, 16kHz`
+- 每个输入帧默认按 `512 samples` 切块做流式 VAD
+
+最小消息协议：
+
+- 设备 -> 主机
+  - `hello`：`deviceId / authToken / encoding / sampleRate / channels`
+  - `wake`
+  - `audio_start`
+  - `audio_chunk`：JSON 文本帧，`data` 为 base64 编码 PCM
+  - `audio_end`
+  - `ping`
+- 主机 -> 设备
+  - `hello_ack`
+  - `listening`
+  - `transcript`
+  - `tts_start`
+  - `tts_chunk`
+  - `tts_end`
+  - `session_closed`
+  - `error`
+  - `pong`
+
+推荐接入方式：
+- 设备本地只做唤醒词和音频采集/播放。
+- 主机负责一句话的 VAD 断句、Whisper STT、Agent 调用和 Piper TTS。
+- 设备在 `wake` 之后开始上行音频；主机识别出一句话后回传 TTS 音频，设备播放即可。
 
 ## PulseAudio（Ubuntu Desktop）
 

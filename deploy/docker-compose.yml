@@ -297,6 +297,8 @@ services:
       - ../backend/services/voice-satellite:/app
       - /run/user/${LOCAL_UID:-1000}/pulse:/run/user/${LOCAL_UID:-1000}/pulse
       - ${HOME:-/home/app}/.config/pulse:/home/app/.config/pulse:ro
+    ports:
+      - "${VOICE_SATELLITE_PORT:-8765}:8765"
     # Linux ALSA device passthrough (optional). For PulseAudio/pipewire, additional config may be needed.
     devices:
       - "/dev/snd:/dev/snd"

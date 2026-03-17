@@ -10,6 +10,7 @@
 ## 目录地图
 - `backend/` 服务端代码与设备模型
 - `frontend/` Web 与未来移动端
+- `firmware/` 设备端固件（ESP32/XIAO/ReSpeaker 等）
 - `deploy/` 本地开发环境的 docker-compose、反向代理和配置样例
 - `docs/` 设计文档（架构、设备模型等）
 - `.github/workflows/` CI 配置
