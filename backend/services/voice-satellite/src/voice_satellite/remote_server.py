@@ -17,10 +17,12 @@ from .audio_types import SynthesizedAudio
 from .common import (
     PROCESS_BLOCK_SIZE,
     PROCESS_SAMPLE_RATE,
+    audio_stats,
     build_resampler,
     clean_user_text,
     match_short_phrase,
     normalize_for_match,
+    prepare_stt_audio,
     resample_block,
     split_pcm16le_blocks,
 )
@@ -78,10 +80,8 @@ class RemoteSatelliteSession:
         self.prebuffer: list[np.ndarray] = []
         self.utterance: list[np.ndarray] = []
         self.capture_blocks: list[np.ndarray] = []
-        self.pending_response_events: list[dict[str, Any]] = []
-        self.awaiting_audio_end = False
         self.speech_started = False
-        self.silence = 0
+        self.capture_max_vad_probability = 0.0
         self.pending_pcm = bytearray()
 
     async def start_session(self) -> list[dict[str, Any]]:
@@ -92,8 +92,6 @@ class RemoteSatelliteSession:
         self.wake_started_at = now
         self.last_turn_at = now
         self.awaiting_first_utterance = True
-        self.pending_response_events = []
-        self.awaiting_audio_end = False
         self._reset_recording()
         try:
             await asyncio.to_thread(self.devices.refresh)
@@ -125,8 +123,6 @@ class RemoteSatelliteSession:
             return []
         self.pending_pcm.clear()
         self.capture_blocks = []
-        self.pending_response_events = []
-        self.awaiting_audio_end = False
         return []
 
     async def ingest_audio_chunk(self, pcm_bytes: bytes) -> list[dict[str, Any]]:
@@ -135,34 +131,21 @@ class RemoteSatelliteSession:
             return timeout_events
         if self.state != "LISTEN" or not self.session_id:
             return [{"type": "error", "code": "session_not_started", "message": "wake the device before sending audio"}]
-        if self.awaiting_audio_end:
-            return []
 
         self.pending_pcm.extend(pcm_bytes)
-        events: list[dict[str, Any]] = []
         for block in split_pcm16le_blocks(self.pending_pcm, block_samples=PROCESS_BLOCK_SIZE):
             self.capture_blocks.append(block.copy())
             block_events = await self._process_block(block)
-            if any(event.get("type") in {"transcript", "tts_start", "tts_end"} for event in block_events):
-                self.pending_response_events.extend(block_events)
-                self.awaiting_audio_end = True
-                return []
-            events.extend(block_events)
-        return events
+            if block_events:
+                return block_events
+        return []
 
     async def finalize_audio(self) -> list[dict[str, Any]]:
         timeout_events = await self.tick()
         if timeout_events:
             return timeout_events
-        if self.pending_response_events and not self.capture_blocks:
-            events = list(self.pending_response_events)
-            self.pending_response_events = []
-            self.awaiting_audio_end = False
-            return events
         if self.state != "LISTEN":
             return []
-        self.pending_response_events = []
-        self.awaiting_audio_end = False
         if not self.capture_blocks:
             self._reset_recording()
             return []
@@ -182,7 +165,7 @@ class RemoteSatelliteSession:
         self.utterance = []
         self.capture_blocks = []
         self.speech_started = False
-        self.silence = 0
+        self.capture_max_vad_probability = 0.0
         self.pending_pcm.clear()
 
     def _close_session(self, *, reason: str) -> list[dict[str, Any]]:
@@ -200,14 +183,9 @@ class RemoteSatelliteSession:
         if self.awaiting_first_utterance and self.wake_started_at and (now - self.wake_started_at) * 1000 > self.cfg.wake.timeout_ms:
             return self._close_session(reason="wake_timeout")
 
-        if self.pre_roll_chunks > 0:
-            self.prebuffer.append(block)
-            if len(self.prebuffer) > self.pre_roll_chunks:
-                self.prebuffer = self.prebuffer[-self.pre_roll_chunks :]
-        else:
-            self.prebuffer = []
-
         prob = float(self._vad.probability(block))
+        if prob > self.capture_max_vad_probability:
+            self.capture_max_vad_probability = prob
         is_speech = prob >= self.cfg.vad.threshold
 
         if not self.speech_started:
@@ -215,8 +193,6 @@ class RemoteSatelliteSession:
                 self.speech_started = True
                 if self.awaiting_first_utterance:
                     self.awaiting_first_utterance = False
-                self.utterance = [*self.prebuffer, block]
-                self.silence = 0
                 self.last_turn_at = now
                 self.logger.debug(
                     {
@@ -228,43 +204,9 @@ class RemoteSatelliteSession:
                 )
             return []
 
-        self.utterance.append(block)
         if is_speech:
-            self.silence = 0
-        else:
-            self.silence += 1
-
-        if len(self.utterance) >= self.max_utt_chunks:
-            self.logger.warn(
-                {
-                    "msg": "satellite.vad.max_utterance_reached",
-                    "device_id": self.device_id,
-                    "session_id": self.session_id,
-                    "chunks": len(self.utterance),
-                }
-            )
-            self.silence = self.end_silence_chunks
-
-        if self.silence < self.end_silence_chunks:
-            return []
-
-        if len(self.utterance) < self.min_utt_chunks:
-            self.logger.debug(
-                {
-                    "msg": "satellite.vad.too_short",
-                    "device_id": self.device_id,
-                    "session_id": self.session_id,
-                    "chunks": len(self.utterance),
-                }
-            )
-            self._reset_recording()
-            return []
-
-        return await self._complete_utterance()
-
-    async def _complete_utterance(self) -> list[dict[str, Any]]:
-        pcm = np.concatenate(self.utterance).astype(np.float32) / 32768.0
-        return await self._complete_pcm(pcm)
+            self.last_turn_at = now
+        return []
 
     async def _complete_capture(self) -> list[dict[str, Any]]:
         pcm = np.concatenate(self.capture_blocks).astype(np.float32) / 32768.0
@@ -284,16 +226,26 @@ class RemoteSatelliteSession:
         self.state = "SPEAK"
         self.awaiting_first_utterance = False
         try:
-            stats = self._audio_stats(pcm)
+            stats = audio_stats(pcm)
+            stt_pcm, stt_stats = prepare_stt_audio(pcm)
             self.logger.info(
                 {
                     "msg": "satellite.audio.stats",
                     "device_id": self.device_id,
                     "session_id": self.session_id,
+                    "vad_max_probability": self.capture_max_vad_probability,
                     **stats,
                 }
             )
-            text_raw, _meta = await asyncio.to_thread(self._transcribe_blocking, pcm)
+            self.logger.debug(
+                {
+                    "msg": "satellite.audio.prepared",
+                    "device_id": self.device_id,
+                    "session_id": self.session_id,
+                    **stt_stats,
+                }
+            )
+            text_raw, _meta = await asyncio.to_thread(self._transcribe_blocking, stt_pcm)
             text_raw = clean_user_text(text_raw)
             self.logger.info(
                 {
@@ -488,15 +440,6 @@ class RemoteSatelliteSession:
             sample_width=2,
             pcm_s16le=pcm.astype(np.int16, copy=False).tobytes(),
         )
-
-    def _audio_stats(self, pcm: np.ndarray) -> dict[str, Any]:
-        if pcm.size == 0:
-            return {"samples": 0, "rms": 0.0, "peak": 0.0}
-        return {
-            "samples": int(pcm.size),
-            "rms": float(np.sqrt(np.mean(np.square(pcm, dtype=np.float32), dtype=np.float32))),
-            "peak": float(np.max(np.abs(pcm))),
-        }
 
     def _dump_debug_wav(self, pcm: np.ndarray) -> str:
         clipped = np.clip(pcm * 32768.0, -32768, 32767).astype(np.int16)

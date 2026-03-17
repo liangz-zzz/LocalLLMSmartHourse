@@ -51,4 +51,12 @@ config SATELLITE_MANUAL_TEST_CAPTURE_MS
     help
         Duration of microphone uplink when the serial 'w' test command is used.
 
+config SATELLITE_UPLINK_LEAD_IN_DISCARD_MS
+    int "Discard uplink lead-in after wake prompt (milliseconds)"
+    range 0 1000
+    default 250
+    help
+        Drops the first slice of microphone audio after the local wake prompt so the
+        host does not see prompt tail or wake-residual noise as the start of speech.
+
 endmenu

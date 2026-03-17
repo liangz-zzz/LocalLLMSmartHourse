@@ -24,6 +24,7 @@ from voice_satellite.config import (  # noqa: E402
     WakeConfig,
 )
 from voice_satellite.audio_types import SynthesizedAudio  # noqa: E402
+from voice_satellite.common import prepare_stt_audio  # noqa: E402
 from voice_satellite.remote_server import RemoteSatelliteSession  # noqa: E402
 
 
@@ -185,6 +186,40 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalized.sample_width, 2)
         self.assertGreater(len(normalized.pcm_s16le), 0)
         self.assertNotEqual(len(normalized.pcm_s16le), len(audio.pcm_s16le))
+
+    async def test_remote_session_waits_until_audio_end_before_transcribing(self) -> None:
+        cfg = make_cfg()
+        stt = FakeStt(["打开客厅主灯"])
+        session = RemoteSatelliteSession(
+            device_id="living-room-respeaker",
+            cfg=cfg,
+            logger=type("L", (), {"info": lambda *a, **k: None, "debug": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
+            devices=FakeDevices(),
+            agent=FakeAgent({"type": "answer", "message": "ok"}),
+            stt=stt,
+            tts=FakeTts(),
+            vad_factory=lambda: FakeVad([0.9, 0.9, 0.1, 0.1]),
+        )
+
+        await session.start_session()
+        pcm = (np.ones(512 * 4, dtype=np.int16) * 1024).tobytes()
+        events = await session.ingest_audio_chunk(pcm)
+
+        self.assertEqual(events, [])
+        self.assertEqual(stt.texts, ["打开客厅主灯"])
+
+        await session.finalize_audio()
+        self.assertEqual(stt.texts, [])
+
+    def test_prepare_stt_audio_removes_dc_and_normalizes(self) -> None:
+        audio = np.linspace(-0.1, 0.12, num=1600, dtype=np.float32) + 0.2
+        prepared, stats = prepare_stt_audio(audio)
+
+        self.assertEqual(prepared.dtype, np.float32)
+        self.assertLess(abs(float(prepared.mean())), 1e-3)
+        self.assertGreater(float(stats["peak"]), 0.3)
+        self.assertLessEqual(float(stats["peak"]), 1.0)
+        self.assertGreaterEqual(float(stats["gain"]), 1.0)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,44 @@ def split_pcm16le_blocks(buffer: bytearray, *, block_samples: int = PROCESS_BLOC
     return blocks
 
 
+def audio_stats(samples: np.ndarray) -> dict[str, float | int]:
+    if samples.size == 0:
+        return {"samples": 0, "rms": 0.0, "peak": 0.0, "dc": 0.0, "clip_fraction": 0.0}
+    samples_f32 = samples.astype(np.float32, copy=False).reshape(-1)
+    peak = float(np.max(np.abs(samples_f32)))
+    return {
+        "samples": int(samples_f32.size),
+        "rms": float(np.sqrt(np.mean(np.square(samples_f32), dtype=np.float32))),
+        "peak": peak,
+        "dc": float(np.mean(samples_f32, dtype=np.float32)),
+        "clip_fraction": float(np.mean(np.abs(samples_f32) >= 0.999)),
+    }
+
+
+def prepare_stt_audio(
+    samples: np.ndarray,
+    *,
+    target_peak: float = 0.72,
+    min_peak_for_boost: float = 0.08,
+    max_gain: float = 3.0,
+) -> tuple[np.ndarray, dict[str, float | int]]:
+    pcm = samples.astype(np.float32, copy=False).reshape(-1)
+    if pcm.size == 0:
+        return pcm, {"gain": 1.0, **audio_stats(pcm)}
+
+    dc = float(np.mean(pcm, dtype=np.float32))
+    pcm = pcm - dc
+    peak = float(np.max(np.abs(pcm)))
+    gain = 1.0
+    if peak > 0.98:
+        gain = min(gain, 0.95 / peak)
+    elif peak >= min_peak_for_boost:
+        gain = min(max_gain, target_peak / peak)
+
+    pcm = np.clip(pcm * gain, -1.0, 1.0).astype(np.float32, copy=False)
+    return pcm, {"gain": float(gain), **audio_stats(pcm)}
+
+
 def clean_user_text(text: str) -> str:
     t = (text or "").strip()
     t = _re_trim_punct.sub("", t)

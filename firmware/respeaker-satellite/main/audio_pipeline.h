@@ -18,6 +18,7 @@ int satellite_audio_get_uplink_gain(void);
 esp_err_t satellite_audio_set_uplink_channel_index(int channel_index);
 esp_err_t satellite_audio_set_uplink_gain(int gain);
 esp_err_t satellite_audio_read_uplink_frame(int16_t *samples, size_t sample_count, TickType_t timeout_ticks);
+esp_err_t satellite_audio_discard_uplink_ms(uint32_t duration_ms);
 esp_err_t satellite_audio_capture_stream_ms(uint32_t duration_ms,
                                             satellite_audio_uplink_sink_t sink,
                                             void *user_ctx);

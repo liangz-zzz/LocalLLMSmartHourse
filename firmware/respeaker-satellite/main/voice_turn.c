@@ -52,6 +52,11 @@ static void satellite_voice_turn_task(void *arg) {
     goto done;
   }
 
+  err = satellite_audio_discard_uplink_ms(SATELLITE_UPLINK_LEAD_IN_DISCARD_MS);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "uplink lead-in discard failed: %s", esp_err_to_name(err));
+  }
+
   err = satellite_audio_capture_stream_ms(SATELLITE_MANUAL_TEST_CAPTURE_MS, satellite_voice_turn_uplink_sink, NULL);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "capture stream failed: %s", esp_err_to_name(err));

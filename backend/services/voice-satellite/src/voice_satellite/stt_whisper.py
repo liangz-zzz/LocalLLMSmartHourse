@@ -41,7 +41,9 @@ class WhisperStt:
             task="transcribe",
             fp16=fp16,
             verbose=False,
+            temperature=0.0,
+            condition_on_previous_text=False,
+            initial_prompt="以下是中文智能家居语音指令转写。",
         )
         text = str(result.get("text") or "").strip()
         return text, result
-

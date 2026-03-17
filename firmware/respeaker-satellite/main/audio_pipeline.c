@@ -362,6 +362,49 @@ esp_err_t satellite_audio_read_uplink_frame(int16_t *samples, size_t sample_coun
   return err;
 }
 
+esp_err_t satellite_audio_discard_uplink_ms(uint32_t duration_ms) {
+  if (!s_audio_ready) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (duration_ms == 0) {
+    return ESP_OK;
+  }
+  if (!s_uplink_mutex) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (xSemaphoreTake(s_uplink_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    return ESP_ERR_TIMEOUT;
+  }
+
+  uint8_t raw_frames[4096];
+  uint32_t frames_budget = (SATELLITE_I2S_SAMPLE_RATE_HZ * duration_ms) / 1000;
+  uint32_t frames_discarded = 0;
+
+  while (frames_discarded < frames_budget) {
+    size_t bytes_wanted = sizeof(raw_frames);
+    size_t frames_remaining = frames_budget - frames_discarded;
+    size_t remaining_bytes = frames_remaining * sizeof(int32_t) * SATELLITE_I2S_CHANNELS;
+    if (remaining_bytes < bytes_wanted) {
+      bytes_wanted = remaining_bytes;
+    }
+
+    size_t bytes_read = 0;
+    esp_err_t err = i2s_read(s_i2s_port, raw_frames, bytes_wanted, &bytes_read, pdMS_TO_TICKS(200));
+    if (err != ESP_OK) {
+      xSemaphoreGive(s_uplink_mutex);
+      return err;
+    }
+    if (bytes_read == 0) {
+      continue;
+    }
+    frames_discarded += bytes_read / (sizeof(int32_t) * SATELLITE_I2S_CHANNELS);
+  }
+
+  xSemaphoreGive(s_uplink_mutex);
+  ESP_LOGI(TAG, "discarded uplink lead-in: %ums", (unsigned int)duration_ms);
+  return ESP_OK;
+}
+
 esp_err_t satellite_audio_capture_stream_ms(uint32_t duration_ms,
                                             satellite_audio_uplink_sink_t sink,
                                             void *user_ctx) {
