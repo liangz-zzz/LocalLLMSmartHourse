@@ -14,6 +14,7 @@ static const char *TAG = "satellite_wifi";
 
 static EventGroupHandle_t s_wifi_events;
 static bool s_wifi_connected = false;
+static bool s_wifi_ever_connected = false;
 static int s_retry_count = 0;
 static esp_event_handler_instance_t s_wifi_any_id_handler;
 static esp_event_handler_instance_t s_ip_got_ip_handler;
@@ -34,8 +35,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
     s_wifi_connected = false;
+    s_retry_count++;
+    if (s_wifi_ever_connected) {
+      ESP_LOGW(TAG, "wifi disconnected after startup, retry=%d", s_retry_count);
+      esp_wifi_connect();
+      return;
+    }
     if (s_retry_count < 5) {
-      s_retry_count++;
       ESP_LOGW(TAG, "wifi disconnected, retry=%d", s_retry_count);
       esp_wifi_connect();
       return;
@@ -47,6 +53,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
   if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     s_wifi_connected = true;
+    s_wifi_ever_connected = true;
     s_retry_count = 0;
     ESP_LOGI(TAG, "wifi connected, ip=" IPSTR, IP2STR(&event->ip_info.ip));
     xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);

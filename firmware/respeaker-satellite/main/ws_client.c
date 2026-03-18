@@ -32,15 +32,31 @@ static size_t s_rx_capacity = 0;
 static size_t s_rx_expected_len = 0;
 static QueueHandle_t s_message_queue = NULL;
 static SemaphoreHandle_t s_send_mutex = NULL;
+static SemaphoreHandle_t s_reconnect_mutex = NULL;
 
 typedef struct {
   char *payload;
   size_t len;
 } satellite_ws_message_job_t;
 
+static void satellite_ws_reset_rx_buffer(void);
 static esp_err_t satellite_ws_send_json(cJSON *root);
 static void satellite_ws_clear_message_queue(void);
 static void satellite_ws_message_worker(void *arg);
+static void satellite_ws_mark_disconnected(const char *reason);
+
+static void satellite_ws_mark_disconnected(const char *reason) {
+  bool was_connected = s_connected;
+  s_connected = false;
+  satellite_ws_reset_rx_buffer();
+  satellite_ws_clear_message_queue();
+  if (was_connected && s_connection_handler) {
+    s_connection_handler(false, s_handler_ctx);
+  }
+  if (reason && reason[0]) {
+    ESP_LOGW(TAG, "transport marked disconnected: %s", reason);
+  }
+}
 
 static void satellite_ws_reset_rx_buffer(void) {
   free(s_rx_buffer);
@@ -112,6 +128,10 @@ static esp_err_t satellite_ws_send_simple_message(const char *type) {
 }
 
 static esp_err_t satellite_ws_send_json(cJSON *root) {
+  if (!s_client) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
   char *payload = cJSON_PrintUnformatted(root);
   if (!payload) {
     return ESP_ERR_NO_MEM;
@@ -120,6 +140,17 @@ static esp_err_t satellite_ws_send_json(cJSON *root) {
     cJSON_free(payload);
     return ESP_ERR_TIMEOUT;
   }
+
+  if (!s_connected || !esp_websocket_client_is_connected(s_client)) {
+    if (s_send_mutex) {
+      xSemaphoreGive(s_send_mutex);
+    }
+    cJSON_free(payload);
+    satellite_ws_mark_disconnected("pre-send connection check failed");
+    satellite_ws_reconnect();
+    return ESP_ERR_INVALID_STATE;
+  }
+
   int rc = esp_websocket_client_send_text(s_client, payload, strlen(payload), SATELLITE_WS_SEND_TIMEOUT);
   if (s_send_mutex) {
     xSemaphoreGive(s_send_mutex);
@@ -127,6 +158,8 @@ static esp_err_t satellite_ws_send_json(cJSON *root) {
   cJSON_free(payload);
   if (rc <= 0) {
     ESP_LOGW(TAG, "websocket send failed: rc=%d", rc);
+    satellite_ws_mark_disconnected("send_text returned failure");
+    satellite_ws_reconnect();
     return ESP_FAIL;
   }
   return ESP_OK;
@@ -160,6 +193,12 @@ esp_err_t satellite_ws_register_handlers(satellite_ws_message_handler_t message_
   if (!s_send_mutex) {
     s_send_mutex = xSemaphoreCreateMutex();
     if (!s_send_mutex) {
+      return ESP_ERR_NO_MEM;
+    }
+  }
+  if (!s_reconnect_mutex) {
+    s_reconnect_mutex = xSemaphoreCreateMutex();
+    if (!s_reconnect_mutex) {
       return ESP_ERR_NO_MEM;
     }
   }
@@ -198,12 +237,7 @@ static void websocket_event_handler(void *handler_args,
       }
       break;
     case WEBSOCKET_EVENT_DISCONNECTED:
-      s_connected = false;
-      satellite_ws_reset_rx_buffer();
-      satellite_ws_clear_message_queue();
-      if (s_connection_handler) {
-        s_connection_handler(false, s_handler_ctx);
-      }
+      satellite_ws_mark_disconnected("event disconnected");
       ESP_LOGW(TAG, "disconnected from ws server");
       break;
     case WEBSOCKET_EVENT_DATA:
@@ -280,6 +314,39 @@ esp_err_t satellite_ws_start(void) {
     return ESP_FAIL;
   }
   return ESP_OK;
+}
+
+esp_err_t satellite_ws_reconnect(void) {
+  if (!s_client) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (s_reconnect_mutex && xSemaphoreTake(s_reconnect_mutex, SATELLITE_WS_SEND_LOCK_TIMEOUT) != pdTRUE) {
+    return ESP_ERR_TIMEOUT;
+  }
+
+  if (esp_websocket_client_is_connected(s_client)) {
+    s_connected = true;
+    if (s_reconnect_mutex) {
+      xSemaphoreGive(s_reconnect_mutex);
+    }
+    return ESP_OK;
+  }
+
+  satellite_ws_mark_disconnected("reconnect requested");
+  ESP_LOGW(TAG, "attempting websocket reconnect");
+  esp_err_t stop_err = esp_websocket_client_stop(s_client);
+  if (stop_err != ESP_OK) {
+    ESP_LOGW(TAG, "websocket stop before reconnect returned: %s", esp_err_to_name(stop_err));
+  }
+  esp_err_t start_err = esp_websocket_client_start(s_client);
+  if (start_err != ESP_OK) {
+    ESP_LOGE(TAG, "websocket restart failed: %s", esp_err_to_name(start_err));
+  }
+
+  if (s_reconnect_mutex) {
+    xSemaphoreGive(s_reconnect_mutex);
+  }
+  return start_err;
 }
 
 esp_err_t satellite_ws_send_ping(void) {
@@ -374,4 +441,13 @@ esp_err_t satellite_ws_send_audio_end(void) {
   return satellite_ws_send_simple_message("audio_end");
 }
 
-bool satellite_ws_is_connected(void) { return s_connected; }
+bool satellite_ws_is_connected(void) {
+  if (!s_client || !s_connected) {
+    return false;
+  }
+  if (!esp_websocket_client_is_connected(s_client)) {
+    satellite_ws_mark_disconnected("state check mismatch");
+    return false;
+  }
+  return true;
+}

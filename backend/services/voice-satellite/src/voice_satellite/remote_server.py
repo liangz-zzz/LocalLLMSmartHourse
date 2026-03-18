@@ -454,6 +454,7 @@ class RemoteSatelliteSession:
 
 async def run_ws_server(cfg: AppConfig, logger: Logger) -> int:
     from websockets.legacy.server import serve
+    from websockets.exceptions import ConnectionClosed
     from .stt_whisper import WhisperStt
     from .tts_piper import PiperTts
 
@@ -503,108 +504,119 @@ async def run_ws_server(cfg: AppConfig, logger: Logger) -> int:
         logger.info({"msg": "satellite.connection.open", "remote": str(remote), "path": path})
         watchdog_task = asyncio.create_task(watchdog())
         try:
-            async for raw in websocket:
-                if isinstance(raw, bytes):
-                    await send_event({"type": "error", "code": "binary_not_supported", "message": "send JSON text frames only"})
-                    continue
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    await send_event({"type": "error", "code": "invalid_json", "message": "message must be valid JSON"})
-                    continue
-                if not isinstance(msg, dict):
-                    await send_event({"type": "error", "code": "invalid_message", "message": "message must be an object"})
-                    continue
-
-                msg_type = str(msg.get("type") or "").strip()
-                if session is None:
-                    if msg_type != "hello":
-                        await send_event({"type": "error", "code": "hello_required", "message": "send hello before other messages"})
-                        await websocket.close(code=1008, reason="hello required")
-                        return
-                    device_id = str(msg.get("deviceId") or "").strip()
-                    if not device_id:
-                        await send_event({"type": "error", "code": "missing_device_id", "message": "hello.deviceId is required"})
-                        await websocket.close(code=1008, reason="missing device id")
-                        return
-                    auth_token = str(msg.get("authToken") or "")
-                    if cfg.satellite_server.auth_token and auth_token != cfg.satellite_server.auth_token:
-                        await send_event({"type": "error", "code": "auth_failed", "message": "invalid auth token"})
-                        await websocket.close(code=1008, reason="auth failed")
-                        return
-                    sample_rate = int(msg.get("sampleRate") or PROCESS_SAMPLE_RATE)
-                    encoding = str(msg.get("encoding") or "pcm_s16le").strip().lower()
-                    channels = int(msg.get("channels") or 1)
-                    if sample_rate != PROCESS_SAMPLE_RATE or channels != 1 or encoding != "pcm_s16le":
-                        await send_event(
-                            {
-                                "type": "error",
-                                "code": "unsupported_audio_format",
-                                "message": "expected mono 16kHz pcm_s16le audio",
-                            }
-                        )
-                        await websocket.close(code=1008, reason="unsupported audio format")
-                        return
-                    session = RemoteSatelliteSession(
-                        device_id=device_id,
-                        cfg=cfg,
-                        logger=logger,
-                        devices=devices,
-                        agent=agent,
-                        stt=stt,
-                        tts=tts,
-                        stt_lock=stt_lock,
-                    )
-                    logger.info({"msg": "satellite.hello", "device_id": device_id, "remote": str(remote)})
-                    await send_event(
-                        {
-                            "type": "hello_ack",
-                            "deviceId": device_id,
-                            "sessionIdleTimeoutMs": cfg.runtime.session_idle_timeout_ms,
-                            "audioFormat": {
-                                "encoding": "pcm_s16le",
-                                "sampleRate": PROCESS_SAMPLE_RATE,
-                                "channels": 1,
-                                "frameSamples": PROCESS_BLOCK_SIZE,
-                            },
-                        }
-                    )
-                    continue
-
-                if msg_type == "ping":
-                    await send_event({"type": "pong", "deviceId": session.device_id, "ts": int(time.time() * 1000)})
-                    continue
-                if msg_type == "debug_tts":
-                    text = str(msg.get("text") or "这是网络语音播报测试。").strip() or "这是网络语音播报测试。"
-                    if not session.session_id:
-                        session.session_id = f"voice-{uuid.uuid4().hex[:8]}"
-                    events = await session._build_tts_events(text, turn_type="debug")
-                    events.extend(session._close_session(reason="debug_tts"))
-                    await send_events(events)
-                    continue
-                if msg_type == "wake":
-                    await send_events(await session.start_session())
-                    continue
-                if msg_type == "audio_start":
-                    await send_events(await session.begin_capture())
-                    continue
-                if msg_type == "audio_end":
-                    await send_events(await session.finalize_audio())
-                    continue
-                if msg_type == "audio_chunk":
-                    data = msg.get("data")
-                    if not isinstance(data, str) or not data:
-                        await send_event({"type": "error", "code": "missing_audio", "message": "audio_chunk.data is required"})
+            try:
+                async for raw in websocket:
+                    if isinstance(raw, bytes):
+                        await send_event({"type": "error", "code": "binary_not_supported", "message": "send JSON text frames only"})
                         continue
                     try:
-                        pcm_bytes = base64.b64decode(data, validate=True)
-                    except Exception:
-                        await send_event({"type": "error", "code": "invalid_audio", "message": "audio_chunk.data must be base64"})
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        await send_event({"type": "error", "code": "invalid_json", "message": "message must be valid JSON"})
                         continue
-                    await send_events(await session.ingest_audio_chunk(pcm_bytes))
-                    continue
+                    if not isinstance(msg, dict):
+                        await send_event({"type": "error", "code": "invalid_message", "message": "message must be an object"})
+                        continue
 
-                await send_event({"type": "error", "code": "unsupported_message", "message": f"unsupported type: {msg_type or '<empty>'}"})
+                    msg_type = str(msg.get("type") or "").strip()
+                    if session is None:
+                        if msg_type != "hello":
+                            await send_event({"type": "error", "code": "hello_required", "message": "send hello before other messages"})
+                            await websocket.close(code=1008, reason="hello required")
+                            return
+                        device_id = str(msg.get("deviceId") or "").strip()
+                        if not device_id:
+                            await send_event({"type": "error", "code": "missing_device_id", "message": "hello.deviceId is required"})
+                            await websocket.close(code=1008, reason="missing device id")
+                            return
+                        auth_token = str(msg.get("authToken") or "")
+                        if cfg.satellite_server.auth_token and auth_token != cfg.satellite_server.auth_token:
+                            await send_event({"type": "error", "code": "auth_failed", "message": "invalid auth token"})
+                            await websocket.close(code=1008, reason="auth failed")
+                            return
+                        sample_rate = int(msg.get("sampleRate") or PROCESS_SAMPLE_RATE)
+                        encoding = str(msg.get("encoding") or "pcm_s16le").strip().lower()
+                        channels = int(msg.get("channels") or 1)
+                        if sample_rate != PROCESS_SAMPLE_RATE or channels != 1 or encoding != "pcm_s16le":
+                            await send_event(
+                                {
+                                    "type": "error",
+                                    "code": "unsupported_audio_format",
+                                    "message": "expected mono 16kHz pcm_s16le audio",
+                                }
+                            )
+                            await websocket.close(code=1008, reason="unsupported audio format")
+                            return
+                        session = RemoteSatelliteSession(
+                            device_id=device_id,
+                            cfg=cfg,
+                            logger=logger,
+                            devices=devices,
+                            agent=agent,
+                            stt=stt,
+                            tts=tts,
+                            stt_lock=stt_lock,
+                        )
+                        logger.info({"msg": "satellite.hello", "device_id": device_id, "remote": str(remote)})
+                        await send_event(
+                            {
+                                "type": "hello_ack",
+                                "deviceId": device_id,
+                                "sessionIdleTimeoutMs": cfg.runtime.session_idle_timeout_ms,
+                                "audioFormat": {
+                                    "encoding": "pcm_s16le",
+                                    "sampleRate": PROCESS_SAMPLE_RATE,
+                                    "channels": 1,
+                                    "frameSamples": PROCESS_BLOCK_SIZE,
+                                },
+                            }
+                        )
+                        continue
+
+                    if msg_type == "ping":
+                        await send_event({"type": "pong", "deviceId": session.device_id, "ts": int(time.time() * 1000)})
+                        continue
+                    if msg_type == "debug_tts":
+                        text = str(msg.get("text") or "这是网络语音播报测试。").strip() or "这是网络语音播报测试。"
+                        if not session.session_id:
+                            session.session_id = f"voice-{uuid.uuid4().hex[:8]}"
+                        events = await session._build_tts_events(text, turn_type="debug")
+                        events.extend(session._close_session(reason="debug_tts"))
+                        await send_events(events)
+                        continue
+                    if msg_type == "wake":
+                        await send_events(await session.start_session())
+                        continue
+                    if msg_type == "audio_start":
+                        await send_events(await session.begin_capture())
+                        continue
+                    if msg_type == "audio_end":
+                        await send_events(await session.finalize_audio())
+                        continue
+                    if msg_type == "audio_chunk":
+                        data = msg.get("data")
+                        if not isinstance(data, str) or not data:
+                            await send_event({"type": "error", "code": "missing_audio", "message": "audio_chunk.data is required"})
+                            continue
+                        try:
+                            pcm_bytes = base64.b64decode(data, validate=True)
+                        except Exception:
+                            await send_event({"type": "error", "code": "invalid_audio", "message": "audio_chunk.data must be base64"})
+                            continue
+                        await send_events(await session.ingest_audio_chunk(pcm_bytes))
+                        continue
+
+                    await send_event({"type": "error", "code": "unsupported_message", "message": f"unsupported type: {msg_type or '<empty>'}"})
+            except ConnectionClosed as exc:
+                logger.info(
+                    {
+                        "msg": "satellite.connection.closed_ungracefully",
+                        "remote": str(remote),
+                        "device_id": getattr(session, "device_id", None),
+                        "code": getattr(exc, "code", None),
+                        "reason": getattr(exc, "reason", None),
+                    }
+                )
         finally:
             watchdog_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

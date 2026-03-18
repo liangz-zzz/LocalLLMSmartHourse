@@ -19,13 +19,21 @@ static void ping_task(void *arg) {
   (void)arg;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(SATELLITE_PING_INTERVAL_SEC * 1000));
-    if (satellite_ws_is_connected()) {
-      esp_err_t err = satellite_ws_send_ping();
-      if (err == ESP_OK) {
-        ESP_LOGI(TAG, "ping sent");
-      } else {
-        ESP_LOGW(TAG, "ping failed: %s", esp_err_to_name(err));
+    if (!satellite_wifi_is_connected()) {
+      continue;
+    }
+    if (!satellite_ws_is_connected()) {
+      esp_err_t err = satellite_ws_reconnect();
+      if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ws reconnect failed: %s", esp_err_to_name(err));
       }
+      continue;
+    }
+    esp_err_t err = satellite_ws_send_ping();
+    if (err == ESP_OK) {
+      ESP_LOGI(TAG, "ping sent");
+    } else {
+      ESP_LOGW(TAG, "ping failed: %s", esp_err_to_name(err));
     }
   }
 }

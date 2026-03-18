@@ -59,4 +59,47 @@ config SATELLITE_UPLINK_LEAD_IN_DISCARD_MS
         Drops the first slice of microphone audio after the local wake prompt so the
         host does not see prompt tail or wake-residual noise as the start of speech.
 
+config SATELLITE_FOLLOW_UP_ENABLED
+    bool "Enable wake-free follow-up turns after TTS"
+    default y
+    help
+        Keeps the current session open after a reply and starts a short local
+        listening window so the next user utterance does not need a wake word.
+
+config SATELLITE_FOLLOW_UP_COOLDOWN_MS
+    int "Follow-up cooldown after TTS (milliseconds)"
+    range 0 1500
+    default 250
+    depends on SATELLITE_FOLLOW_UP_ENABLED
+    help
+        Wait time after TTS playback ends before the device starts its follow-up
+        speech detector. This helps avoid speaker tail being mistaken for a new turn.
+
+config SATELLITE_FOLLOW_UP_LISTEN_MS
+    int "Follow-up local listen window (milliseconds)"
+    range 1000 15000
+    default 6000
+    depends on SATELLITE_FOLLOW_UP_ENABLED
+    help
+        Maximum time to wait for the next user utterance without requiring the
+        wake word again.
+
+config SATELLITE_FOLLOW_UP_CAPTURE_MS
+    int "Follow-up capture duration once speech starts (milliseconds)"
+    range 1000 15000
+    default 4500
+    depends on SATELLITE_FOLLOW_UP_ENABLED
+    help
+        Fixed capture window for the follow-up turn after local speech start
+        has been detected.
+
+config SATELLITE_FOLLOW_UP_RMS_THRESHOLD
+    int "Follow-up speech detection RMS threshold"
+    range 100 12000
+    default 1200
+    depends on SATELLITE_FOLLOW_UP_ENABLED
+    help
+        RMS threshold on post-gain int16 samples used to decide that the user has
+        started speaking during the follow-up window.
+
 endmenu

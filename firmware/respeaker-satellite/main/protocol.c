@@ -9,6 +9,8 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "mbedtls/base64.h"
+#include "satellite_config.h"
+#include "voice_turn.h"
 
 static const char *TAG = "satellite_proto";
 
@@ -178,7 +180,29 @@ static esp_err_t satellite_protocol_handle_tts_end(cJSON *root) {
   s_state.playing_tts = false;
   s_state.listening = true;
   ESP_LOGI(TAG, "tts_end: turn=%s text=%s", satellite_protocol_safe_text(turn_type), satellite_protocol_safe_text(text));
-  return satellite_audio_playback_end();
+  esp_err_t err = satellite_audio_playback_end();
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  if (SATELLITE_FOLLOW_UP_ENABLED &&
+      s_state.session_id[0] &&
+      turn_type &&
+      strcmp(turn_type, "exit") != 0 &&
+      strcmp(turn_type, "debug") != 0) {
+    err = satellite_voice_turn_start_follow_up("tts_end");
+    if (err == ESP_ERR_INVALID_STATE) {
+      ESP_LOGD(TAG, "follow-up listen window skipped because voice turn is already busy");
+      return ESP_OK;
+    }
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "failed to start follow-up listen window: %s", esp_err_to_name(err));
+      return err;
+    }
+    ESP_LOGI(TAG, "follow-up listen window armed for session=%s", satellite_protocol_safe_text(s_state.session_id));
+  }
+
+  return ESP_OK;
 }
 
 static esp_err_t satellite_protocol_handle_session_closed(cJSON *root) {

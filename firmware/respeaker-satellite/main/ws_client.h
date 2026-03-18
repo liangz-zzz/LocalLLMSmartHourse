@@ -13,6 +13,7 @@ esp_err_t satellite_ws_register_handlers(satellite_ws_message_handler_t message_
                                          satellite_ws_connection_handler_t connection_handler,
                                          void *user_ctx);
 esp_err_t satellite_ws_start(void);
+esp_err_t satellite_ws_reconnect(void);
 esp_err_t satellite_ws_send_ping(void);
 esp_err_t satellite_ws_send_wake(void);
 esp_err_t satellite_ws_send_debug_tts(const char *text);
