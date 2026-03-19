@@ -1,4 +1,4 @@
-FROM python:3.10-bookworm
+FROM nvcr.io/nvidia/pytorch:24.10-py3
 
 ARG LOCAL_UID=1000
 ARG LOCAL_GID=1000
@@ -42,12 +42,19 @@ RUN groupadd -g 1000 app \
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
-ARG TORCH_VERSION=2.2.2+cpu
-ARG TORCHAUDIO_VERSION=2.2.2+cpu
-RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-    "torch==${TORCH_VERSION}" \
-    "torchaudio==${TORCHAUDIO_VERSION}"
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN PIP_CONFIG_FILE=/dev/null pip install --no-cache-dir --index-url https://pypi.org/simple \
+    numpy==1.26.4 \
+    "PyYAML>=6.0.1" \
+    "requests>=2.31.0" \
+    "sounddevice>=0.4.6" \
+    "vosk>=0.3.45" \
+    "websockets>=12.0,<13.0" \
+    "onnxruntime>=1.17,<2.0" \
+    more-itertools \
+    tiktoken \
+  && PIP_CONFIG_FILE=/dev/null pip install --no-cache-dir --index-url https://pypi.org/simple --no-deps \
+    silero-vad==6.2.1 \
+    openai-whisper==20250625
 
 USER app
 

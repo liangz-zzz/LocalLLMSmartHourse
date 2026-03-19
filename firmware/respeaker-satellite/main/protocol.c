@@ -19,11 +19,13 @@ typedef struct {
   bool hello_acked;
   bool listening;
   bool playing_tts;
+  volatile bool capture_stop_requested;
   int session_idle_timeout_ms;
   int audio_sample_rate_hz;
   int audio_channels;
   int audio_frame_samples;
   char session_id[64];
+  char capture_stop_reason[32];
 } satellite_protocol_state_t;
 
 static satellite_protocol_state_t s_state;
@@ -75,7 +77,9 @@ static bool satellite_protocol_get_bool(cJSON *root, const char *field, bool fal
 static void satellite_protocol_reset_session(void) {
   s_state.listening = false;
   s_state.playing_tts = false;
+  s_state.capture_stop_requested = false;
   s_state.session_id[0] = '\0';
+  s_state.capture_stop_reason[0] = '\0';
 }
 
 static esp_err_t satellite_protocol_handle_hello_ack(cJSON *root) {
@@ -105,6 +109,8 @@ static esp_err_t satellite_protocol_handle_listening(cJSON *root) {
   int wake_timeout_ms = satellite_protocol_get_int(root, "wakeTimeoutMs", 0);
   satellite_protocol_copy_string(s_state.session_id, sizeof(s_state.session_id), session_id);
   s_state.listening = true;
+  s_state.capture_stop_requested = false;
+  s_state.capture_stop_reason[0] = '\0';
   ESP_LOGI(TAG,
            "session listening: session_id=%s wake_timeout_ms=%d",
            satellite_protocol_safe_text(s_state.session_id),
@@ -213,6 +219,17 @@ static esp_err_t satellite_protocol_handle_session_closed(cJSON *root) {
   return ESP_OK;
 }
 
+static esp_err_t satellite_protocol_handle_stop_capture(cJSON *root) {
+  const char *reason = satellite_protocol_get_string(root, "reason");
+  satellite_protocol_copy_string(s_state.capture_stop_reason, sizeof(s_state.capture_stop_reason), reason);
+  s_state.capture_stop_requested = true;
+  ESP_LOGI(TAG,
+           "stop_capture requested: session_id=%s reason=%s",
+           satellite_protocol_safe_text(s_state.session_id),
+           satellite_protocol_safe_text(s_state.capture_stop_reason));
+  return ESP_OK;
+}
+
 static esp_err_t satellite_protocol_handle_error(cJSON *root) {
   const char *code = satellite_protocol_get_string(root, "code");
   const char *message = satellite_protocol_get_string(root, "message");
@@ -232,6 +249,23 @@ esp_err_t satellite_protocol_init(void) {
 bool satellite_protocol_is_ready(void) { return s_state.transport_connected && s_state.hello_acked; }
 
 bool satellite_protocol_is_listening(void) { return s_state.listening; }
+
+void satellite_protocol_clear_stop_capture(void) {
+  s_state.capture_stop_requested = false;
+  s_state.capture_stop_reason[0] = '\0';
+}
+
+bool satellite_protocol_consume_stop_capture(char *reason, size_t reason_len) {
+  if (!s_state.capture_stop_requested) {
+    return false;
+  }
+  s_state.capture_stop_requested = false;
+  if (reason && reason_len > 0) {
+    satellite_protocol_copy_string(reason, reason_len, s_state.capture_stop_reason);
+  }
+  s_state.capture_stop_reason[0] = '\0';
+  return true;
+}
 
 void satellite_protocol_handle_ws_connection(bool connected, void *user_ctx) {
   (void)user_ctx;
@@ -290,6 +324,8 @@ void satellite_protocol_handle_ws_message(const char *payload, size_t len, void 
     err = satellite_protocol_handle_tts_end(root);
   } else if (strcmp(msg_type, "session_closed") == 0) {
     err = satellite_protocol_handle_session_closed(root);
+  } else if (strcmp(msg_type, "stop_capture") == 0) {
+    err = satellite_protocol_handle_stop_capture(root);
   } else if (strcmp(msg_type, "error") == 0) {
     err = satellite_protocol_handle_error(root);
   } else {

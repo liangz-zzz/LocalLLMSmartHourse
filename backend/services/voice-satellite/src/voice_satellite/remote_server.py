@@ -33,6 +33,7 @@ from .speech import compose_speech
 
 TTS_CHUNK_BYTES = 4096
 TTS_CHUNK_PACING_SEC = TTS_CHUNK_BYTES / float(PROCESS_SAMPLE_RATE * 2)
+WAIT_AUDIO_END_TIMEOUT_MS = 2000
 
 
 class RemoteSatelliteSession:
@@ -81,7 +82,13 @@ class RemoteSatelliteSession:
         self.utterance: list[np.ndarray] = []
         self.capture_blocks: list[np.ndarray] = []
         self.speech_started = False
+        self.silence_chunks = 0
         self.capture_max_vad_probability = 0.0
+        self.capture_started_at = 0.0
+        self.speech_started_at = 0.0
+        self.stop_requested = False
+        self.stop_requested_at = 0.0
+        self.stop_reason = ""
         self.pending_pcm = bytearray()
 
     async def start_session(self) -> list[dict[str, Any]]:
@@ -93,10 +100,21 @@ class RemoteSatelliteSession:
         self.last_turn_at = now
         self.awaiting_first_utterance = True
         self._reset_recording()
-        try:
-            await asyncio.to_thread(self.devices.refresh)
-        except Exception as exc:
-            self.logger.warn({"msg": "devices.refresh.failed", "device_id": self.device_id, "error": str(exc)})
+        refresh_started = False
+        if hasattr(self.devices, "refresh_in_background"):
+            try:
+                refresh_started = bool(self.devices.refresh_in_background())
+            except Exception as exc:
+                self.logger.warn({"msg": "devices.refresh.schedule_failed", "device_id": self.device_id, "error": str(exc)})
+        self.logger.info(
+            {
+                "msg": "satellite.session.listening",
+                "device_id": self.device_id,
+                "session_id": self.session_id,
+                "wake_to_listening_ms": 0,
+                "devices_refresh_started": refresh_started,
+            }
+        )
         return [
             {
                 "type": "listening",
@@ -107,13 +125,33 @@ class RemoteSatelliteSession:
         ]
 
     async def tick(self) -> list[dict[str, Any]]:
-        if self.state != "LISTEN" or not self.session_id:
+        if self.state not in ("LISTEN", "WAIT_AUDIO_END") or not self.session_id:
             return []
         now = time.monotonic()
-        if self.awaiting_first_utterance and self.wake_started_at and (now - self.wake_started_at) * 1000 > self.cfg.wake.timeout_ms:
+        if self.state == "WAIT_AUDIO_END" and self.stop_requested_at and (now - self.stop_requested_at) * 1000 > WAIT_AUDIO_END_TIMEOUT_MS:
+            self.logger.warn(
+                {
+                    "msg": "satellite.audio_end.timeout",
+                    "device_id": self.device_id,
+                    "session_id": self.session_id,
+                    "wait_audio_end_ms": int((now - self.stop_requested_at) * 1000),
+                    "reason": self.stop_reason or "unknown",
+                }
+            )
+            return [
+                {
+                    "type": "error",
+                    "deviceId": self.device_id,
+                    "sessionId": self.session_id,
+                    "code": "audio_end_timeout",
+                    "message": "device did not finish capture after stop_capture",
+                },
+                *self._close_session(reason="audio_end_timeout"),
+            ]
+        if self.state == "LISTEN" and self.awaiting_first_utterance and self.wake_started_at and (now - self.wake_started_at) * 1000 > self.cfg.wake.timeout_ms:
             self.logger.info({"msg": "satellite.wake_timeout", "device_id": self.device_id, "session_id": self.session_id})
             return self._close_session(reason="wake_timeout")
-        if self.last_turn_at and (now - self.last_turn_at) * 1000 > self.cfg.runtime.session_idle_timeout_ms:
+        if self.state == "LISTEN" and self.last_turn_at and (now - self.last_turn_at) * 1000 > self.cfg.runtime.session_idle_timeout_ms:
             self.logger.info({"msg": "satellite.session_timeout", "device_id": self.device_id, "session_id": self.session_id})
             return self._close_session(reason="idle_timeout")
         return []
@@ -121,33 +159,43 @@ class RemoteSatelliteSession:
     async def begin_capture(self) -> list[dict[str, Any]]:
         if self.state != "LISTEN":
             return []
+        self.capture_started_at = time.monotonic()
         self.pending_pcm.clear()
         self.capture_blocks = []
+        self.capture_max_vad_probability = 0.0
+        self.speech_started = False
+        self.silence_chunks = 0
+        self.speech_started_at = 0.0
+        self.stop_requested = False
+        self.stop_requested_at = 0.0
+        self.stop_reason = ""
         return []
 
     async def ingest_audio_chunk(self, pcm_bytes: bytes) -> list[dict[str, Any]]:
         timeout_events = await self.tick()
         if timeout_events:
             return timeout_events
-        if self.state != "LISTEN" or not self.session_id:
+        if self.state not in ("LISTEN", "WAIT_AUDIO_END") or not self.session_id:
             return [{"type": "error", "code": "session_not_started", "message": "wake the device before sending audio"}]
 
         self.pending_pcm.extend(pcm_bytes)
         for block in split_pcm16le_blocks(self.pending_pcm, block_samples=PROCESS_BLOCK_SIZE):
             self.capture_blocks.append(block.copy())
-            block_events = await self._process_block(block)
-            if block_events:
-                return block_events
+            if not self.stop_requested:
+                block_events = await self._process_block(block)
+                if block_events:
+                    return block_events
         return []
 
     async def finalize_audio(self) -> list[dict[str, Any]]:
         timeout_events = await self.tick()
         if timeout_events:
             return timeout_events
-        if self.state != "LISTEN":
+        if self.state not in ("LISTEN", "WAIT_AUDIO_END"):
             return []
         if not self.capture_blocks:
             self._reset_recording()
+            self.state = "LISTEN"
             return []
         if not self.speech_started:
             self.logger.warn(
@@ -158,6 +206,16 @@ class RemoteSatelliteSession:
                     "chunks": len(self.capture_blocks),
                 }
             )
+        if self.stop_requested and self.stop_requested_at:
+            self.logger.info(
+                {
+                    "msg": "satellite.audio_end.received",
+                    "device_id": self.device_id,
+                    "session_id": self.session_id,
+                    "reason": self.stop_reason or "unknown",
+                    "wait_audio_end_ms": int((time.monotonic() - self.stop_requested_at) * 1000),
+                }
+            )
         return await self._complete_capture()
 
     def _reset_recording(self) -> None:
@@ -165,7 +223,13 @@ class RemoteSatelliteSession:
         self.utterance = []
         self.capture_blocks = []
         self.speech_started = False
+        self.silence_chunks = 0
         self.capture_max_vad_probability = 0.0
+        self.capture_started_at = 0.0
+        self.speech_started_at = 0.0
+        self.stop_requested = False
+        self.stop_requested_at = 0.0
+        self.stop_reason = ""
         self.pending_pcm.clear()
 
     def _close_session(self, *, reason: str) -> list[dict[str, Any]]:
@@ -194,6 +258,8 @@ class RemoteSatelliteSession:
                 if self.awaiting_first_utterance:
                     self.awaiting_first_utterance = False
                 self.last_turn_at = now
+                self.speech_started_at = now
+                self.silence_chunks = 0
                 self.logger.debug(
                     {
                         "msg": "satellite.vad.start",
@@ -206,7 +272,42 @@ class RemoteSatelliteSession:
 
         if is_speech:
             self.last_turn_at = now
+            self.silence_chunks = 0
+        else:
+            self.silence_chunks += 1
+
+        if len(self.capture_blocks) >= self.max_utt_chunks:
+            return self._request_stop_capture(reason="max_utterance_reached")
+        if self.silence_chunks >= self.end_silence_chunks:
+            return self._request_stop_capture(reason="vad_end")
         return []
+
+    def _request_stop_capture(self, *, reason: str) -> list[dict[str, Any]]:
+        if self.stop_requested or self.state != "LISTEN" or not self.session_id:
+            return []
+        now = time.monotonic()
+        self.stop_requested = True
+        self.stop_requested_at = now
+        self.stop_reason = reason
+        self.state = "WAIT_AUDIO_END"
+        self.logger.info(
+            {
+                "msg": "satellite.stop_capture.requested",
+                "device_id": self.device_id,
+                "session_id": self.session_id,
+                "reason": reason,
+                "speech_to_stop_capture_ms": int((now - self.speech_started_at) * 1000) if self.speech_started_at else 0,
+                "captured_chunks": len(self.capture_blocks),
+            }
+        )
+        return [
+            {
+                "type": "stop_capture",
+                "deviceId": self.device_id,
+                "sessionId": self.session_id,
+                "reason": reason,
+            }
+        ]
 
     async def _complete_capture(self) -> list[dict[str, Any]]:
         pcm = np.concatenate(self.capture_blocks).astype(np.float32) / 32768.0
@@ -245,13 +346,16 @@ class RemoteSatelliteSession:
                     **stt_stats,
                 }
             )
+            stt_started_at = time.monotonic()
             text_raw, _meta = await asyncio.to_thread(self._transcribe_blocking, stt_pcm)
+            stt_ms = int((time.monotonic() - stt_started_at) * 1000)
             text_raw = clean_user_text(text_raw)
             self.logger.info(
                 {
                     "msg": "satellite.stt.done",
                     "device_id": self.device_id,
                     "session_id": self.session_id,
+                    "stt_ms": stt_ms,
                     "text": text_raw,
                 }
             )
@@ -292,13 +396,16 @@ class RemoteSatelliteSession:
                 events.extend(self._close_session(reason="exit"))
                 return events
 
+            agent_started_at = time.monotonic()
             out = await asyncio.to_thread(self.agent.turn, session_id=self.session_id or "", text=text_raw, confirm=confirm)
+            agent_ms = int((time.monotonic() - agent_started_at) * 1000)
             speech = compose_speech(out, self.devices.by_id)
             self.logger.info(
                 {
                     "msg": "satellite.agent.reply",
                     "device_id": self.device_id,
                     "session_id": self.session_id,
+                    "agent_ms": agent_ms,
                     "type": out.get("type"),
                     "speech": speech,
                 }
@@ -381,7 +488,19 @@ class RemoteSatelliteSession:
             return self.stt.transcribe(pcm, sample_rate=PROCESS_SAMPLE_RATE)
 
     async def _build_tts_events(self, text: str, *, turn_type: str) -> list[dict[str, Any]]:
+        started_at = time.monotonic()
         audio = await asyncio.to_thread(self.tts.synthesize, text)
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        self.logger.info(
+            {
+                "msg": "satellite.tts.ready",
+                "device_id": self.device_id,
+                "session_id": self.session_id,
+                "turn_type": turn_type,
+                "tts_synth_ms": elapsed_ms,
+                "first_tts_chunk_ms": elapsed_ms,
+            }
+        )
         return self._audio_to_events(audio, text=text, turn_type=turn_type)
 
     def _audio_to_events(self, audio: SynthesizedAudio, *, text: str, turn_type: str) -> list[dict[str, Any]]:

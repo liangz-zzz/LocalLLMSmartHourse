@@ -21,6 +21,7 @@
 2) 创建 Python venv 并安装依赖
 - `python -m venv .venv && source .venv/bin/activate`
 - `pip install -r backend/services/voice-satellite/requirements.txt`
+- 若启用仓库默认配置，Whisper 需要跑在 `cuda`；Docker 方式默认要求可用 NVIDIA GPU。
 
 3) 准备本地模型/资源（必须离线可用）
 - Vosk 中文模型目录：例如 `vosk-model-small-cn-0.22/`
@@ -39,6 +40,7 @@
 说明：
 - 仍需你自行准备本地模型文件（Vosk/Whisper/Piper voice），并在 `config.yaml` 指向容器内路径（建议统一挂载到 `/models`）。
 - 需要宿主可用的音频设备；compose 已尝试透传 `/dev/snd`（ALSA）。如果你用 PipeWire/PulseAudio，可能需要额外配置。
+- 当前 Docker 配置对 `voice-satellite` 启用了 `gpus: all`，并要求容器内 `torch.cuda.is_available()` 为真；否则服务会直接失败。
 
 1) 准备 `config.yaml`
 - `cp backend/services/voice-satellite/config.example.yaml backend/services/voice-satellite/config.yaml`
@@ -62,7 +64,8 @@
   - `wake`
   - `audio_start`
   - `audio_chunk`：JSON 文本帧，`data` 为 base64 编码 PCM
-  - `audio_end`
+- `audio_end`
+- 主机在一句话尾静音判定后还会向设备发送 `stop_capture`，设备应尽快停止 uplink 并回 `audio_end`
   - `ping`
 - 主机 -> 设备
   - `hello_ack`

@@ -52,7 +52,7 @@ class VadConfig:
 class SttConfig:
     whisper_model: str = ""
     language: str = "zh"
-    device: str = "cpu"  # cpu | cuda
+    device: str = "cuda"  # cuda only
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ def load_config(path: str) -> AppConfig:
     stt = SttConfig(
         whisper_model=str(stt_raw.get("whisper_model") or ""),
         language=str(stt_raw.get("language") or "zh"),
-        device=str(stt_raw.get("device") or "cpu"),
+        device=str(stt_raw.get("device") or "cuda"),
     )
 
     tts_raw = raw.get("tts") or {}

@@ -66,6 +66,10 @@ class FakeDevices:
     def refresh(self) -> None:
         self.refreshed = True
 
+    def refresh_in_background(self) -> bool:
+        self.refresh()
+        return True
+
 
 class FakeAgent:
     def __init__(self, out: dict):
@@ -127,10 +131,11 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(devices.refreshed)
 
         pcm = (np.ones(512 * 4, dtype=np.int16) * 1024).tobytes()
-        await session.ingest_audio_chunk(pcm)
+        stop_events = await session.ingest_audio_chunk(pcm)
         events = await session.finalize_audio()
         event_types = [event["type"] for event in events]
 
+        self.assertEqual(stop_events[0]["type"], "stop_capture")
         self.assertIn("transcript", event_types)
         self.assertIn("tts_start", event_types)
         self.assertIn("tts_chunk", event_types)
@@ -156,10 +161,11 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
 
         await session.start_session()
         pcm = (np.ones(512 * 4, dtype=np.int16) * 512).tobytes()
-        await session.ingest_audio_chunk(pcm)
+        stop_events = await session.ingest_audio_chunk(pcm)
         events = await session.finalize_audio()
         event_types = [event["type"] for event in events]
 
+        self.assertEqual(stop_events[0]["type"], "stop_capture")
         self.assertIn("session_closed", event_types)
         self.assertEqual(agent.calls, [])
         self.assertEqual(session.state, "IDLE")
@@ -205,8 +211,9 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         pcm = (np.ones(512 * 4, dtype=np.int16) * 1024).tobytes()
         events = await session.ingest_audio_chunk(pcm)
 
-        self.assertEqual(events, [])
+        self.assertEqual(events[0]["type"], "stop_capture")
         self.assertEqual(stt.texts, ["打开客厅主灯"])
+        self.assertEqual(session.state, "WAIT_AUDIO_END")
 
         await session.finalize_audio()
         self.assertEqual(stt.texts, [])

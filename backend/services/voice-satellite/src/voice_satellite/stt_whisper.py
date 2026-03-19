@@ -17,11 +17,27 @@ class WhisperStt:
     logger: Logger | None = None
 
     def __post_init__(self) -> None:
+        if str(self.device or "").strip().lower() != "cuda":
+            raise RuntimeError("voice-satellite requires stt.device=cuda")
+
+        import torch
         import whisper
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("voice-satellite requires CUDA, but torch.cuda.is_available() is false")
+
+        gpu_name = "unknown"
+        with_device = getattr(torch.cuda, "current_device", None)
+        get_name = getattr(torch.cuda, "get_device_name", None)
+        if callable(with_device) and callable(get_name):
+            try:
+                gpu_name = str(get_name(with_device()))
+            except Exception:
+                gpu_name = "unknown"
 
         ref = self.model_ref
         if os.path.exists(ref):
-            self.logger and self.logger.info({"msg": "whisper.load", "path": ref, "device": self.device})
+            self.logger and self.logger.info({"msg": "whisper.load", "path": ref, "device": self.device, "gpu": gpu_name})
         else:
             # If a model name is used, whisper will download weights (not offline).
             self.logger and self.logger.warn({"msg": "whisper.model_not_found_path", "ref": ref, "hint": "Use a local .pt path for offline runtime."})

@@ -33,6 +33,9 @@ async function main() {
   const mcp = await createMcpClient({ config, logger });
   const llm = createLlmClient({ config, logger });
   const agent = createAgent({ config, logger, sessionStore, mcp, llm });
+  agent
+    .prewarm?.({ reason: "startup" })
+    .catch((err) => logger.warn({ msg: "agent.prewarm.startup_failed", error: err?.message || String(err) }));
 
   const app = buildServer({ config, logger, agent });
   await app.listen({ port: config.port, host: "0.0.0.0" });
@@ -43,4 +46,3 @@ main().catch((err) => {
   console.error(err?.stack || String(err));
   process.exit(1);
 });
-

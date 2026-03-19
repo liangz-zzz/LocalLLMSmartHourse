@@ -145,9 +145,13 @@ static esp_err_t satellite_voice_turn_wait_for_follow_up_speech(int16_t *pre_rol
   return ESP_ERR_NOT_FOUND;
 }
 
-static esp_err_t satellite_voice_turn_stream_follow_up_capture(size_t pre_roll_frames_count,
-                                                               const int16_t *pre_roll_frames,
-                                                               uint32_t capture_ms) {
+static bool satellite_voice_turn_consume_stop_capture(char *reason, size_t reason_len) {
+  return satellite_protocol_consume_stop_capture(reason, reason_len);
+}
+
+static esp_err_t satellite_voice_turn_stream_capture(size_t pre_roll_frames_count,
+                                                     const int16_t *pre_roll_frames,
+                                                     uint32_t capture_ms) {
   uint32_t seq = 0;
   uint32_t samples_sent = 0;
   uint32_t sample_budget = (SATELLITE_AUDIO_SAMPLE_RATE_HZ * capture_ms) / 1000U;
@@ -160,12 +164,23 @@ static esp_err_t satellite_voice_turn_stream_follow_up_capture(size_t pre_roll_f
     return err;
   }
 
-  err = satellite_voice_turn_send_frames(pre_roll_frames, pre_roll_frames_count, &seq, &samples_sent, sample_budget);
-  if (err != ESP_OK) {
-    return err;
+  if (pre_roll_frames_count > 0 && pre_roll_frames) {
+    err = satellite_voice_turn_send_frames(pre_roll_frames, pre_roll_frames_count, &seq, &samples_sent, sample_budget);
+    if (err != ESP_OK) {
+      return err;
+    }
   }
 
   while (samples_sent < sample_budget) {
+    char stop_reason[32] = {0};
+    if (satellite_voice_turn_consume_stop_capture(stop_reason, sizeof(stop_reason))) {
+      ESP_LOGI(TAG,
+               "stop_capture consumed: reason=%s samples_sent=%u",
+               stop_reason[0] ? stop_reason : "<empty>",
+               (unsigned int)samples_sent);
+      return ESP_OK;
+    }
+
     int16_t frame[SATELLITE_AUDIO_FRAME_SAMPLES];
     err = satellite_audio_read_uplink_frame(frame, SATELLITE_AUDIO_FRAME_SAMPLES, pdMS_TO_TICKS(200));
     if (err == ESP_ERR_TIMEOUT) {
@@ -222,10 +237,11 @@ static void satellite_voice_turn_task(void *arg) {
       ESP_LOGW(TAG, "uplink lead-in discard failed: %s", esp_err_to_name(err));
     }
 
-    err = satellite_audio_capture_stream_ms(
-        request && request->capture_ms ? request->capture_ms : SATELLITE_MANUAL_TEST_CAPTURE_MS,
-        satellite_voice_turn_uplink_sink,
-        NULL);
+    satellite_protocol_clear_stop_capture();
+    err = satellite_voice_turn_stream_capture(
+        0,
+        NULL,
+        request && request->capture_ms ? request->capture_ms : SATELLITE_WAKE_CAPTURE_MAX_MS);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "capture stream failed: %s", esp_err_to_name(err));
     }
@@ -255,10 +271,11 @@ static void satellite_voice_turn_task(void *arg) {
       goto done;
     }
 
-    err = satellite_voice_turn_stream_follow_up_capture(
+    satellite_protocol_clear_stop_capture();
+    err = satellite_voice_turn_stream_capture(
         pre_roll_count,
         pre_roll_frames,
-        request->capture_ms ? request->capture_ms : SATELLITE_FOLLOW_UP_CAPTURE_MS);
+        request->capture_ms ? request->capture_ms : SATELLITE_FOLLOW_UP_CAPTURE_MAX_MS);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "follow-up capture stream failed: %s", esp_err_to_name(err));
     }
@@ -315,9 +332,13 @@ static esp_err_t satellite_voice_turn_start_internal(const char *source,
 }
 
 esp_err_t satellite_voice_turn_start(const char *source) {
+  return satellite_voice_turn_start_internal(source, true, false, SATELLITE_WAKE_CAPTURE_MAX_MS);
+}
+
+esp_err_t satellite_voice_turn_start_manual(const char *source) {
   return satellite_voice_turn_start_internal(source, true, false, SATELLITE_MANUAL_TEST_CAPTURE_MS);
 }
 
 esp_err_t satellite_voice_turn_start_follow_up(const char *source) {
-  return satellite_voice_turn_start_internal(source, false, true, SATELLITE_FOLLOW_UP_CAPTURE_MS);
+  return satellite_voice_turn_start_internal(source, false, true, SATELLITE_FOLLOW_UP_CAPTURE_MAX_MS);
 }

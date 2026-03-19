@@ -24,7 +24,7 @@ wake:
 
 vad:
   threshold: 0.55
-  end_silence_ms: 700
+  end_silence_ms: 500
   pre_roll_ms: 400
   max_utterance_ms: 20000
   min_utterance_ms: 300
@@ -33,7 +33,7 @@ stt:
   # Use a local Whisper model file to keep runtime offline, e.g. "/ABS/PATH/whisper-small.pt"
   whisper_model: "/ABS/PATH/TO/whisper-small.pt"
   language: "zh"
-  device: "cpu"  # "cpu" | "cuda"
+  device: "cuda"
 
 tts:
   piper_bin: "piper"

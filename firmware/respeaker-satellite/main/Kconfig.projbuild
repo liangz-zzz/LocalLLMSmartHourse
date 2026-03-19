@@ -51,6 +51,14 @@ config SATELLITE_MANUAL_TEST_CAPTURE_MS
     help
         Duration of microphone uplink when the serial 'w' test command is used.
 
+config SATELLITE_WAKE_CAPTURE_MAX_MS
+    int "Wake capture max duration (milliseconds)"
+    range 1000 15000
+    default 6000
+    help
+        Hard cap for the real wake-word capture path. The host usually stops the
+        uplink earlier with stop_capture once VAD detects end-of-speech.
+
 config SATELLITE_UPLINK_LEAD_IN_DISCARD_MS
     int "Discard uplink lead-in after wake prompt (milliseconds)"
     range 0 1000
@@ -84,14 +92,15 @@ config SATELLITE_FOLLOW_UP_LISTEN_MS
         Maximum time to wait for the next user utterance without requiring the
         wake word again.
 
-config SATELLITE_FOLLOW_UP_CAPTURE_MS
-    int "Follow-up capture duration once speech starts (milliseconds)"
+config SATELLITE_FOLLOW_UP_CAPTURE_MAX_MS
+    int "Follow-up capture max duration once speech starts (milliseconds)"
     range 1000 15000
-    default 4500
+    default 4000
     depends on SATELLITE_FOLLOW_UP_ENABLED
     help
-        Fixed capture window for the follow-up turn after local speech start
-        has been detected.
+        Hard cap for the follow-up capture path after local speech start has
+        been detected. The host usually stops the uplink earlier with
+        stop_capture.
 
 config SATELLITE_FOLLOW_UP_RMS_THRESHOLD
     int "Follow-up speech detection RMS threshold"

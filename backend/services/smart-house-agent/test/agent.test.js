@@ -260,6 +260,59 @@ test("agent requires confirmation for medium/high risk voice actions", async () 
   assert.match(out.message, /需先确认/);
 });
 
+test("agent reuses prewarmed bootstrap facts and refills standby after the turn", async () => {
+  const events = [];
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = {
+    async listTools() {
+      return {
+        tools: [
+          { name: "devices.list", description: "list", inputSchema: { type: "object" } },
+          { name: "scenes.list", description: "scenes", inputSchema: { type: "object" } }
+        ]
+      };
+    },
+    async callTool(name) {
+      events.push(`tool:${name}`);
+      if (name === "devices.list") {
+        return { items: [{ id: "kettle_plug", name: "烧水壶插座" }], count: 1 };
+      }
+      if (name === "scenes.list") {
+        return { items: [{ id: "sleep_mode", name: "睡眠模式" }], count: 1 };
+      }
+      throw new Error(`Unhandled tool: ${name}`);
+    }
+  };
+  const llm = {
+    calls: [],
+    async chat({ messages }) {
+      events.push("llm");
+      this.calls.push(messages);
+      return {
+        choices: [{ message: { content: JSON.stringify({ type: "final", assistant: "好的。", plan: { type: "query", actions: [] } }) } }]
+      };
+    }
+  };
+
+  const agent = createAgent({
+    config: { ...baseConfig, prewarmEnabled: true, prewarmCacheTtlMs: 60_000 },
+    sessionStore,
+    mcp,
+    llm
+  });
+
+  await agent.prewarm({ reason: "test" });
+  events.length = 0;
+
+  const out = await agent.turn({ sessionId: "s_prewarm", input: "你好", confirm: false });
+
+  assert.equal(out.type, "answer");
+  assert.equal(events[0], "llm", "turn should use prewarmed devices/scenes before calling the model");
+  assert.ok(events.slice(1).includes("tool:devices.list"), "turn completion should refill standby devices.list");
+  assert.ok(events.slice(1).includes("tool:scenes.list"), "turn completion should refill standby scenes.list");
+  assert.equal(llm.calls.length, 1);
+});
+
 test("agent surfaces batch_invoke errors during confirmation (no optimistic success)", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({

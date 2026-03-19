@@ -152,7 +152,7 @@ static void satellite_manual_console_task(void *arg) {
         ESP_LOGW(TAG, "manual wake test already running");
         continue;
       }
-      esp_err_t err = satellite_voice_turn_start("manual");
+      esp_err_t err = satellite_voice_turn_start_manual("manual");
       if (err != ESP_OK) {
         ESP_LOGE(TAG, "failed to start manual wake capture task: %s", esp_err_to_name(err));
       }

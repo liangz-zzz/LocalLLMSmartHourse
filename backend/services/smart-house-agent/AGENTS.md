@@ -24,9 +24,16 @@
   - `AGENT_EXECUTION_MODE`（默认 `auto`；`auto`=默认执行、仅不确定时澄清/确认；`always_confirm`=所有写操作都需确认）
   - `SESSION_TTL_MS`（默认 3600000）
   - `SESSION_MAX_MESSAGES`（默认 30）
+  - `AGENT_PREWARM_ENABLED`（默认 `true`；启动后后台预热工具目录、`devices.list`、`scenes.list`）
+  - `AGENT_PREWARM_CACHE_TTL_MS`（默认 `30000`；待命上下文缓存 TTL）
 - 本地（容器）：
   - `npm ci`
   - `npm run dev`
 
 测试
 - `npm test`
+
+预热待命
+- 服务启动会后台预热一份“待命上下文”，缓存工具目录、设备清单和场景清单。
+- 每轮对话优先复用待命上下文，避免再同步拉一次 `devices.list` / `scenes.list`。
+- 当前语音链路里“拜拜”由 `voice-satellite` 截断，不会发到 agent；因此 agent 侧采用“每轮结束后后台补一份新的待命上下文”的方式保持下一轮可直接进入处理。

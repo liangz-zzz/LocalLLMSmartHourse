@@ -6,6 +6,11 @@ const MAX_TOOL_CALLS_PER_TURN = 16;
 
 export function createAgent({ config, logger, sessionStore, mcp, llm }) {
   let toolCatalogTextPromise = null;
+  let standbyContext = null;
+  let standbyContextPromise = null;
+  let standbyRefreshTimer = null;
+  const prewarmEnabled = config?.prewarmEnabled === true;
+  const prewarmCacheTtlMs = Math.max(1_000, Number(config?.prewarmCacheTtlMs) || 30_000);
 
   async function toolCatalogText() {
     if (toolCatalogTextPromise) return toolCatalogTextPromise;
@@ -14,8 +19,160 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       return tools
         .map((t) => `- ${t.name}: ${t.description || ""}\n  inputSchema=${JSON.stringify(t.inputSchema || {})}`)
         .join("\n");
-    })();
+    })().catch((err) => {
+      toolCatalogTextPromise = null;
+      throw err;
+    });
     return toolCatalogTextPromise;
+  }
+
+  function hasFreshStandby() {
+    return Boolean(standbyContext && Date.now() - standbyContext.createdAt < prewarmCacheTtlMs);
+  }
+
+  function hasCompleteFreshStandby() {
+    return Boolean(hasFreshStandby() && standbyContext?.toolsText && standbyContext?.deviceInventory && standbyContext?.sceneInventory);
+  }
+
+  function clearStandbyRefreshTimer() {
+    if (!standbyRefreshTimer) return;
+    clearTimeout(standbyRefreshTimer);
+    standbyRefreshTimer = null;
+  }
+
+  function scheduleStandbyRefresh() {
+    if (!prewarmEnabled) return;
+    clearStandbyRefreshTimer();
+    const delay = hasCompleteFreshStandby() ? Math.max(1_000, prewarmCacheTtlMs - 1_000) : Math.min(5_000, prewarmCacheTtlMs);
+    standbyRefreshTimer = setTimeout(() => {
+      prewarm({ reason: "ttl_refresh", force: true }).catch(() => {});
+    }, delay);
+    standbyRefreshTimer.unref?.();
+  }
+
+  function writeStandbyContext({ toolsText, deviceInventory, sceneInventory, source, reason }) {
+    if (!prewarmEnabled) return null;
+    standbyContext = {
+      createdAt: Date.now(),
+      toolsText: String(toolsText || ""),
+      deviceInventory: deviceInventory || null,
+      sceneInventory: sceneInventory || null,
+      source: String(source || "unknown"),
+      reason: String(reason || "unknown")
+    };
+    scheduleStandbyRefresh();
+    return standbyContext;
+  }
+
+  async function callReadTool(name, args = {}) {
+    try {
+      return await mcp.callTool(name, args);
+    } catch (err) {
+      return { error: "tool_execution_failed", message: err?.message || String(err) };
+    }
+  }
+
+  async function prewarm({ reason = "prewarm", force = false } = {}) {
+    if (!prewarmEnabled) return null;
+    if (!force && hasCompleteFreshStandby()) return standbyContext;
+    if (standbyContextPromise) return standbyContextPromise;
+
+    const startedAt = Date.now();
+    standbyContextPromise = (async () => {
+      try {
+        const [toolsText, deviceInventory, sceneInventory] = await Promise.all([
+          toolCatalogText(),
+          callReadTool("devices.list", {}),
+          callReadTool("scenes.list", {})
+        ]);
+
+        const next = writeStandbyContext({
+          toolsText,
+          deviceInventory: isToolError(deviceInventory) ? null : deviceInventory,
+          sceneInventory: isToolError(sceneInventory) ? null : sceneInventory,
+          source: "prewarm",
+          reason
+        });
+
+        logger?.info?.({
+          msg: "agent.prewarm.ready",
+          reason,
+          elapsed_ms: Date.now() - startedAt,
+          devices_ok: !isToolError(deviceInventory),
+          scenes_ok: !isToolError(sceneInventory),
+          device_count: Array.isArray(deviceInventory?.items) ? deviceInventory.items.length : null,
+          scene_count: Array.isArray(sceneInventory?.items) ? sceneInventory.items.length : null
+        });
+
+        return next;
+      } catch (err) {
+        logger?.warn?.({
+          msg: "agent.prewarm.failed",
+          reason,
+          elapsed_ms: Date.now() - startedAt,
+          error: err?.message || String(err)
+        });
+        throw err;
+      } finally {
+        standbyContextPromise = null;
+      }
+    })();
+
+    return standbyContextPromise;
+  }
+
+  function queuePrewarm({ reason = "prewarm", force = false } = {}) {
+    if (!prewarmEnabled) return;
+    if (!force && hasCompleteFreshStandby()) return;
+    prewarm({ reason, force }).catch(() => {});
+  }
+
+  async function bootstrapFacts({ traceId }) {
+    let snapshot = null;
+    if (prewarmEnabled) {
+      if (hasFreshStandby()) snapshot = standbyContext;
+      else if (standbyContextPromise) {
+        try {
+          snapshot = await standbyContextPromise;
+        } catch {
+          snapshot = null;
+        }
+      }
+    }
+
+    const toolsSource = snapshot?.toolsText ? "prewarm" : "live";
+    const devicesSource = snapshot?.deviceInventory ? "prewarm" : "live";
+    const scenesSource = snapshot?.sceneInventory ? "prewarm" : "live";
+
+    const [toolsText, deviceInventory, sceneInventory] = await Promise.all([
+      snapshot?.toolsText ? Promise.resolve(snapshot.toolsText) : toolCatalogText(),
+      snapshot?.deviceInventory ? Promise.resolve(snapshot.deviceInventory) : callReadTool("devices.list", {}),
+      snapshot?.sceneInventory ? Promise.resolve(snapshot.sceneInventory) : callReadTool("scenes.list", {})
+    ]);
+
+    if (prewarmEnabled) {
+      logger?.info?.({
+        msg: "agent.prewarm.use",
+        traceId,
+        tools_source: toolsSource,
+        devices_source: devicesSource,
+        scenes_source: scenesSource
+      });
+      writeStandbyContext({
+        toolsText,
+        deviceInventory: isToolError(deviceInventory) ? null : deviceInventory,
+        sceneInventory: isToolError(sceneInventory) ? null : sceneInventory,
+        source: toolsSource === "prewarm" && devicesSource === "prewarm" && scenesSource === "prewarm" ? "prewarm" : "turn",
+        reason: "turn_bootstrap"
+      });
+    }
+
+    return {
+      toolsText,
+      deviceInventory,
+      sceneInventory,
+      usedStandby: toolsSource === "prewarm" || devicesSource === "prewarm" || scenesSource === "prewarm"
+    };
   }
 
   async function turn({ sessionId, input, confirm }) {
@@ -30,6 +187,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       if (isCancel) {
         session.state.pending = null;
         await sessionStore.save(session);
+        queuePrewarm({ reason: "post_turn_cancel", force: true });
         return { traceId, sessionId: session.id, type: "canceled", message: "已取消待执行计划。" };
       }
       if (isConfirm) {
@@ -52,6 +210,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         await sessionStore.save(session);
 
         if (isToolError(exec) || !Array.isArray(exec?.results)) {
+          queuePrewarm({ reason: "post_turn_confirm_error", force: true });
           return {
             traceId,
             sessionId: session.id,
@@ -64,6 +223,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           };
         }
 
+        queuePrewarm({ reason: "post_turn_confirm", force: true });
         return {
           traceId,
           sessionId: session.id,
@@ -75,7 +235,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       }
     }
 
-    const toolsText = await toolCatalogText();
+    const { toolsText, deviceInventory, sceneInventory, usedStandby } = await bootstrapFacts({ traceId });
     const system = buildSystemPrompt({ toolsText });
     const context = buildContextPrompt({ session });
 
@@ -89,8 +249,6 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCalls = [];
     const toolCallKeys = new Set();
     const toolCache = new Map();
-    let deviceInventory = null;
-    let sceneInventory = null;
 
     // Strategy A: Always preload the full device list so the model can ground
     // deviceId selection and avoid hallucinating non-existent ids.
@@ -102,13 +260,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       toolCallKeys.add(key);
       toolCalls.push({ name, args: safeArgs });
 
-      let result;
-      try {
-        result = await mcp.callTool(name, safeArgs);
-      } catch (err) {
-        result = { error: "tool_execution_failed", message: err?.message || String(err) };
-      }
-      deviceInventory = !isToolError(result) ? result : null;
+      const result = deviceInventory;
       toolCache.set(key, result);
       messages.push({ role: "system", content: toolResultMessage({ name, result }) });
       messages.push({
@@ -125,6 +277,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
         appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
         await sessionStore.save(session);
+        queuePrewarm({ reason: "post_turn_devices_list_failed", force: usedStandby });
         return { traceId, sessionId: session.id, type: "error", error: "devices_list_failed", message: msg, toolCalls };
       }
     }
@@ -137,13 +290,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
       toolCallKeys.add(key);
       toolCalls.push({ name, args: safeArgs });
 
-      let result;
-      try {
-        result = await mcp.callTool(name, safeArgs);
-      } catch (err) {
-        result = { error: "tool_execution_failed", message: err?.message || String(err) };
-      }
-      sceneInventory = !isToolError(result) ? result : null;
+      const result = sceneInventory;
       toolCache.set(key, result);
       messages.push({ role: "system", content: toolResultMessage({ name, result }) });
       messages.push({
@@ -168,6 +315,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
         appendMessage(session, { role: "assistant", content: fallback }, config.maxMessages);
         await sessionStore.save(session);
+        queuePrewarm({ reason: "post_turn_non_json", force: usedStandby });
         return { traceId, sessionId: session.id, type: "error", message: fallback };
       }
 
@@ -247,6 +395,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
             appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
             await sessionStore.save(session);
+            queuePrewarm({ reason: "post_turn_propose", force: usedStandby });
             return { traceId, sessionId: session.id, type: "propose", planId, actions, message: msg, toolCalls };
           }
 
@@ -266,6 +415,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
             rememberExecution(session, { planId, actions, ok: false, message: msg });
             await sessionStore.save(session);
+            queuePrewarm({ reason: "post_turn_dryrun_clarify", force: usedStandby });
             return { traceId, sessionId: session.id, type: "clarify", planId, actions, message: msg, toolCalls, dryrun };
           }
 
@@ -288,6 +438,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
           await sessionStore.save(session);
 
           if (isToolError(exec) || !Array.isArray(exec?.results)) {
+            queuePrewarm({ reason: "post_turn_execute_error", force: usedStandby });
             return {
               traceId,
               sessionId: session.id,
@@ -301,6 +452,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             };
           }
 
+          queuePrewarm({ reason: "post_turn_execute", force: usedStandby });
           return { traceId, sessionId: session.id, type: "executed", planId, actions, result: exec, message: msg, toolCalls };
         }
 
@@ -308,6 +460,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
         appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
         await sessionStore.save(session);
+        queuePrewarm({ reason: "post_turn_answer", force: usedStandby });
         return { traceId, sessionId: session.id, type: parsed.kind || "answer", message: msg, toolCalls };
       }
 
@@ -327,6 +480,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
     appendMessage(session, { role: "assistant", content: fallback }, config.maxMessages);
     await sessionStore.save(session);
+    queuePrewarm({ reason: "post_turn_no_final", force: usedStandby });
     return {
       traceId,
       sessionId: session.id,
@@ -339,7 +493,7 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     };
   }
 
-  return { turn };
+  return { turn, prewarm };
 }
 
 function buildSystemPrompt({ toolsText }) {

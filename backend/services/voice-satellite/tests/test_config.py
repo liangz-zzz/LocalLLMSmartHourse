@@ -34,6 +34,7 @@ class LoadConfigTest(unittest.TestCase):
         cfg = load_config(path)
         self.assertEqual(cfg.mode, "ws_server")
         self.assertEqual(cfg.satellite_server.port, 8765)
+        self.assertEqual(cfg.stt.device, "cuda")
 
     def test_local_mode_requires_vosk_model(self) -> None:
         path = self._write(

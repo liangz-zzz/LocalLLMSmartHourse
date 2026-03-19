@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sys
 
 import numpy as np
 
@@ -12,6 +13,14 @@ class SileroVad:
 
     def __post_init__(self) -> None:
         import torch
+
+        try:
+            import torchaudio  # noqa: F401
+        except ModuleNotFoundError:
+            from . import _torchaudio_stub as torchaudio_stub
+
+            sys.modules.setdefault("torchaudio", torchaudio_stub)
+
         from silero_vad import load_silero_vad
 
         torch.set_num_threads(1)

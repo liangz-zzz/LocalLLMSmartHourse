@@ -3,6 +3,15 @@ function num(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function bool(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  return fallback;
+}
+
 export function loadConfig() {
   const sessionTtlMs = num("SESSION_TTL_MS", 60 * 60 * 1000);
   const maxMessages = num("SESSION_MAX_MESSAGES", 30);
@@ -16,6 +25,8 @@ export function loadConfig() {
     redisUrl: (process.env.REDIS_URL || "").trim(),
     sessionTtlMs,
     maxMessages,
-    executionMode: String(process.env.AGENT_EXECUTION_MODE || "auto").trim().toLowerCase()
+    executionMode: String(process.env.AGENT_EXECUTION_MODE || "auto").trim().toLowerCase(),
+    prewarmEnabled: bool("AGENT_PREWARM_ENABLED", true),
+    prewarmCacheTtlMs: num("AGENT_PREWARM_CACHE_TTL_MS", 30_000)
   };
 }

@@ -8,5 +8,7 @@
 esp_err_t satellite_protocol_init(void);
 bool satellite_protocol_is_ready(void);
 bool satellite_protocol_is_listening(void);
+void satellite_protocol_clear_stop_capture(void);
+bool satellite_protocol_consume_stop_capture(char *reason, size_t reason_len);
 void satellite_protocol_handle_ws_message(const char *payload, size_t len, void *user_ctx);
 void satellite_protocol_handle_ws_connection(bool connected, void *user_ctx);
