@@ -17,6 +17,8 @@
 - 不增加二次 LLM 调用：语音播报的“执行内容”来自 agent 的 `actions/result` 结构化结果 + 本地设备名映射（`api-gateway /devices`）。
 - 唤醒词可配置，默认 `"你好，米奇"`。
 - 远端卫星模式的主机接口是 WebSocket，当前固定音频格式为 `PCM s16le / mono / 16kHz / 512 samples per frame`。
+- ws 卫星必须先登记到共享 `devices.config.json` 的 `voice_control.mics[]`；`mic.id` 必须等于卫星 `hello.deviceId`，且必须提供 `placement.room`。
+- 远端卫星模式下，主机转发到 Agent 时会附带 `wakeSource={ transport, deviceId, placement }`，供 Agent 按唤醒设备所在房间解析省略指令。
 - 远端卫星模式下，主机侧会在 VAD 判定一句话结束后主动下发 `stop_capture`，设备收到后应尽快结束 uplink 并发送 `audio_end`。
 
 运行

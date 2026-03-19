@@ -300,6 +300,7 @@ services:
       - "audio"
     volumes:
       - ../backend/services/voice-satellite:/app
+      - ./data/config:/config:ro
       - /run/user/${LOCAL_UID:-1000}/pulse:/run/user/${LOCAL_UID:-1000}/pulse
       - ${HOME:-/home/app}/.config/pulse:/home/app/.config/pulse:ro
     ports:

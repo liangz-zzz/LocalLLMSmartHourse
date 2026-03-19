@@ -110,6 +110,64 @@ test("agent persists lastDevice and exposes it in CONTEXT_JSON for follow-ups", 
   assert.equal(ctx.lastDevice.room, "kitchen");
 });
 
+test("agent persists wakeSource context and exposes room-scoped defaults to the model", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [
+        { id: "bedroom_main_light", name: "卧室主灯", placement: { room: "bedroom", zone: "ceiling" }, capabilities: [{ action: "turn_off" }] },
+        { id: "living_room_main_light", name: "客厅主灯", placement: { room: "living_room", zone: "ceiling" }, capabilities: [{ action: "turn_off" }] }
+      ],
+      count: 2
+    }),
+    "scenes.list": async () => ({ items: [], count: 0 })
+  });
+  const llm = makeLlmStub([
+    { type: "final", assistant: "好的。", plan: { type: "query", actions: [] } },
+    { type: "final", assistant: "继续。", plan: { type: "query", actions: [] } }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  await agent.turn({
+    sessionId: "s_wake",
+    input: "把灯关了",
+    confirm: false,
+    context: {
+      wakeSource: {
+        transport: "ws_satellite",
+        deviceId: "bedroom-respeaker",
+        placement: { room: "bedroom", zone: "bedside" }
+      }
+    }
+  });
+
+  const stored = await sessionStore.getOrCreate("s_wake");
+  assert.equal(stored.state.wakeSource.deviceId, "bedroom-respeaker");
+  assert.equal(stored.state.wakeSource.placement.room, "bedroom");
+
+  const firstTurnMessages = llm.calls[0];
+  const ctxMsg = firstTurnMessages.find((m) => m.role === "system" && String(m.content || "").startsWith("CONTEXT_JSON="));
+  assert.ok(ctxMsg, "CONTEXT_JSON should be present");
+  const ctx = JSON.parse(String(ctxMsg.content).slice("CONTEXT_JSON=".length));
+  assert.equal(ctx.wakeSource.deviceId, "bedroom-respeaker");
+  assert.equal(ctx.wakeSource.placement.room, "bedroom");
+
+  const wakeScopeMsg = firstTurnMessages.find((m) => m.role === "system" && String(m.content || "").includes("\"wake_source_scope\""));
+  assert.ok(wakeScopeMsg, "wake source scope should be present");
+  const wakeScope = JSON.parse(String(wakeScopeMsg.content));
+  assert.equal(wakeScope.wake_source_scope.deviceId, "bedroom-respeaker");
+  assert.equal(wakeScope.wake_source_scope.placement.room, "bedroom");
+  assert.equal(wakeScope.room_candidates.length, 1);
+  assert.equal(wakeScope.room_candidates[0].id, "bedroom_main_light");
+
+  await agent.turn({ sessionId: "s_wake", input: "继续", confirm: false });
+  const secondTurnMessages = llm.calls[1];
+  const secondCtxMsg = secondTurnMessages.find((m) => m.role === "system" && String(m.content || "").startsWith("CONTEXT_JSON="));
+  const secondCtx = JSON.parse(String(secondCtxMsg.content).slice("CONTEXT_JSON=".length));
+  assert.equal(secondCtx.wakeSource.deviceId, "bedroom-respeaker");
+  assert.equal(secondCtx.wakeSource.placement.room, "bedroom");
+});
+
 test("agent dedupes repeated tool calls with identical args", async () => {
   const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
   const mcp = makeMcpStub({

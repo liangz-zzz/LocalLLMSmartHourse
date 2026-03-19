@@ -175,9 +175,11 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     };
   }
 
-  async function turn({ sessionId, input, confirm }) {
+  async function turn({ sessionId, input, confirm, context }) {
     const traceId = randomUUID();
     const session = await sessionStore.getOrCreate(sessionId);
+    const incomingWakeSource = normalizeWakeSource(context?.wakeSource);
+    if (incomingWakeSource) rememberWakeSource(session, incomingWakeSource);
 
     const trimmed = String(input || "").trim();
     const isConfirm = confirm || looksLikeConfirm(trimmed);
@@ -237,11 +239,11 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
 
     const { toolsText, deviceInventory, sceneInventory, usedStandby } = await bootstrapFacts({ traceId });
     const system = buildSystemPrompt({ toolsText });
-    const context = buildContextPrompt({ session });
+    const contextPrompt = buildContextPrompt({ session });
 
     const messages = [
       { role: "system", content: system },
-      { role: "system", content: context },
+      { role: "system", content: contextPrompt },
       ...session.messages.map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: trimmed }
     ];
@@ -271,6 +273,8 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
             "Use ONLY deviceId values present in the devices.list result above. Never invent device ids. If no device matches the user request, ask a clarifying question (plan.type=clarify)."
         })
       });
+      const wakeScope = buildWakeScopeMessage({ wakeSource: session.state?.wakeSource, deviceInventory: result });
+      if (wakeScope) messages.push({ role: "system", content: wakeScope });
 
       if (isToolError(result)) {
         const msg = `无法获取设备列表（${result.error}）：${String(result.message || "").trim() || "unknown error"}。`;
@@ -515,6 +519,9 @@ function buildSystemPrompt({ toolsText }) {
     "- NEVER invent device ids. deviceId must come from devices.list (or devices.get). If no match, ask a clarifying question.",
     "- NEVER invent scene ids. sceneId must come from scenes.list. If no match, ask a clarifying question.",
     '- If the user refers implicitly (e.g., "好了，可以关了") and CONTEXT_JSON.lastDevice.id is set, treat that as the target device.',
+    "- If CONTEXT_JSON.wakeSource.placement.room is set and the user does not explicitly name another room/device, treat that room as the default scope for device selection.",
+    "- If multiple matching candidates remain inside the wakeSource room, return plan.type=clarify instead of guessing.",
+    "- If the user explicitly names another room or a specific device, that overrides wakeSource.",
     "- If the user asks about current state, call devices.state/devices.get first.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
     "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",
@@ -532,6 +539,7 @@ function buildContextPrompt({ session }) {
   const ctx = {
     sessionId: session.id,
     lastDevice,
+    wakeSource: session.state?.wakeSource || null,
     lastExecution: session.state?.lastExecution || null,
     pending
   };
@@ -658,6 +666,11 @@ function rememberLastDevice(session, { deviceId, inventory, requireInventory } =
   }
 }
 
+function rememberWakeSource(session, wakeSource) {
+  if (!session.state || typeof session.state !== "object") session.state = {};
+  session.state.wakeSource = wakeSource;
+}
+
 function rememberExecution(session, { planId, actions, ok, message } = {}) {
   if (!session.state || typeof session.state !== "object") session.state = {};
   session.state.lastExecution = {
@@ -673,6 +686,32 @@ function findDeviceInInventory(inventory, id) {
   const list = inventory?.items;
   if (!Array.isArray(list)) return null;
   return list.find((d) => d && typeof d === "object" && d.id === id) || null;
+}
+
+function buildWakeScopeMessage({ wakeSource, deviceInventory }) {
+  const room = String(wakeSource?.placement?.room || "").trim();
+  if (!room || isToolError(deviceInventory) || !Array.isArray(deviceInventory?.items)) return "";
+  const roomKey = normalizeRoom(room);
+  const candidates = deviceInventory.items
+    .filter((device) => normalizeRoom(device?.placement?.room) === roomKey)
+    .map((device) => ({
+      id: device?.id || "",
+      name: device?.name || "",
+      room: device?.placement?.room || "",
+      zone: device?.placement?.zone || "",
+      actions: Array.isArray(device?.capabilities) ? device.capabilities.map((cap) => cap?.action).filter(Boolean) : []
+    }));
+
+  return JSON.stringify({
+    wake_source_scope: {
+      transport: wakeSource.transport,
+      deviceId: wakeSource.deviceId,
+      placement: wakeSource.placement
+    },
+    room_candidates: candidates,
+    instruction:
+      "Unless the user explicitly specifies another room or a unique device elsewhere, prefer candidates in wake_source_scope. If multiple candidates in that room still match, ask a clarifying question."
+  });
 }
 
 function summarizeDryrunFailure({ dryrun, actions }) {
@@ -727,6 +766,38 @@ function decideExecutionMode({ config, planType, forceConfirm = false }) {
   if (planType === "clarify") return false;
   if (planType === "propose") return false;
   return true;
+}
+
+function normalizeWakeSource(raw) {
+  if (!isPlainObject(raw)) return null;
+  const deviceId = String(raw.deviceId || "").trim();
+  if (!deviceId) return null;
+  const placement = normalizePlacement(raw.placement);
+  if (!placement.room) return null;
+  const transport = String(raw.transport || "ws_satellite").trim() || "ws_satellite";
+  return { transport, deviceId, placement };
+}
+
+function normalizePlacement(raw) {
+  if (!isPlainObject(raw)) return {};
+  const out = {};
+  for (const key of ["room", "zone", "floor", "mount", "description"]) {
+    const value = String(raw[key] || "").trim();
+    if (value) out[key] = value;
+  }
+  if (isPlainObject(raw.coordinates)) {
+    const coordinates = {};
+    for (const [key, value] of Object.entries(raw.coordinates)) {
+      if (value === undefined || value === null || value === "") continue;
+      coordinates[key] = value;
+    }
+    if (Object.keys(coordinates).length) out.coordinates = coordinates;
+  }
+  return out;
+}
+
+function normalizeRoom(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function stableStringify(value) {

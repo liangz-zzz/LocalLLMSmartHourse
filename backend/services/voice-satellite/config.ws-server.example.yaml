@@ -44,6 +44,10 @@ api_gateway:
   base_url: "http://localhost:4000"
   api_key: ""
 
+# Shared device config. ws satellites must be registered in voice_control.mics[]
+# and the mic id must match the satellite hello.deviceId.
+device_config_path: "/config/devices.config.json"
+
 agent:
   base_url: "http://localhost:6100"
   timeout_s: 30

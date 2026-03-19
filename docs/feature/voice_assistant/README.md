@@ -34,7 +34,7 @@ Satellite device
   -> WebSocket PCM uplink
   -> (host) silero-vad chunking
   -> Whisper STT -> text
-  -> POST smart-house-agent /v1/agent/turn
+  -> POST smart-house-agent /v1/agent/turn (+ wakeSource=deviceId+placement)
   -> Piper TTS -> WebSocket PCM downlink
   -> device speaker playback
 ```
@@ -43,7 +43,14 @@ Satellite device
 
 语音端只发文本给 Agent：
 - `POST http://localhost:6100/v1/agent/turn`
-- `{ "input": "<STT文本>", "sessionId": "<本次唤醒会话id>" }`
+- 本地模式：`{ "input": "<STT文本>", "sessionId": "<本次唤醒会话id>" }`
+- ws 卫星模式：`{ "input": "<STT文本>", "sessionId": "<本次唤醒会话id>", "context": { "wakeSource": { "transport": "ws_satellite", "deviceId": "<hello.deviceId>", "placement": { "room": "...", "zone": "..." } } } }`
+
+ws 卫星注册约定：
+- `voice-satellite` 的 `device_config_path` 必须指向共享 `devices.config.json`
+- `voice_control.mics[]` 既是“最近麦克风”配置，也是 ws 卫星注册表
+- `mics[].id` 必须与卫星固件上报的 `hello.deviceId` 一致，且必须配置 `placement.room`
+- 未注册卫星会在 WebSocket `hello` 阶段被拒绝，不进入后续 STT/Agent/TTS 链路
 
 语音端的播报规则：
 - `type=answer/clarify/error/canceled`：播报 `out.message`

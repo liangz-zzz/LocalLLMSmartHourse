@@ -76,8 +76,8 @@ class FakeAgent:
         self.out = out
         self.calls: list[dict] = []
 
-    def turn(self, *, session_id: str, text: str, confirm: bool) -> dict:
-        self.calls.append({"session_id": session_id, "text": text, "confirm": confirm})
+    def turn(self, *, session_id: str, text: str, confirm: bool, wake_source: dict | None = None) -> dict:
+        self.calls.append({"session_id": session_id, "text": text, "confirm": confirm, "wake_source": wake_source})
         return dict(self.out)
 
 
@@ -90,6 +90,7 @@ def make_cfg() -> AppConfig:
         stt=SttConfig(whisper_model="/models/whisper.pt", language="zh", device="cpu"),
         tts=TtsConfig(model_path="/models/piper.onnx", config_path="/models/piper.onnx.json"),
         api_gateway=ApiGatewayConfig(),
+        device_config_path="/config/devices.config.json",
         agent=AgentConfig(
             base_url="http://localhost:6100",
             timeout_s=30,
@@ -117,6 +118,7 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         tts = FakeTts()
         session = RemoteSatelliteSession(
             device_id="living-room-respeaker",
+            placement={"room": "living_room", "zone": "sofa"},
             cfg=cfg,
             logger=type("L", (), {"info": lambda *a, **k: None, "debug": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
             devices=devices,
@@ -141,6 +143,8 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("tts_chunk", event_types)
         self.assertIn("tts_end", event_types)
         self.assertEqual(agent.calls[0]["text"], "打开客厅主灯")
+        self.assertEqual(agent.calls[0]["wake_source"]["deviceId"], "living-room-respeaker")
+        self.assertEqual(agent.calls[0]["wake_source"]["placement"]["room"], "living_room")
         self.assertEqual(tts.spoken[0], "已提交执行：打开客厅主灯。好的")
         self.assertEqual(session.state, "LISTEN")
         self.assertIsNotNone(session.session_id)
@@ -150,6 +154,7 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         agent = FakeAgent({"type": "answer", "message": "不应调用"})
         session = RemoteSatelliteSession(
             device_id="living-room-respeaker",
+            placement={"room": "living_room"},
             cfg=cfg,
             logger=type("L", (), {"info": lambda *a, **k: None, "debug": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
             devices=FakeDevices(),
@@ -174,6 +179,7 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         cfg = make_cfg()
         session = RemoteSatelliteSession(
             device_id="living-room-respeaker",
+            placement={"room": "living_room"},
             cfg=cfg,
             logger=type("L", (), {"info": lambda *a, **k: None, "debug": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
             devices=FakeDevices(),
@@ -198,6 +204,7 @@ class RemoteSessionTest(unittest.IsolatedAsyncioTestCase):
         stt = FakeStt(["打开客厅主灯"])
         session = RemoteSatelliteSession(
             device_id="living-room-respeaker",
+            placement={"room": "living_room"},
             cfg=cfg,
             logger=type("L", (), {"info": lambda *a, **k: None, "debug": lambda *a, **k: None, "warn": lambda *a, **k: None, "error": lambda *a, **k: None})(),
             devices=FakeDevices(),

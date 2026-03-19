@@ -104,6 +104,7 @@ class AppConfig:
     stt: SttConfig
     tts: TtsConfig
     api_gateway: ApiGatewayConfig
+    device_config_path: str
     agent: AgentConfig
     runtime: RuntimeConfig
     satellite_server: SatelliteServerConfig
@@ -172,6 +173,7 @@ def load_config(path: str) -> AppConfig:
 
     api_raw = raw.get("api_gateway") or {}
     api_gateway = ApiGatewayConfig(base_url=str(api_raw.get("base_url") or "http://localhost:4000"), api_key=str(api_raw.get("api_key") or ""))
+    device_config_path = str(raw.get("device_config_path") or "").strip()
 
     agent_raw = raw.get("agent") or {}
     agent = AgentConfig(
@@ -214,6 +216,7 @@ def load_config(path: str) -> AppConfig:
         stt=stt,
         tts=tts,
         api_gateway=api_gateway,
+        device_config_path=device_config_path,
         agent=agent,
         runtime=runtime,
         satellite_server=satellite_server,

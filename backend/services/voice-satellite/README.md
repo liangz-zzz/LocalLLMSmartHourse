@@ -56,6 +56,7 @@
 - `satellite_server.host / port / path`
 - 音频格式固定为 `pcm_s16le, mono, 16kHz`
 - 每个输入帧默认按 `512 samples` 切块做流式 VAD
+- `device_config_path` 必须指向共享的 `devices.config.json`，其中 `voice_control.mics[]` 作为 ws 卫星注册表
 
 最小消息协议：
 
@@ -82,6 +83,8 @@
 - 设备本地只做唤醒词和音频采集/播放。
 - 主机负责一句话的 VAD 断句、Whisper STT、Agent 调用和 Piper TTS。
 - 设备在 `wake` 之后开始上行音频；主机识别出一句话后回传 TTS 音频，设备播放即可。
+- 每个 ws 卫星都必须先登记到 `voice_control.mics[]`，并满足 `mic.id == hello.deviceId` 且存在 `placement.room`；未登记的卫星会在 `hello` 阶段被拒绝。
+- 主机转发到 Agent 时会附带 `wakeSource={ transport, deviceId, placement }`，Agent 以唤醒卫星所在房间作为“把灯关了”这类省略指令的默认作用域。
 
 ## PulseAudio（Ubuntu Desktop）
 

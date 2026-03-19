@@ -21,7 +21,7 @@
 工具/样例
 - `mock-adapter.js`: 离线将 `mock-data/zigbee2mqtt` 的示例 payload 归一化为设备模型，用于无设备时的 dry-run。
 - `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以 `id`（通常等于 zigbee2mqtt 的 `friendly_name`）为键；可用 `DEVICE_CONFIG_PATH` 或 `CONFIG_DIR/devices.config.json` 指定路径（默认 `./devices.config.json`）。
-  - 可选 `voice_control` 顶层段：`defaults.ack_keywords`、`mic_selection.max_distance`、`mics[]`（用于语音设备应答监听）。
+  - 可选 `voice_control` 顶层段：`defaults.ack_keywords`、`mic_selection.max_distance`、`mics[]`（用于语音设备应答监听；同时也作为 ws 语音卫星的注册表，`mics[].id` 需与卫星 `hello.deviceId` 对齐并提供 `placement.room`）。
   - 可选 `virtual` 顶层段由 `device-simulator` 使用，适配器会忽略该段，避免误解析为设备覆盖项。
 
 运行与测试

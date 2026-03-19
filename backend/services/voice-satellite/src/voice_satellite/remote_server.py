@@ -29,6 +29,7 @@ from .common import (
 from .config import AppConfig
 from .devices import DeviceCatalog
 from .log import Logger
+from .satellite_registry import SatelliteRegistry
 from .speech import compose_speech
 
 TTS_CHUNK_BYTES = 4096
@@ -41,6 +42,7 @@ class RemoteSatelliteSession:
         self,
         *,
         device_id: str,
+        placement: dict[str, Any] | None,
         cfg: AppConfig,
         logger: Logger,
         devices: DeviceCatalog,
@@ -51,6 +53,7 @@ class RemoteSatelliteSession:
         vad_factory: Optional[Callable[[], Any]] = None,
     ):
         self.device_id = device_id
+        self.placement = dict(placement or {})
         self.cfg = cfg
         self.logger = logger
         self.devices = devices
@@ -112,6 +115,7 @@ class RemoteSatelliteSession:
                 "device_id": self.device_id,
                 "session_id": self.session_id,
                 "wake_to_listening_ms": 0,
+                "room": self.placement.get("room"),
                 "devices_refresh_started": refresh_started,
             }
         )
@@ -397,7 +401,13 @@ class RemoteSatelliteSession:
                 return events
 
             agent_started_at = time.monotonic()
-            out = await asyncio.to_thread(self.agent.turn, session_id=self.session_id or "", text=text_raw, confirm=confirm)
+            out = await asyncio.to_thread(
+                self.agent.turn,
+                session_id=self.session_id or "",
+                text=text_raw,
+                confirm=confirm,
+                wake_source=self._agent_wake_source(),
+            )
             agent_ms = int((time.monotonic() - agent_started_at) * 1000)
             speech = compose_speech(out, self.devices.by_id)
             self.logger.info(
@@ -560,6 +570,13 @@ class RemoteSatelliteSession:
             pcm_s16le=pcm.astype(np.int16, copy=False).tobytes(),
         )
 
+    def _agent_wake_source(self) -> dict[str, Any]:
+        return {
+            "transport": "ws_satellite",
+            "deviceId": self.device_id,
+            "placement": dict(self.placement),
+        }
+
     def _dump_debug_wav(self, pcm: np.ndarray) -> str:
         clipped = np.clip(pcm * 32768.0, -32768, 32767).astype(np.int16)
         path = f"/tmp/voice_satellite_{self.device_id}_{int(time.time() * 1000)}.wav"
@@ -578,6 +595,8 @@ async def run_ws_server(cfg: AppConfig, logger: Logger) -> int:
     from .tts_piper import PiperTts
 
     devices = DeviceCatalog(base_url=cfg.api_gateway.base_url, api_key=cfg.api_gateway.api_key, logger=logger)
+    registry = SatelliteRegistry(path=cfg.device_config_path, logger=logger)
+    registry.refresh_if_needed()
     agent = AgentClient(base_url=cfg.agent.base_url, timeout_s=cfg.agent.timeout_s, logger=logger)
     stt = WhisperStt(model_ref=cfg.stt.whisper_model, device=cfg.stt.device, language=cfg.stt.language, logger=logger)
     tts = PiperTts(
@@ -666,8 +685,30 @@ async def run_ws_server(cfg: AppConfig, logger: Logger) -> int:
                             )
                             await websocket.close(code=1008, reason="unsupported audio format")
                             return
+                        registration, error_code, error_message = registry.resolve(device_id)
+                        if not registration:
+                            logger.warn(
+                                {
+                                    "msg": "satellite.hello.rejected",
+                                    "device_id": device_id,
+                                    "remote": str(remote),
+                                    "code": error_code,
+                                    "message": error_message,
+                                }
+                            )
+                            await send_event(
+                                {
+                                    "type": "error",
+                                    "deviceId": device_id,
+                                    "code": error_code,
+                                    "message": error_message,
+                                }
+                            )
+                            await websocket.close(code=1008, reason=error_code or "satellite rejected")
+                            return
                         session = RemoteSatelliteSession(
                             device_id=device_id,
+                            placement=registration.placement,
                             cfg=cfg,
                             logger=logger,
                             devices=devices,
@@ -676,7 +717,14 @@ async def run_ws_server(cfg: AppConfig, logger: Logger) -> int:
                             tts=tts,
                             stt_lock=stt_lock,
                         )
-                        logger.info({"msg": "satellite.hello", "device_id": device_id, "remote": str(remote)})
+                        logger.info(
+                            {
+                                "msg": "satellite.hello",
+                                "device_id": device_id,
+                                "remote": str(remote),
+                                "room": registration.placement.get("room"),
+                            }
+                        )
                         await send_event(
                             {
                                 "type": "hello_ack",

@@ -14,8 +14,9 @@ export function buildServer({ config, agent }) {
 
     const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
     const confirm = Boolean(body.confirm);
+    const context = body?.context && typeof body.context === "object" && !Array.isArray(body.context) ? body.context : {};
 
-    const out = await agent.turn({ sessionId, input, confirm });
+    const out = await agent.turn({ sessionId, input, confirm, context });
     return reply.send(out);
   });
 
@@ -25,4 +26,3 @@ export function buildServer({ config, agent }) {
 
   return app;
 }
-
