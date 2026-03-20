@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { Device } from "../lib/device-types";
+import { setStoredFloorplanId } from "../lib/floorplan-context";
 import { getDeviceExternalLinks } from "../lib/integrations";
 
 type Point2D = { x: number; y: number };
@@ -762,6 +763,7 @@ export default function FloorplanPage() {
   const enterEditor = (floorplanId: string) => {
     resetEditorTransientState();
     setActiveId(floorplanId);
+    setStoredFloorplanId(floorplanId);
     setPageStage("editor");
     setBrowseView("select");
     setMode("view");

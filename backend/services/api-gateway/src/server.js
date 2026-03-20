@@ -15,6 +15,7 @@ import { DeviceOverridesStoreError } from "./device-overrides-store.js";
 import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
 import { SceneRunnerError } from "./scene-runner.js";
 import { DeviceIdentityResolver } from "./device-identity.js";
+import { filterDevicesForFloorplan, getSceneScopeFloorplanIds, sceneMatchesFloorplan } from "./floorplan-utils.js";
 
 export function buildServer({
   store,
@@ -29,7 +30,8 @@ export function buildServer({
   deviceOverridesStore,
   virtualDevicesStore,
   sceneRunner,
-  agenticSceneRunner
+  agenticSceneRunner,
+  haSyncService
 }) {
   const app = Fastify({ logger: false });
   const apiKeys = config.apiKeys || [];
@@ -87,6 +89,45 @@ export function buildServer({
     return reply.code(401).send({ error: "unauthorized" });
   };
 
+  const triggerHaSync = (reason) => {
+    haSyncService?.schedule?.(reason);
+  };
+
+  const resolveFloorplanFilter = async (req, reply) => {
+    const floorplanId = String(req.query?.floorplanId || "").trim();
+    if (!floorplanId) return null;
+    if (!floorplanStore) {
+      reply.code(503).send({ error: "floorplan_store_unavailable" });
+      return Symbol.for("handled");
+    }
+    try {
+      const floorplan = await floorplanStore.get(floorplanId);
+      if (!floorplan) {
+        reply.code(404).send({ error: "floorplan_not_found" });
+        return Symbol.for("handled");
+      }
+      return floorplan;
+    } catch (err) {
+      handleFloorplanError(err, reply, logger);
+      return Symbol.for("handled");
+    }
+  };
+
+  const validateSceneScopeFloorplans = async (scene) => {
+    if (!floorplanStore) return null;
+    const scopedIds = getSceneScopeFloorplanIds(scene);
+    if (!scopedIds.length) return null;
+    const floorplans = await floorplanStore.list();
+    const existing = new Set(floorplans.map((plan) => plan.id));
+    const missing = scopedIds.filter((id) => !existing.has(id));
+    if (!missing.length) return null;
+    return {
+      error: "invalid_scene",
+      reason: `unknown floorplan ids: ${missing.join(", ")}`,
+      details: missing.map((id) => `scope.floorplanIds missing floorplan: ${id}`)
+    };
+  };
+
   const validateActionParams = (device, action, params) => {
     const capability = device.capabilities?.find((c) => c.action === action);
     if (!capability || !capability.parameters) return { ok: true };
@@ -120,6 +161,28 @@ export function buildServer({
   };
 
   app.get("/health", async () => ({ status: "ok" }));
+
+  app.addHook("onClose", async () => {
+    haSyncService?.stop?.();
+  });
+
+  app.get("/ha/sync", { preHandler: authGuard }, async (_req, reply) => {
+    if (!haSyncService) return reply.code(503).send({ error: "ha_sync_unavailable" });
+    return haSyncService.getStatus();
+  });
+
+  app.post("/ha/sync", { preHandler: authGuard }, async (_req, reply) => {
+    if (!haSyncService) return reply.code(503).send({ error: "ha_sync_unavailable" });
+    try {
+      return await haSyncService.runSync("manual");
+    } catch (err) {
+      return reply.code(500).send({
+        error: "ha_sync_failed",
+        reason: err?.message || String(err),
+        status: haSyncService.getStatus()
+      });
+    }
+  });
 
   app.post("/assets", { preHandler: authGuard }, async (req, reply) => {
     if (!req.isMultipart()) {
@@ -164,8 +227,13 @@ export function buildServer({
     }
   });
 
-  app.get("/devices", { preHandler: authGuard }, async () => {
-    const list = await store.list();
+  app.get("/devices", { preHandler: authGuard }, async (req, reply) => {
+    let list = await store.list();
+    const floorplan = await resolveFloorplanFilter(req, reply);
+    if (floorplan === Symbol.for("handled")) return;
+    if (floorplan) {
+      list = filterDevicesForFloorplan(list, floorplan);
+    }
     const items = identityResolver.enrichDevices(list);
     return { items, count: items.length };
   });
@@ -226,11 +294,22 @@ export function buildServer({
   });
 
   // Scene management (file-backed)
-  app.get("/scenes", { preHandler: authGuard }, async (_req, reply) => {
+  app.get("/scenes", { preHandler: authGuard }, async (req, reply) => {
     if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
     try {
-      const list = await sceneStore.list();
-      const items = list.map((scene) => ({ id: scene.id, name: scene.name, description: scene.description }));
+      let list = await sceneStore.list();
+      const floorplan = await resolveFloorplanFilter(req, reply);
+      if (floorplan === Symbol.for("handled")) return;
+      if (floorplan) {
+        list = list.filter((scene) => sceneMatchesFloorplan(scene, floorplan.id));
+      }
+      const items = list.map((scene) => ({
+        id: scene.id,
+        name: scene.name,
+        description: scene.description,
+        scope: scene.scope || { floorplanIds: [] },
+        kind: Array.isArray(scene?.intent?.goals) ? "agentic" : "steps"
+      }));
       return { items, count: items.length };
     } catch (err) {
       return handleSceneError(err, reply, logger);
@@ -354,8 +433,11 @@ export function buildServer({
   app.post("/scenes", { preHandler: authGuard }, async (req, reply) => {
     if (!sceneStore) return reply.code(503).send({ error: "scene_store_unavailable" });
     try {
+      const scopeError = await validateSceneScopeFloorplans(req.body || {});
+      if (scopeError) return reply.code(400).send(scopeError);
       const created = await sceneStore.create(req.body || {});
       logger?.info("scene.created", { id: created?.id, actor: getActor(req) });
+      triggerHaSync("scene.created");
       return created;
     } catch (err) {
       return handleSceneError(err, reply, logger);
@@ -369,8 +451,11 @@ export function buildServer({
       return reply.code(400).send({ error: "scene_id_mismatch" });
     }
     try {
+      const scopeError = await validateSceneScopeFloorplans(payload);
+      if (scopeError) return reply.code(400).send(scopeError);
       const updated = await sceneStore.update(req.params.id, payload);
       logger?.info("scene.updated", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("scene.updated");
       return updated;
     } catch (err) {
       return handleSceneError(err, reply, logger);
@@ -383,6 +468,7 @@ export function buildServer({
     try {
       const result = await sceneStore.delete(req.params.id, { cascade });
       logger?.info("scene.deleted", { id: req.params.id, cascade, actor: getActor(req) });
+      triggerHaSync("scene.deleted");
       return { status: "deleted", removed: result.removed };
     } catch (err) {
       return handleSceneError(err, reply, logger);
@@ -424,6 +510,7 @@ export function buildServer({
     try {
       const created = await floorplanStore.create(req.body || {});
       logger?.info("floorplan.created", { id: created?.id, actor: getActor(req) });
+      triggerHaSync("floorplan.created");
       return created;
     } catch (err) {
       return handleFloorplanError(err, reply, logger);
@@ -439,6 +526,7 @@ export function buildServer({
     try {
       const updated = await floorplanStore.update(req.params.id, payload);
       logger?.info("floorplan.updated", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("floorplan.updated");
       return updated;
     } catch (err) {
       return handleFloorplanError(err, reply, logger);
@@ -450,6 +538,7 @@ export function buildServer({
     try {
       const result = await floorplanStore.delete(req.params.id);
       logger?.info("floorplan.deleted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("floorplan.deleted");
       return { status: "deleted", removed: result.removed };
     } catch (err) {
       return handleFloorplanError(err, reply, logger);
@@ -546,6 +635,7 @@ export function buildServer({
     try {
       const updated = await deviceOverridesStore.upsert(req.params.id, payload);
       logger?.info("device_override.upserted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("device_override.upserted");
       return updated;
     } catch (err) {
       return handleDeviceOverridesError(err, reply, logger);
@@ -557,6 +647,7 @@ export function buildServer({
     try {
       const result = await deviceOverridesStore.delete(req.params.id);
       logger?.info("device_override.deleted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("device_override.deleted");
       return { status: "deleted", removed: result.removed };
     } catch (err) {
       return handleDeviceOverridesError(err, reply, logger);
@@ -578,6 +669,7 @@ export function buildServer({
     try {
       const configPayload = await virtualDevicesStore.saveConfig(req.body || {});
       logger?.info("virtual_devices.config.updated", { actor: getActor(req), devices: configPayload.devices.length });
+      triggerHaSync("virtual_devices.config.updated");
       return configPayload;
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);
@@ -601,6 +693,7 @@ export function buildServer({
     try {
       const models = await virtualDevicesStore.saveModels(items);
       logger?.info("virtual_models.updated", { actor: getActor(req), count: models.length });
+      triggerHaSync("virtual_models.updated");
       return { items: models, count: models.length };
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);
@@ -616,6 +709,7 @@ export function buildServer({
     try {
       const model = await virtualDevicesStore.upsertModel(req.params.id, payload);
       logger?.info("virtual_model.upserted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("virtual_model.upserted");
       return model;
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);
@@ -627,6 +721,7 @@ export function buildServer({
     try {
       const result = await virtualDevicesStore.deleteModel(req.params.id);
       logger?.info("virtual_model.deleted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("virtual_model.deleted");
       return { status: "deleted", removed: result.removed };
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);
@@ -642,6 +737,7 @@ export function buildServer({
     try {
       const updated = await virtualDevicesStore.upsert(req.params.id, payload);
       logger?.info("virtual_device.upserted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("virtual_device.upserted");
       return updated;
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);
@@ -653,6 +749,7 @@ export function buildServer({
     try {
       const result = await virtualDevicesStore.delete(req.params.id);
       logger?.info("virtual_device.deleted", { id: req.params.id, actor: getActor(req) });
+      triggerHaSync("virtual_device.deleted");
       return { status: "deleted", removed: result.removed };
     } catch (err) {
       return handleVirtualDevicesError(err, reply, logger);

@@ -158,3 +158,28 @@ test("floorplan store enforces roomId references", async () => {
     );
   });
 });
+
+test("floorplan store rejects a device assigned to multiple floorplans", async () => {
+  await withTempDir(async (dir) => {
+    const store = new FloorplanStore({ floorplansPath: path.join(dir, "floorplans.json") });
+    await store.create(buildPlan());
+    await assert.rejects(
+      () =>
+        store.create(
+          buildPlan({
+            id: "floor2",
+            name: "二层",
+            devices: [
+              {
+                deviceId: "humidifier_1",
+                x: 0.3,
+                y: 0.3,
+                roomId: "living"
+              }
+            ]
+          })
+        ),
+      (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan"
+    );
+  });
+});

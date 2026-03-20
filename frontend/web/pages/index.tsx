@@ -3,6 +3,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import type { Device } from "../lib/device-types";
+import type { Floorplan, FloorplanSummary } from "../lib/floorplan-context";
+import { getStoredFloorplanId, resolveInitialFloorplanId, setStoredFloorplanId } from "../lib/floorplan-context";
 import { getDeviceExternalLinks } from "../lib/integrations";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -13,6 +15,13 @@ type IntentResult = {
   params?: Record<string, any>;
   confidence?: number;
   summary?: string;
+};
+
+type SceneSummary = {
+  id: string;
+  name: string;
+  description?: string;
+  scope?: { floorplanIds?: string[] };
 };
 
 const pageBg = "linear-gradient(135deg, #09121d 0%, #18324a 42%, #0f6a6c 100%)";
@@ -53,6 +62,10 @@ const solidButtonStyle: CSSProperties = {
 
 export default function Home() {
   const [devices, setDevices] = useState<Record<string, Device>>({});
+  const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
+  const [currentFloorplan, setCurrentFloorplan] = useState<Floorplan | null>(null);
+  const [selectedFloorplanId, setSelectedFloorplanId] = useState("");
+  const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatTurn[]>([]);
@@ -60,25 +73,10 @@ export default function Home() {
   const [intentInput, setIntentInput] = useState("");
   const [intentResult, setIntentResult] = useState<IntentResult | null>(null);
   const [intentStatus, setIntentStatus] = useState("");
+  const [pageStatus, setPageStatus] = useState("");
   const [wsStatus, setWsStatus] = useState("connecting");
   const wsRef = useRef<WebSocket | null>(null);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/devices");
-      const data = await res.json();
-      const map: Record<string, Device> = {};
-      for (const device of data.items || []) {
-        if (device?.id) map[device.id] = device;
-      }
-      setDevices(map);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const allowedDeviceIdsRef = useRef<Set<string>>(new Set());
 
   const buildWsUrl = () => {
     if (process.env.NEXT_PUBLIC_WS_BASE) return process.env.NEXT_PUBLIC_WS_BASE;
@@ -87,6 +85,79 @@ export default function Home() {
     const host = window.location.hostname;
     const port = process.env.NEXT_PUBLIC_WS_PORT || "4001";
     return `${proto}://${host}:${port}/ws`;
+  };
+
+  const loadFloorplans = async (preferredId?: string) => {
+    const res = await fetch("/api/floorplans");
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.reason || data?.error || "加载户型失败");
+    }
+    const items = Array.isArray(data.items) ? data.items : [];
+    setFloorplans(items);
+    const nextId = resolveInitialFloorplanId(items, preferredId || getStoredFloorplanId() || selectedFloorplanId);
+    if (!nextId) {
+      setSelectedFloorplanId("");
+      setCurrentFloorplan(null);
+      setScenes([]);
+      setDevices({});
+      allowedDeviceIdsRef.current = new Set();
+      return "";
+    }
+    if (nextId !== selectedFloorplanId) {
+      setSelectedFloorplanId(nextId);
+    }
+    return nextId;
+  };
+
+  const loadScopedData = async (floorplanId: string) => {
+    if (!floorplanId) {
+      setCurrentFloorplan(null);
+      setScenes([]);
+      setDevices({});
+      allowedDeviceIdsRef.current = new Set();
+      return;
+    }
+
+    const [floorplanRes, devicesRes, scenesRes] = await Promise.all([
+      fetch(`/api/floorplans/${encodeURIComponent(floorplanId)}`),
+      fetch(`/api/devices?floorplanId=${encodeURIComponent(floorplanId)}`),
+      fetch(`/api/scenes?floorplanId=${encodeURIComponent(floorplanId)}`)
+    ]);
+
+    const [floorplanJson, devicesJson, scenesJson] = await Promise.all([floorplanRes.json(), devicesRes.json(), scenesRes.json()]);
+    if (!floorplanRes.ok) throw new Error(floorplanJson?.reason || floorplanJson?.error || "加载户型详情失败");
+    if (!devicesRes.ok) throw new Error(devicesJson?.reason || devicesJson?.error || "加载设备失败");
+    if (!scenesRes.ok) throw new Error(scenesJson?.reason || scenesJson?.error || "加载场景失败");
+
+    const nextPlan = floorplanJson as Floorplan;
+    const deviceMap: Record<string, Device> = {};
+    for (const device of devicesJson.items || []) {
+      if (!device?.id) continue;
+      deviceMap[device.id] = device;
+    }
+
+    setCurrentFloorplan(nextPlan);
+    setDevices(deviceMap);
+    setScenes(Array.isArray(scenesJson.items) ? scenesJson.items : []);
+    allowedDeviceIdsRef.current = new Set((nextPlan.devices || []).map((entry) => entry.deviceId));
+    setStoredFloorplanId(floorplanId);
+  };
+
+  const refresh = async (preferredId?: string) => {
+    setLoading(true);
+    setPageStatus("");
+    try {
+      const nextId = await loadFloorplans(preferredId);
+      if (nextId && nextId === selectedFloorplanId) {
+        await loadScopedData(nextId);
+      }
+    } catch (err) {
+      console.error(err);
+      setPageStatus((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const connectWs = () => {
@@ -100,18 +171,18 @@ export default function Home() {
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
-          if (msg.type === "device_update" || msg.type === "state_snapshot") {
-            const nextDevice = msg.data;
-            if (!nextDevice?.id) return;
-            setDevices((prev) => ({
-              ...prev,
-              [nextDevice.id]: {
-                ...prev[nextDevice.id],
-                ...nextDevice,
-                traits: { ...(prev[nextDevice.id]?.traits || {}), ...(nextDevice.traits || {}) }
-              }
-            }));
-          }
+          if (msg.type !== "device_update" && msg.type !== "state_snapshot") return;
+          const nextDevice = msg.data;
+          if (!nextDevice?.id) return;
+          if (!allowedDeviceIdsRef.current.has(nextDevice.id)) return;
+          setDevices((prev) => ({
+            ...prev,
+            [nextDevice.id]: {
+              ...prev[nextDevice.id],
+              ...nextDevice,
+              traits: { ...(prev[nextDevice.id]?.traits || {}), ...(nextDevice.traits || {}) }
+            }
+          }));
         } catch (_err) {
           // ignore malformed messages
         }
@@ -132,12 +203,27 @@ export default function Home() {
   };
 
   useEffect(() => {
-    refresh();
+    refresh().catch((err) => {
+      console.error(err);
+      setPageStatus((err as Error).message);
+    });
     connectWs();
     return () => {
       wsRef.current?.close();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!selectedFloorplanId) return;
+    setLoading(true);
+    setPageStatus("");
+    loadScopedData(selectedFloorplanId)
+      .catch((err) => {
+        console.error(err);
+        setPageStatus((err as Error).message);
+      })
+      .finally(() => setLoading(false));
+  }, [selectedFloorplanId]);
 
   const deviceList = useMemo(
     () =>
@@ -149,14 +235,27 @@ export default function Home() {
     [devices]
   );
 
+  const roomSummary = useMemo(() => {
+    const roomMap = new Map<string, { id: string; name: string; deviceCount: number }>();
+    for (const room of currentFloorplan?.rooms || []) {
+      roomMap.set(room.id, { id: room.id, name: room.name, deviceCount: 0 });
+    }
+    for (const entry of currentFloorplan?.devices || []) {
+      const roomId = String(entry.roomId || "").trim();
+      if (!roomId) continue;
+      const target = roomMap.get(roomId);
+      if (!target) continue;
+      target.deviceCount += 1;
+    }
+    return Array.from(roomMap.values());
+  }, [currentFloorplan]);
+
   const summary = useMemo(() => {
-    const rooms = new Set<string>();
     let withHa = 0;
     let withZ2m = 0;
     let virtualDevices = 0;
 
     for (const device of deviceList) {
-      if (device.placement?.room) rooms.add(device.placement.room);
       if (getDeviceExternalLinks(device).haUrl) withHa += 1;
       if (getDeviceExternalLinks(device).zigbee2mqttUrl) withZ2m += 1;
       if (device.protocol === "virtual") virtualDevices += 1;
@@ -164,12 +263,13 @@ export default function Home() {
 
     return {
       totalDevices: deviceList.length,
-      rooms: rooms.size,
+      rooms: roomSummary.length,
+      scenes: scenes.length,
       withHa,
       withZ2m,
       virtualDevices
     };
-  }, [deviceList]);
+  }, [deviceList, roomSummary, scenes]);
 
   const submitChat = async () => {
     if (!chatInput.trim()) return;
@@ -234,7 +334,7 @@ export default function Home() {
     }
     const device = devices[intentResult.deviceId];
     if (!device) {
-      setIntentStatus("设备不在当前摘要中");
+      setIntentStatus("设备不在当前户型中");
       return;
     }
     setIntentStatus("执行中...");
@@ -256,11 +356,13 @@ export default function Home() {
   };
 
   const summaryCards = [
-    { label: "设备总数", value: summary.totalDevices, testId: "summary-total-devices" },
-    { label: "已识别房间", value: summary.rooms, testId: "summary-total-rooms" },
-    { label: "可跳转 HA", value: summary.withHa, testId: "summary-ha-bound" },
-    { label: "可跳转 Z2M", value: summary.withZ2m, testId: "summary-z2m-bound" }
+    { label: "当前户型设备", value: summary.totalDevices, testId: "summary-total-devices" },
+    { label: "当前户型房间", value: summary.rooms, testId: "summary-total-rooms" },
+    { label: "当前户型场景", value: summary.scenes, testId: "summary-total-scenes" },
+    { label: "可跳转 HA", value: summary.withHa, testId: "summary-ha-bound" }
   ];
+
+  const haHubHref = selectedFloorplanId ? `/ha-hub?floorplanId=${encodeURIComponent(selectedFloorplanId)}` : "/ha-hub";
 
   return (
     <>
@@ -281,9 +383,9 @@ export default function Home() {
         <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
             <div style={{ letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.82, fontSize: 12 }}>Command Center</div>
-            <h1 style={{ margin: "0.25rem 0 0.45rem", fontSize: "2.2rem" }}>LLM、空间和外部系统入口</h1>
+            <h1 style={{ margin: "0.25rem 0 0.45rem", fontSize: "2.2rem" }}>按户型切换的主页摘要</h1>
             <p style={{ margin: 0, maxWidth: 780, opacity: 0.82, lineHeight: 1.6 }}>
-              这个首页不再充当主设备控制台。通用设备管理交给 Home Assistant 和 Zigbee2MQTT，本页面只负责语义入口、空间入口和统一摘要。
+              首页现在以当前户型为上下文。房间、设备、场景和 HA Hub 入口都跟随户型切换，Home Assistant 作为镜像视图承接外部页面。
             </p>
           </div>
 
@@ -297,14 +399,61 @@ export default function Home() {
             <Link href="/virtual-devices" style={linkButtonStyle}>
               打开虚拟设备
             </Link>
-            <Link href="/ha-hub" style={solidButtonStyle}>
+            <Link href={haHubHref} style={solidButtonStyle}>
               打开 HA Hub
             </Link>
-            <button onClick={refresh} disabled={loading} style={{ ...solidButtonStyle, boxShadow: "0 10px 24px rgba(16,185,129,0.24)" }}>
+            <button
+              onClick={() => refresh(selectedFloorplanId)}
+              disabled={loading}
+              style={{ ...solidButtonStyle, boxShadow: "0 10px 24px rgba(16,185,129,0.24)" }}
+            >
               {loading ? "刷新中..." : "刷新摘要"}
             </button>
           </div>
         </header>
+
+        <section style={{ ...panelStyle, marginTop: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 12, opacity: 0.75 }}>当前户型</div>
+              <div style={{ fontSize: 28, fontWeight: 900 }} data-testid="current-floorplan-name">
+                {currentFloorplan?.name || "未选择户型"}
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.75 }}>
+                WebSocket: {wsStatus} · 虚拟设备: {summary.virtualDevices}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 260 }}>
+              <label htmlFor="home-floorplan-select" style={{ fontSize: 12, opacity: 0.8 }}>
+                切换户型
+              </label>
+              <select
+                id="home-floorplan-select"
+                value={selectedFloorplanId}
+                onChange={(e) => setSelectedFloorplanId(e.target.value)}
+                data-testid="current-floorplan-select"
+                style={{
+                  minWidth: 260,
+                  padding: "0.85rem 0.95rem",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(0,0,0,0.25)",
+                  color: "#e8edf7"
+                }}
+              >
+                {!floorplans.length ? <option value="">暂无户型</option> : null}
+                {floorplans.map((floorplan) => (
+                  <option key={floorplan.id} value={floorplan.id}>
+                    {floorplan.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {pageStatus ? <div style={{ marginTop: 12, fontSize: 13, color: "#fca5a5" }}>{pageStatus}</div> : null}
+        </section>
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginTop: 18 }}>
           {summaryCards.map((card) => (
@@ -328,36 +477,93 @@ export default function Home() {
             <div style={panelStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: "1.15rem" }}>系统摘要</h2>
+                  <h2 style={{ margin: 0, fontSize: "1.15rem" }}>空间摘要</h2>
                   <p style={{ margin: "8px 0 0", opacity: 0.78, fontSize: 13 }}>
-                    WebSocket 状态: {wsStatus} · 虚拟设备: {summary.virtualDevices}
+                    主页显示当前户型的房间、设备和场景，不再混合全局数据。
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link href="/ha-hub" style={linkButtonStyle}>
-                    设备与自动化去 HA
+                  <Link href={haHubHref} style={linkButtonStyle}>
+                    进入当前户型 HA 镜像
                   </Link>
                   <Link href="/floorplan" style={linkButtonStyle}>
-                    设备布点去 Floorplan
+                    编辑户型与布点
                   </Link>
                 </div>
               </div>
+
+              {!currentFloorplan ? (
+                <p style={{ marginTop: 16, opacity: 0.78 }}>还没有可用户型，先去户型编辑页创建。</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 16 }}>
+                  <div
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 16,
+                      padding: "1rem",
+                      background: "rgba(7, 18, 35, 0.44)"
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: "1.02rem" }}>房间 / Areas</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                      {roomSummary.length ? (
+                        roomSummary.map((room) => (
+                          <span
+                            key={room.id}
+                            style={{
+                              background: "rgba(255,255,255,0.08)",
+                              borderRadius: 999,
+                              padding: "0.4rem 0.65rem",
+                              fontSize: 12
+                            }}
+                          >
+                            {room.name} · {room.deviceCount}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ opacity: 0.72, fontSize: 13 }}>当前户型没有房间。</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 16,
+                      padding: "1rem",
+                      background: "rgba(7, 18, 35, 0.44)"
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: "1.02rem" }}>场景 / Scenes</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                      {scenes.length ? (
+                        scenes.slice(0, 6).map((scene) => (
+                          <div key={scene.id} style={{ paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                            <div style={{ fontWeight: 700 }}>{scene.name}</div>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>{scene.description || scene.id}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <span style={{ opacity: 0.72, fontSize: 13 }}>当前户型没有带 scope 的场景。</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={panelStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: "1.15rem" }}>设备摘要</h2>
-                  <p style={{ margin: "8px 0 0", opacity: 0.78, fontSize: 13 }}>
-                    这里不再承担完整控制台职责，只展示统一设备模型的摘要并提供外部入口。
-                  </p>
+                  <p style={{ margin: "8px 0 0", opacity: 0.78, fontSize: 13 }}>只显示当前户型里已布点的设备。</p>
                 </div>
-                <Link href="/ha-hub" style={linkButtonStyle}>
-                  查看更多 HA 入口
+                <Link href={haHubHref} style={linkButtonStyle}>
+                  查看当前户型 HA 入口
                 </Link>
               </div>
 
-              {deviceList.length === 0 && !loading ? <p style={{ marginTop: 16, opacity: 0.78 }}>暂无设备数据。</p> : null}
+              {deviceList.length === 0 && !loading ? <p style={{ marginTop: 16, opacity: 0.78 }}>当前户型暂无设备数据。</p> : null}
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginTop: 16 }}>
                 {deviceList.map((device) => {
@@ -473,9 +679,7 @@ export default function Home() {
             <section style={panelStyle}>
               <div>
                 <h2 style={{ margin: "0 0 0.35rem 0" }}>LLM 代理（llm-bridge）</h2>
-                <p style={{ margin: 0, opacity: 0.75, fontSize: 13 }}>
-                  首页继续保留自然语言入口。真实执行仍走统一设备模型和 API Gateway。
-                </p>
+                <p style={{ margin: 0, opacity: 0.75, fontSize: 13 }}>自然语言入口仍保留，但解释上下文已经收敛到当前户型设备。</p>
               </div>
               <div
                 style={{

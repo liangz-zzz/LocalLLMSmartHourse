@@ -146,3 +146,23 @@ test("scene store accepts goal-based scene and marks it non-expandable", async (
     );
   });
 });
+
+test("scene store validates scope.floorplanIds", async () => {
+  await withTempDir(async (dir) => {
+    const store = new SceneStore({ scenesPath: path.join(dir, "scenes.json") });
+
+    await assert.rejects(
+      () =>
+        store.create({
+          id: "scoped_scene",
+          name: "Scoped Scene",
+          description: "Invalid scope payload",
+          scope: {
+            floorplanIds: ["floor1", "floor1"]
+          },
+          steps: [{ type: "device", deviceId: "lamp", action: "turn_on", params: {} }]
+        }),
+      (err) => err instanceof SceneStoreError && err.code === "invalid_scene"
+    );
+  });
+});

@@ -6,12 +6,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "GET") {
     try {
-      const url = new URL(`${base}/scenes`);
-      const floorplanId = Array.isArray(req.query?.floorplanId) ? req.query.floorplanId[0] : req.query?.floorplanId;
-      if (floorplanId) {
-        url.searchParams.set("floorplanId", String(floorplanId));
-      }
-      const resp = await fetch(url, {
+      const resp = await fetch(`${base}/ha/sync`, {
         headers: {
           ...(apiKey ? { "X-API-Key": apiKey } : {})
         }
@@ -25,13 +20,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "POST") {
     try {
-      const resp = await fetch(`${base}/scenes`, {
+      const resp = await fetch(`${base}/ha/sync`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           ...(apiKey ? { "X-API-Key": apiKey } : {})
-        },
-        body: JSON.stringify(req.body || {})
+        }
       });
       const data = await resp.json();
       return res.status(resp.status).json(data);

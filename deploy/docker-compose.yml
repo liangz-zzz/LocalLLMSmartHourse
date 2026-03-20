@@ -84,11 +84,19 @@ services:
       - REDIS_URL=redis://redis:${REDIS_PORT:-6379}
       - HA_BASE_URL=http://homeassistant:${HA_HTTP_PORT:-8123}
       - HA_TOKEN=${HA_ELEVATED_TOKEN:-}
+      - HA_SYNC_ENABLED=${HA_SYNC_ENABLED:-true}
+      - HA_SYNC_PUBLIC_API_BASE_URL=${HA_SYNC_PUBLIC_API_BASE_URL:-http://localhost:${API_HTTP_PORT:-4000}}
+      - HA_SYNC_INTERNAL_API_BASE_URL=${HA_SYNC_INTERNAL_API_BASE_URL:-http://api-gateway:${API_HTTP_PORT:-4000}}
+      - HA_SYNC_API_KEY=${HA_SYNC_API_KEY:-}
+      - HA_SYNC_INTERVAL_MS=${HA_SYNC_INTERVAL_MS:-300000}
+      - HA_SYNC_DEBOUNCE_MS=${HA_SYNC_DEBOUNCE_MS:-2000}
+      - HA_SYNC_HA_CONFIG_DIR=/homeassistant-config
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     volumes:
       - ../backend/services/api-gateway:/app
       - ../backend/prisma:/workspace/prisma
       - ./data/config:/config
+      - ./homeassistant:/homeassistant-config
       - api_gateway_node_modules:/app/node_modules
     ports:
       - "${API_HTTP_PORT:-4000}:4000"

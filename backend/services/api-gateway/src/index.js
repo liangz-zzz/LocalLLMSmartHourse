@@ -13,6 +13,7 @@ import { VirtualDevicesStore } from "./virtual-devices-store.js";
 import { SceneRunner } from "./scene-runner.js";
 import { DeviceIdentityResolver } from "./device-identity.js";
 import { AgenticSceneRunner } from "./agentic-scene-runner.js";
+import { HomeAssistantMirrorService } from "./ha-sync.js";
 
 function createLogger(level) {
   const levels = ["error", "warn", "info", "debug"];
@@ -63,6 +64,7 @@ async function main() {
   let virtualDevicesStore;
   let sceneRunner;
   let agenticSceneRunner;
+  let haSyncService;
   if (config.databaseUrl) {
     if (config.actionResultsPersist) {
       actionStore = new ActionResultStore({ databaseUrl: config.databaseUrl });
@@ -107,6 +109,14 @@ async function main() {
       identityResolver
     });
   }
+  haSyncService = new HomeAssistantMirrorService({
+    config,
+    logger,
+    floorplanStore,
+    sceneStore,
+    store
+  });
+  haSyncService.start();
   const app = buildServer({
     store,
     logger,
@@ -120,7 +130,8 @@ async function main() {
     deviceOverridesStore,
     virtualDevicesStore,
     sceneRunner,
-    agenticSceneRunner
+    agenticSceneRunner,
+    haSyncService
   });
   await app.listen({ port: config.port, host: "0.0.0.0" });
   if (bus) {

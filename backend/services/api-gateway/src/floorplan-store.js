@@ -129,6 +129,7 @@ function validateFloorplanList(list) {
   }
 
   const ids = new Set();
+  const assignedDeviceIds = new Map();
 
   list.forEach((plan, planIndex) => {
     const prefix = `floorplans[${planIndex}]`;
@@ -225,8 +226,11 @@ function validateFloorplanList(list) {
           errors.push(`${devicePrefix}.deviceId is required`);
         } else if (deviceIds.has(deviceId)) {
           errors.push(`${devicePrefix}.deviceId duplicate: ${deviceId}`);
+        } else if (assignedDeviceIds.has(deviceId)) {
+          errors.push(`${devicePrefix}.deviceId duplicate across floorplans: ${deviceId} already assigned to ${assignedDeviceIds.get(deviceId)}`);
         } else {
           deviceIds.add(deviceId);
+          assignedDeviceIds.set(deviceId, planId || prefix);
         }
         validatePoint2d(device, devicePrefix, errors, true);
         if (device.height !== undefined && (!Number.isFinite(device.height) || device.height < 0)) {

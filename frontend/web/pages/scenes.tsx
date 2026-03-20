@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
 import type { Capability, CapabilityParam, Device } from "../lib/device-types";
+import type { FloorplanSummary } from "../lib/floorplan-context";
 import { getHaHubLinks } from "../lib/integrations";
 
-type SceneSummary = { id: string; name: string; description?: string };
+type SceneSummary = { id: string; name: string; description?: string; scope?: { floorplanIds?: string[] } };
 
 type WaitFor = {
   traitPath: string;
@@ -23,6 +24,7 @@ type Scene = {
   id: string;
   name: string;
   description?: string;
+  scope?: { floorplanIds?: string[] };
   steps: SceneStep[];
 };
 
@@ -107,6 +109,7 @@ export default function ScenesPage() {
 
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [draft, setDraft] = useState<Scene | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,11 +128,13 @@ export default function ScenesPage() {
     setStatus("");
     setDetails([]);
     try {
-      const [scenesRes, devicesRes] = await Promise.all([fetch("/api/scenes"), fetch("/api/devices")]);
+      const [scenesRes, devicesRes, floorplansRes] = await Promise.all([fetch("/api/scenes"), fetch("/api/devices"), fetch("/api/floorplans")]);
       const scenesJson = await scenesRes.json();
       const devicesJson = await devicesRes.json();
+      const floorplansJson = await floorplansRes.json();
       setSceneList(scenesJson.items || []);
       setDevices(devicesJson.items || []);
+      setFloorplans(floorplansJson.items || []);
     } catch (err) {
       setStatus((err as Error).message);
     } finally {
@@ -148,7 +153,11 @@ export default function ScenesPage() {
         setStatus(data?.error || "加载失败");
         return;
       }
-      setDraft(data);
+      setDraft({
+        ...data,
+        scope: data?.scope || { floorplanIds: [] },
+        steps: Array.isArray(data?.steps) ? data.steps : []
+      });
     } catch (err) {
       setStatus((err as Error).message);
     } finally {
@@ -167,7 +176,7 @@ export default function ScenesPage() {
 
   const startNew = () => {
     setSelectedId("");
-    setDraft({ id: "", name: "", description: "", steps: [] });
+    setDraft({ id: "", name: "", description: "", scope: { floorplanIds: [] }, steps: [] });
     setStatus("");
     setDetails([]);
   };
@@ -513,6 +522,56 @@ export default function ScenesPage() {
                   placeholder="可选"
                   data-testid="scene-description"
                 />
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label style={labelStyle}>户型 Scope</label>
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {floorplans.length ? (
+                    floorplans.map((floorplan) => {
+                      const checked = (draft.scope?.floorplanIds || []).includes(floorplan.id);
+                      return (
+                        <label
+                          key={floorplan.id}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            borderRadius: 999,
+                            padding: "0.45rem 0.75rem",
+                            background: checked ? "rgba(16,185,129,0.16)" : "rgba(255,255,255,0.08)",
+                            border: checked ? "1px solid rgba(16,185,129,0.5)" : "1px solid rgba(255,255,255,0.12)",
+                            cursor: "pointer",
+                            fontSize: 13
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const current = new Set(draft.scope?.floorplanIds || []);
+                              if (e.target.checked) current.add(floorplan.id);
+                              else current.delete(floorplan.id);
+                              setDraft({
+                                ...draft,
+                                scope: {
+                                  floorplanIds: Array.from(current)
+                                }
+                              });
+                            }}
+                            data-testid={`scene-scope-floorplan-${floorplan.id}`}
+                          />
+                          {floorplan.name}
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <span style={{ opacity: 0.72, fontSize: 13 }}>暂无户型可绑定。</span>
+                  )}
+                </div>
+                <div style={{ marginTop: 8, opacity: 0.72, fontSize: 12 }}>
+                  未设置 scope 的场景保持本地可用，但不会进入首页户型摘要，也不会导出到 HA。
+                </div>
               </div>
 
               <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center" }}>

@@ -154,6 +154,7 @@ function validateSceneList(list) {
     if (typeof scene.description !== "string") {
       errors.push(`scene[${sceneIndex}].description must be string`);
     }
+    validateSceneScope(scene.scope, `scene[${sceneIndex}].scope`, errors);
     const hasLegacySteps = Array.isArray(scene.steps);
     const hasIntentGoals = Array.isArray(scene?.intent?.goals);
     if (hasLegacySteps && hasIntentGoals) {
@@ -220,6 +221,31 @@ function validateSceneList(list) {
   if (errors.length) {
     throw new SceneStoreError("invalid_scene", errors.join("; "), { details: errors });
   }
+}
+
+function validateSceneScope(scope, prefix, errors) {
+  if (scope === undefined || scope === null) return;
+  if (!isPlainObject(scope)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  if (scope.floorplanIds === undefined) return;
+  if (!Array.isArray(scope.floorplanIds)) {
+    errors.push(`${prefix}.floorplanIds must be an array`);
+    return;
+  }
+  const ids = new Set();
+  scope.floorplanIds.forEach((value, index) => {
+    if (typeof value !== "string" || !value.trim()) {
+      errors.push(`${prefix}.floorplanIds[${index}] must be a non-empty string`);
+      return;
+    }
+    if (ids.has(value)) {
+      errors.push(`${prefix}.floorplanIds[${index}] duplicate: ${value}`);
+      return;
+    }
+    ids.add(value);
+  });
 }
 
 function validateWaitFor(waitFor, prefix, errors) {

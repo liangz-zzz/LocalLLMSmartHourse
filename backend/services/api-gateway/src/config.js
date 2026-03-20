@@ -2,6 +2,7 @@ import path from "node:path";
 
 export function loadConfig() {
   const defaultMode = process.env.MODE ? process.env.MODE : "redis"; // prefer redis when services are up
+  const port = Number(process.env.PORT || 4000);
   const configDir = String(process.env.CONFIG_DIR || "").trim();
   const scenesPath = String(process.env.SCENES_PATH || "").trim() || (configDir ? path.join(configDir, "scenes.json") : "./scenes.json");
   const floorplansPath =
@@ -13,8 +14,11 @@ export function loadConfig() {
     String(process.env.DEVICE_CONFIG_PATH || "").trim() || (configDir ? path.join(configDir, "devices.config.json") : "./devices.config.json");
   const assetMaxImageMb = parsePositiveNumber(process.env.ASSET_MAX_IMAGE_MB, 20);
   const assetMaxModelMb = parsePositiveNumber(process.env.ASSET_MAX_MODEL_MB, 200);
+  const haBaseUrl = String(process.env.HA_BASE_URL || "").trim() || "http://homeassistant:8123";
+  const haToken = String(process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN || "").trim();
+  const haSyncHomeAssistantConfigDir = String(process.env.HA_SYNC_HA_CONFIG_DIR || "").trim() || "/homeassistant-config";
   return {
-    port: Number(process.env.PORT || 4000),
+    port,
     mode: defaultMode, // mock | redis
     redisUrl: process.env.REDIS_URL || "redis://redis:6379",
     redisUpdatesChannel: process.env.REDIS_UPDATES_CHANNEL || "device:updates",
@@ -32,6 +36,16 @@ export function loadConfig() {
     deviceOverridesPath,
     assetMaxImageMb,
     assetMaxModelMb,
+    haBaseUrl,
+    haToken,
+    haSyncEnabled: parseBoolean(process.env.HA_SYNC_ENABLED, Boolean(haBaseUrl && haToken)),
+    haSyncPublicApiBaseUrl: String(process.env.HA_SYNC_PUBLIC_API_BASE_URL || "").trim(),
+    haSyncInternalApiBaseUrl:
+      String(process.env.HA_SYNC_INTERNAL_API_BASE_URL || "").trim() || `http://api-gateway:${port || 4000}`,
+    haSyncApiKey: String(process.env.HA_SYNC_API_KEY || "").trim(),
+    haSyncIntervalMs: parsePositiveNumber(process.env.HA_SYNC_INTERVAL_MS, 5 * 60 * 1000),
+    haSyncDebounceMs: parsePositiveNumber(process.env.HA_SYNC_DEBOUNCE_MS, 2000),
+    haSyncHomeAssistantConfigDir,
     agenticSceneEnabled: parseBoolean(process.env.AGENTIC_SCENE_ENABLED, false),
     agenticSceneRunTtlMs: parsePositiveNumber(process.env.AGENTIC_SCENE_RUN_TTL_MS, 60 * 60 * 1000),
     apiKeys: (process.env.API_KEYS || process.env.API_KEY || "")

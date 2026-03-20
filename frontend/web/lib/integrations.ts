@@ -51,6 +51,15 @@ function interpolateTemplate(template: string, values: Record<string, string>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => encodeURIComponent(values[key] || ""));
 }
 
+function slugSegment(value: string) {
+  const slug = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "floorplan";
+}
+
 function parseHaLinksConfig() {
   const raw = process.env.NEXT_PUBLIC_HA_LINKS_JSON;
   if (!raw) return {};
@@ -125,4 +134,15 @@ export function getDeviceExternalLinks(device?: Device | null) {
     haUrl: getDeviceHaUrl(device),
     zigbee2mqttUrl: getDeviceZ2MUrl(device)
   };
+}
+
+export function getMirroredHaDashboardUrlPath(floorplanId: string) {
+  return `smarthouse-${slugSegment(floorplanId)}`;
+}
+
+export function getMirroredHaDashboardUrl(floorplanId: string) {
+  const base = getHaBaseUrl();
+  const path = getMirroredHaDashboardUrlPath(floorplanId);
+  if (!base || !path) return "";
+  return joinExternalUrl(base, `/${path}`);
 }
