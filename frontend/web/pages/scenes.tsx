@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 
 import type { Capability, CapabilityParam, Device } from "../lib/device-types";
 import type { FloorplanSummary } from "../lib/floorplan-context";
-import { getHaHubLinks } from "../lib/integrations";
+import { useIntegrationBases } from "../lib/integrations";
 
 type SceneSummary = { id: string; name: string; description?: string; scope?: { floorplanIds?: string[] } };
 
@@ -105,7 +105,7 @@ function toDisplayValue(value: any) {
 export default function ScenesPage() {
   const router = useRouter();
   const prefillDeviceId = typeof router.query.deviceId === "string" ? router.query.deviceId : "";
-  const haLinks = getHaHubLinks();
+  const { haLinks } = useIntegrationBases();
 
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);

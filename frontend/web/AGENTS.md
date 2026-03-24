@@ -36,9 +36,10 @@
 - `public/vendor/three/*`：3D 预览所需的 three.js 模块（importmap + 动态加载）。
 
 环境变量
-- `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址（默认推断 `ws://<host>:4001/ws`），`NEXT_PUBLIC_WS_PORT` 覆盖端口。
-- `NEXT_PUBLIC_HA_BASE_URL`：浏览器可访问的 HA 地址，用于 HA Hub 和设备外链。
-- `NEXT_PUBLIC_Z2M_BASE_URL`：浏览器可访问的 Zigbee2MQTT Web 地址。
+- `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址；留空时默认推断 `ws://<当前访问主机>:4001/ws`，`NEXT_PUBLIC_WS_PORT` 覆盖端口。
+- `NEXT_PUBLIC_HA_BASE_URL`：浏览器可访问的 HA 地址；留空时默认跟随当前访问主机名，端口由 `NEXT_PUBLIC_HA_PORT` 指定。
+- `NEXT_PUBLIC_Z2M_BASE_URL`：浏览器可访问的 Zigbee2MQTT Web 地址；留空时默认跟随当前访问主机名，端口由 `NEXT_PUBLIC_Z2M_PORT` 指定。
+- `NEXT_PUBLIC_HA_PORT` / `NEXT_PUBLIC_Z2M_PORT`：当上面两个 base URL 留空时，用于补足默认端口。
 - `NEXT_PUBLIC_HA_LINKS_JSON`：可选 JSON，用于覆盖 HA Hub 默认深链和设备 entity 路径模板。
 
 开发/测试

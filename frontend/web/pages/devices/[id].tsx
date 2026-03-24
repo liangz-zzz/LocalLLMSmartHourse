@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
 import type { Device } from "../../lib/device-types";
-import { getDeviceExternalLinks } from "../../lib/integrations";
+import { getDeviceExternalLinks, useIntegrationBases } from "../../lib/integrations";
 
 type ActionResult = {
   id: string;
@@ -17,6 +17,7 @@ const pageBg = "linear-gradient(135deg, #f8fafc 0%, #eef4ff 45%, #f4faf6 100%)";
 export default function DevicePage() {
   const router = useRouter();
   const { id } = router.query;
+  const { haBase, z2mBase } = useIntegrationBases();
   const [device, setDevice] = useState<Device | null>(null);
   const [history, setHistory] = useState<ActionResult[]>([]);
   const [action, setAction] = useState("");
@@ -37,7 +38,7 @@ export default function DevicePage() {
     load();
   }, [id]);
 
-  const links = useMemo(() => getDeviceExternalLinks(device), [device]);
+  const links = useMemo(() => getDeviceExternalLinks(device, { haBase, z2mBase }), [device, haBase, z2mBase]);
 
   const sendAction = async () => {
     if (!id || Array.isArray(id) || !action) return;

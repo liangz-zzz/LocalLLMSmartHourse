@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 import type { Device } from "./device-types";
 import { getHaEntityId, getZigbeeTopic } from "./device-types";
 
@@ -15,6 +17,11 @@ type HaLinkConfig = {
   zigbeeDevicePath: string;
 };
 
+export type IntegrationBases = {
+  haBase: string;
+  z2mBase: string;
+};
+
 const DEFAULT_HA_LINKS: HaLinkConfig = {
   overview: "/",
   dashboards: "/lovelace/default_view",
@@ -29,6 +36,9 @@ const DEFAULT_HA_LINKS: HaLinkConfig = {
   zigbeeDevicePath: ""
 };
 
+const DEFAULT_HA_PORT = String(process.env.NEXT_PUBLIC_HA_PORT || "8123").trim() || "8123";
+const DEFAULT_Z2M_PORT = String(process.env.NEXT_PUBLIC_Z2M_PORT || "8080").trim() || "8080";
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
@@ -36,6 +46,15 @@ function trimTrailingSlash(value: string) {
 function normalizeBaseUrl(value?: string) {
   const trimmed = String(value || "").trim();
   return trimmed ? trimTrailingSlash(trimmed) : "";
+}
+
+function resolveBrowserVisibleBaseUrl(explicitBaseUrl: string | undefined, defaultPort: string) {
+  const explicit = normalizeBaseUrl(explicitBaseUrl);
+  if (explicit) return explicit;
+  if (typeof window === "undefined") return "";
+  const origin = new URL(window.location.origin);
+  origin.port = defaultPort;
+  return trimTrailingSlash(origin.origin);
 }
 
 function joinExternalUrl(base: string, pathOrUrl?: string) {
@@ -72,12 +91,33 @@ function parseHaLinksConfig() {
   }
 }
 
-export function getHaBaseUrl() {
-  return normalizeBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL);
+export function resolveIntegrationBases(): IntegrationBases {
+  return {
+    haBase: resolveBrowserVisibleBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL, DEFAULT_HA_PORT),
+    z2mBase: resolveBrowserVisibleBaseUrl(process.env.NEXT_PUBLIC_Z2M_BASE_URL, DEFAULT_Z2M_PORT)
+  };
 }
 
-export function getZ2MBaseUrl() {
-  return normalizeBaseUrl(process.env.NEXT_PUBLIC_Z2M_BASE_URL);
+export function useIntegrationBases() {
+  const [bases, setBases] = useState<IntegrationBases>(() => ({
+    haBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL),
+    z2mBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_Z2M_BASE_URL)
+  }));
+
+  useEffect(() => {
+    setBases(resolveIntegrationBases());
+  }, []);
+
+  const haLinks = useMemo(() => getHaHubLinks(bases.haBase), [bases.haBase]);
+  return { ...bases, haLinks };
+}
+
+export function getHaBaseUrl(haBaseUrl?: string) {
+  return normalizeBaseUrl(haBaseUrl) || resolveIntegrationBases().haBase;
+}
+
+export function getZ2MBaseUrl(z2mBaseUrl?: string) {
+  return normalizeBaseUrl(z2mBaseUrl) || resolveIntegrationBases().z2mBase;
 }
 
 export function getHaLinks(): HaLinkConfig {
@@ -97,8 +137,8 @@ export function getHaLinks(): HaLinkConfig {
   };
 }
 
-export function getHaHubLinks() {
-  const base = getHaBaseUrl();
+export function getHaHubLinks(haBaseUrl?: string) {
+  const base = getHaBaseUrl(haBaseUrl);
   const links = getHaLinks();
   return {
     overview: joinExternalUrl(base, links.overview),
@@ -113,15 +153,15 @@ export function getHaHubLinks() {
   };
 }
 
-export function getDeviceHaUrl(device?: Device | null) {
-  const base = getHaBaseUrl();
+export function getDeviceHaUrl(device?: Device | null, haBaseUrl?: string) {
+  const base = getHaBaseUrl(haBaseUrl);
   const entityId = getHaEntityId(device);
   if (!base || !entityId) return "";
   return joinExternalUrl(base, interpolateTemplate(getHaLinks().entityPath, { entityId }));
 }
 
-export function getDeviceZ2MUrl(device?: Device | null) {
-  const base = getZ2MBaseUrl();
+export function getDeviceZ2MUrl(device?: Device | null, z2mBaseUrl?: string) {
+  const base = getZ2MBaseUrl(z2mBaseUrl);
   const topic = getZigbeeTopic(device);
   if (!base || !topic) return "";
   const pathTemplate = getHaLinks().zigbeeDevicePath;
@@ -129,10 +169,10 @@ export function getDeviceZ2MUrl(device?: Device | null) {
   return joinExternalUrl(base, interpolateTemplate(pathTemplate, { topic }));
 }
 
-export function getDeviceExternalLinks(device?: Device | null) {
+export function getDeviceExternalLinks(device?: Device | null, bases?: Partial<IntegrationBases>) {
   return {
-    haUrl: getDeviceHaUrl(device),
-    zigbee2mqttUrl: getDeviceZ2MUrl(device)
+    haUrl: getDeviceHaUrl(device, bases?.haBase),
+    zigbee2mqttUrl: getDeviceZ2MUrl(device, bases?.z2mBase)
   };
 }
 
@@ -140,8 +180,8 @@ export function getMirroredHaDashboardUrlPath(floorplanId: string) {
   return `smarthouse-${slugSegment(floorplanId)}`;
 }
 
-export function getMirroredHaDashboardUrl(floorplanId: string) {
-  const base = getHaBaseUrl();
+export function getMirroredHaDashboardUrl(floorplanId: string, haBaseUrl?: string) {
+  const base = getHaBaseUrl(haBaseUrl);
   const path = getMirroredHaDashboardUrlPath(floorplanId);
   if (!base || !path) return "";
   return joinExternalUrl(base, `/${path}`);

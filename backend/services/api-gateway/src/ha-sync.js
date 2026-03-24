@@ -11,7 +11,9 @@ const ROOM_ALIAS_PREFIX = "__smarthouse__room:";
 const DASHBOARD_ICON = "mdi:floor-plan";
 const SCRIPT_ICON = "mdi:script-text-play";
 const SCENE_ICON = "mdi:palette-swatch";
-const REST_COMMAND_KEY = `${MANAGED_PREFIX}scene_run`;
+// Home Assistant rest_command keys must be valid slugs, so the managed prefix
+// used for entity ids ("smarthouse__") cannot be reused here.
+const REST_COMMAND_KEY = "smarthouse_scene_run";
 
 export class HomeAssistantMirrorService {
   constructor({ config, logger, floorplanStore, sceneStore, store }) {

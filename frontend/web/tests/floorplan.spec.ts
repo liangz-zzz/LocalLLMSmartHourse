@@ -8,7 +8,7 @@ const floorplanDetail = {
   devices: [{ deviceId: "light1", x: 0.2, y: 0.2, height: 1, rotation: 0, scale: 1 }]
 };
 
-const baseDevices = [
+const baseDevices: any[] = [
   {
     id: "light1",
     name: "客厅灯",

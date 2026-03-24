@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 
 import type { Capability, CapabilityParam, Device } from "../lib/device-types";
-import { getHaHubLinks } from "../lib/integrations";
+import { useIntegrationBases } from "../lib/integrations";
 
 type SceneSummary = { id: string; name: string; description?: string };
 
@@ -125,7 +125,7 @@ function isPlainObject(v: any) {
 export default function AutomationsPage() {
   const router = useRouter();
   const prefillDeviceId = typeof router.query.deviceId === "string" ? router.query.deviceId : "";
-  const haLinks = getHaHubLinks();
+  const { haLinks } = useIntegrationBases();
 
   const [automationList, setAutomationList] = useState<Automation[]>([]);
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);

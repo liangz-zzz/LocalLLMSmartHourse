@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import type { Device } from "../lib/device-types";
 import type { Floorplan, FloorplanSummary } from "../lib/floorplan-context";
 import { getStoredFloorplanId, resolveInitialFloorplanId, setStoredFloorplanId } from "../lib/floorplan-context";
-import { getDeviceExternalLinks } from "../lib/integrations";
+import { getDeviceExternalLinks, useIntegrationBases } from "../lib/integrations";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -61,6 +61,7 @@ const solidButtonStyle: CSSProperties = {
 };
 
 export default function Home() {
+  const { haBase, z2mBase } = useIntegrationBases();
   const [devices, setDevices] = useState<Record<string, Device>>({});
   const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
   const [currentFloorplan, setCurrentFloorplan] = useState<Floorplan | null>(null);
@@ -256,8 +257,9 @@ export default function Home() {
     let virtualDevices = 0;
 
     for (const device of deviceList) {
-      if (getDeviceExternalLinks(device).haUrl) withHa += 1;
-      if (getDeviceExternalLinks(device).zigbee2mqttUrl) withZ2m += 1;
+      const links = getDeviceExternalLinks(device, { haBase, z2mBase });
+      if (links.haUrl) withHa += 1;
+      if (links.zigbee2mqttUrl) withZ2m += 1;
       if (device.protocol === "virtual") virtualDevices += 1;
     }
 
@@ -269,7 +271,7 @@ export default function Home() {
       withZ2m,
       virtualDevices
     };
-  }, [deviceList, roomSummary, scenes]);
+  }, [deviceList, roomSummary, scenes, haBase, z2mBase]);
 
   const submitChat = async () => {
     if (!chatInput.trim()) return;
@@ -567,7 +569,7 @@ export default function Home() {
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginTop: 16 }}>
                 {deviceList.map((device) => {
-                  const links = getDeviceExternalLinks(device);
+                  const links = getDeviceExternalLinks(device, { haBase, z2mBase });
                   const room = device.placement?.room || "未归类";
                   const traitSummary = formatTraitSummary(device.traits);
                   return (

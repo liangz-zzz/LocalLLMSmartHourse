@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 
 import type { Device } from "../lib/device-types";
 import { setStoredFloorplanId } from "../lib/floorplan-context";
-import { getDeviceExternalLinks } from "../lib/integrations";
+import { getDeviceExternalLinks, useIntegrationBases } from "../lib/integrations";
 
 type Point2D = { x: number; y: number };
 type Point3D = { x: number; y: number; z: number };
@@ -435,8 +435,11 @@ function ThreePreview({
     let canceled = false;
     const setup = async () => {
       if (!containerRef.current) return;
+      // @ts-expect-error The three.js browser bundles are served from /public/vendor at runtime.
       const THREE = await import(/* webpackIgnore: true */ "/vendor/three/three.module.js");
+      // @ts-expect-error The GLTFLoader browser bundle is served from /public/vendor at runtime.
       const { GLTFLoader } = await import(/* webpackIgnore: true */ "/vendor/three/GLTFLoader.js");
+      // @ts-expect-error The OrbitControls browser bundle is served from /public/vendor at runtime.
       const { OrbitControls } = await import(/* webpackIgnore: true */ "/vendor/three/OrbitControls.js");
       if (canceled || !containerRef.current) return;
 
@@ -581,7 +584,7 @@ function ThreePreview({
     state.markers = markers;
     const deviceIds = new Set(devices.map((d) => d.deviceId));
 
-    for (const [id, mesh] of markers.entries()) {
+    for (const [id, mesh] of Array.from(markers.entries())) {
       if (!deviceIds.has(id)) {
         state.scene.remove(mesh);
         markers.delete(id);
@@ -633,6 +636,7 @@ function ThreePreview({
 
 export default function FloorplanPage() {
   const router = useRouter();
+  const { haBase, z2mBase } = useIntegrationBases();
   const [pageStage, setPageStage] = useState<PageStage>("browse");
   const [browseView, setBrowseView] = useState<BrowseView>("select");
   const [mode, setMode] = useState<Mode>("view");
@@ -1045,7 +1049,7 @@ export default function FloorplanPage() {
   const selectedRoom = draft?.rooms.find((room) => room.id === selectedRoomId) || null;
   const selectedPlacedDevice = draft?.devices.find((device) => device.deviceId === selectedDeviceId) || null;
   const selectedDevice = selectedPlacedDevice ? deviceMap[selectedPlacedDevice.deviceId] : null;
-  const selectedDeviceLinks = getDeviceExternalLinks(selectedDevice);
+  const selectedDeviceLinks = getDeviceExternalLinks(selectedDevice, { haBase, z2mBase });
   const availablePlacementDevices = draft ? devices.filter((device) => !draft.devices.some((item) => item.deviceId === device.id)) : devices;
   const availablePlacementDeviceIds = new Set(availablePlacementDevices.map((device) => device.id));
   const persistedImageScale = draft?.imageScale || null;

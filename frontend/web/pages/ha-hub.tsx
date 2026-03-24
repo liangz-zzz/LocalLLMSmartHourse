@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { FloorplanSummary } from "../lib/floorplan-context";
 import { getStoredFloorplanId, resolveInitialFloorplanId, setStoredFloorplanId } from "../lib/floorplan-context";
-import { getHaBaseUrl, getHaHubLinks, getMirroredHaDashboardUrl, getZ2MBaseUrl } from "../lib/integrations";
+import { getMirroredHaDashboardUrl, useIntegrationBases } from "../lib/integrations";
 
 const pageBg = "linear-gradient(135deg, #eef4ff 0%, #f7fafc 45%, #edf7f2 100%)";
 
@@ -77,9 +77,7 @@ function ExternalLinkButton({ href, label, testId }: { href: string; label: stri
 
 export default function HaHubPage() {
   const router = useRouter();
-  const haLinks = getHaHubLinks();
-  const haBase = getHaBaseUrl();
-  const z2mBase = getZ2MBaseUrl();
+  const { haBase, z2mBase, haLinks } = useIntegrationBases();
   const [floorplans, setFloorplans] = useState<FloorplanSummary[]>([]);
   const [selectedFloorplanId, setSelectedFloorplanId] = useState("");
   const [syncStatus, setSyncStatus] = useState<HaSyncStatus | null>(null);
@@ -91,7 +89,7 @@ export default function HaHubPage() {
     () => floorplans.find((floorplan) => floorplan.id === selectedFloorplanId) || null,
     [floorplans, selectedFloorplanId]
   );
-  const mirroredDashboardUrl = selectedFloorplanId ? getMirroredHaDashboardUrl(selectedFloorplanId) : "";
+  const mirroredDashboardUrl = selectedFloorplanId ? getMirroredHaDashboardUrl(selectedFloorplanId, haBase) : "";
 
   const load = async () => {
     setLoading(true);

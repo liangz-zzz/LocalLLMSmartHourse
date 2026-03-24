@@ -2,7 +2,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import type { PropsWithChildren } from "react";
 
-import { getHaBaseUrl, getHaHubLinks, getZ2MBaseUrl } from "../lib/integrations";
+import { useIntegrationBases } from "../lib/integrations";
 
 const navItems = [
   { href: "/", label: "Home" },
@@ -72,9 +72,7 @@ function renderUtilityLink(label: string, href: string) {
 
 export function AppShell({ children }: PropsWithChildren) {
   const router = useRouter();
-  const haBase = getHaBaseUrl();
-  const z2mBase = getZ2MBaseUrl();
-  const haHubLinks = getHaHubLinks();
+  const { haBase, z2mBase, haLinks: haHubLinks } = useIntegrationBases();
 
   return (
     <>

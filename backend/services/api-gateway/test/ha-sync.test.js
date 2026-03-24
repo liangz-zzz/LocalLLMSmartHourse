@@ -80,6 +80,7 @@ test("ha sync exports simple scenes and delegates complex scenes to scripts", ()
   assert.equal(generatedScenes[0].id, "smarthouse__welcome_home");
   assert.equal(Object.keys(generatedScripts).length, 1);
   assert.ok(generatedScripts.smarthouse__sleep_mode);
+  assert.equal(generatedScripts.smarthouse__sleep_mode.sequence[0].service, "rest_command.smarthouse_scene_run");
 });
 
 test("ha sync merges generated yaml while preserving user entries", () => {
