@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+function integrationBase(pageUrl: string, port: number) {
+  const url = new URL(pageUrl);
+  url.port = String(port);
+  return url.origin;
+}
+
 const devicesPayload = {
   items: [
     {
@@ -76,13 +82,15 @@ test.describe("device dashboard", () => {
 
   test("shows summary links and can parse and execute intent", async ({ page }) => {
     await page.goto("/");
+    const haBase = integrationBase(page.url(), 8123);
+    const z2mBase = integrationBase(page.url(), 8080);
     await expect(page.getByTestId("home-page")).toBeVisible();
     await expect(page.getByTestId("current-floorplan-name")).toContainText("一层");
     await expect(page.getByTestId("summary-total-scenes")).toContainText("1");
     await expect(page.getByTestId("device-summary-card-light1")).toBeVisible();
     await expect(page.getByTestId("summary-ha-bound")).toContainText("1");
-    await expect(page.getByTestId("device-open-ha-light1")).toHaveAttribute("href", "http://ha.local/history?entity_id=light.living_room_main");
-    await expect(page.getByTestId("device-open-z2m-light1")).toHaveAttribute("href", "http://z2m.local");
+    await expect(page.getByTestId("device-open-ha-light1")).toHaveAttribute("href", `${haBase}/history?entity_id=light.living_room_main`);
+    await expect(page.getByTestId("device-open-z2m-light1")).toHaveAttribute("href", z2mBase);
 
     // intent parse + execute
     await page.getByTestId("intent-input").fill("打开客厅灯");

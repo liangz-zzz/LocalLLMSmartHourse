@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+function integrationBase(pageUrl: string, port: number) {
+  const url = new URL(pageUrl);
+  url.port = String(port);
+  return url.origin;
+}
+
 const floorplanDetail = {
   id: "floor1",
   name: "一层",
@@ -424,10 +430,12 @@ test.describe("floorplan editor", () => {
 
   test("selected placed device exposes HA and Zigbee2MQTT links", async ({ page }) => {
     await openFloorplanEditor(page);
+    const haBase = integrationBase(page.url(), 8123);
+    const z2mBase = integrationBase(page.url(), 8080);
     await page.getByTestId("mode-devices").click();
     await page.getByTestId("floorplan-device-light1").click();
-    await expect(page.getByTestId("floorplan-open-ha")).toHaveAttribute("href", "http://ha.local/history?entity_id=light.living_room_main");
-    await expect(page.getByTestId("floorplan-open-z2m")).toHaveAttribute("href", "http://z2m.local");
+    await expect(page.getByTestId("floorplan-open-ha")).toHaveAttribute("href", `${haBase}/history?entity_id=light.living_room_main`);
+    await expect(page.getByTestId("floorplan-open-z2m")).toHaveAttribute("href", z2mBase);
   });
 
   test("can place a device inside an already defined room area", async ({ page }) => {

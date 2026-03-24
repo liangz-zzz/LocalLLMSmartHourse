@@ -31,7 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.end();
       return;
     }
-    Readable.fromWeb(body as import("node:stream/web").ReadableStream).pipe(res);
+    Readable.fromWeb(body as any).pipe(res);
   } catch (err) {
     res.status(500).json({ error: "failed", message: (err as Error).message });
   }

@@ -91,6 +91,13 @@ function parseHaLinksConfig() {
   }
 }
 
+function getConfiguredIntegrationBases(): IntegrationBases {
+  return {
+    haBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL),
+    z2mBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_Z2M_BASE_URL)
+  };
+}
+
 export function resolveIntegrationBases(): IntegrationBases {
   return {
     haBase: resolveBrowserVisibleBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL, DEFAULT_HA_PORT),
@@ -99,10 +106,7 @@ export function resolveIntegrationBases(): IntegrationBases {
 }
 
 export function useIntegrationBases() {
-  const [bases, setBases] = useState<IntegrationBases>(() => ({
-    haBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_HA_BASE_URL),
-    z2mBase: normalizeBaseUrl(process.env.NEXT_PUBLIC_Z2M_BASE_URL)
-  }));
+  const [bases, setBases] = useState<IntegrationBases>(() => getConfiguredIntegrationBases());
 
   useEffect(() => {
     setBases(resolveIntegrationBases());
@@ -113,11 +117,13 @@ export function useIntegrationBases() {
 }
 
 export function getHaBaseUrl(haBaseUrl?: string) {
-  return normalizeBaseUrl(haBaseUrl) || resolveIntegrationBases().haBase;
+  if (haBaseUrl !== undefined) return normalizeBaseUrl(haBaseUrl);
+  return getConfiguredIntegrationBases().haBase;
 }
 
 export function getZ2MBaseUrl(z2mBaseUrl?: string) {
-  return normalizeBaseUrl(z2mBaseUrl) || resolveIntegrationBases().z2mBase;
+  if (z2mBaseUrl !== undefined) return normalizeBaseUrl(z2mBaseUrl);
+  return getConfiguredIntegrationBases().z2mBase;
 }
 
 export function getHaLinks(): HaLinkConfig {
