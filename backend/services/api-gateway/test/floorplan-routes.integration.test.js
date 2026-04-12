@@ -7,6 +7,7 @@ import path from "node:path";
 import { buildServer } from "../src/server.js";
 import { MockStore } from "../src/store.js";
 import { FloorplanStore } from "../src/floorplan-store.js";
+import { DeviceOverridesStore } from "../src/device-overrides-store.js";
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "floorplan-routes-"));
@@ -89,6 +90,58 @@ test("floorplan routes support CRUD", async () => {
     assert.equal(deleteRes.status, 200);
     const deleted = await deleteRes.json();
     assert.equal(deleted.status, "deleted");
+
+    await app.close();
+  });
+});
+
+test("floorplan updates sync placed voice satellites back to voice_control coordinates", async () => {
+  await withTempDir(async (dir) => {
+    const samplePath = new URL("../src/fixtures/living_room_plug.json", import.meta.url);
+    const store = new MockStore(samplePath);
+    await store.init();
+    const floorplanStore = new FloorplanStore({ floorplansPath: path.join(dir, "floorplans.json") });
+    const deviceOverridesPath = path.join(dir, "devices.config.json");
+    await fs.writeFile(
+      deviceOverridesPath,
+      JSON.stringify(
+        {
+          voice_control: {
+            mics: [
+              {
+                id: "living-room-respeaker",
+                placement: {
+                  room: "living_room"
+                }
+              }
+            ]
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    const deviceOverridesStore = new DeviceOverridesStore({ deviceOverridesPath });
+    const config = { mode: "mock", assetsDir: path.join(dir, "assets") };
+    const app = buildServer({ store, logger: console, config, floorplanStore, deviceOverridesStore });
+    await app.listen({ port: 0 });
+    const baseUrl = `http://127.0.0.1:${app.server.address().port}`;
+
+    const payload = {
+      ...buildPlan(),
+      devices: [{ deviceId: "living-room-respeaker", x: 0.62, y: 0.18 }]
+    };
+    const createdRes = await fetch(`${baseUrl}/floorplans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(createdRes.status, 200);
+
+    const saved = JSON.parse(await fs.readFile(deviceOverridesPath, "utf8"));
+    assert.equal(saved.voice_control.mics[0].placement.coordinates.x, 0.62);
+    assert.equal(saved.voice_control.mics[0].placement.coordinates.y, 0.18);
 
     await app.close();
   });

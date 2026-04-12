@@ -33,6 +33,20 @@ export class DeviceOverridesStore {
     return list.find((d) => d.id === id);
   }
 
+  async listVoiceMics() {
+    const { envelope } = await this.loadEnvelope();
+    const { voiceEnvelope } = resolveVoiceEnvelope(envelope);
+    validateVoiceMicList(voiceEnvelope.mics);
+    return voiceEnvelope.mics;
+  }
+
+  async getVoiceMic(id) {
+    const micId = String(id || "").trim();
+    if (!micId) return null;
+    const list = await this.listVoiceMics();
+    return list.find((item) => item.id === micId) || null;
+  }
+
   async upsert(id, patch) {
     const list = await this.list();
     const deviceId = String(id || "").trim();
@@ -48,6 +62,26 @@ export class DeviceOverridesStore {
 
     validateOverrideList(next);
     await this.save(next);
+    return merged;
+  }
+
+  async upsertVoiceMic(id, patch) {
+    const micId = String(id || "").trim();
+    if (!micId) throw new DeviceOverridesStoreError("invalid_device_override", "voice mic id is required");
+
+    const { devices, envelope } = await this.loadEnvelope();
+    const { key, voiceEnvelope } = resolveVoiceEnvelope(envelope);
+    const next = [...voiceEnvelope.mics];
+    const index = next.findIndex((item) => item?.id === micId);
+    const existing = index >= 0 ? next[index] : null;
+    const merged = mergeVoiceMic(existing, { ...(patch || {}), id: micId });
+
+    if (index >= 0) next[index] = merged;
+    else next.push(merged);
+
+    validateVoiceMicList(next);
+    const nextEnvelope = { ...(envelope || {}), [key]: { ...(voiceEnvelope.meta || {}), mics: next } };
+    await this.saveEnvelope({ devices, envelope: nextEnvelope });
     return merged;
   }
 
@@ -79,12 +113,16 @@ export class DeviceOverridesStore {
   }
 
   async save(list) {
+    const { envelope } = await this.loadEnvelope();
+    await this.saveEnvelope({ devices: list, envelope });
+  }
+
+  async saveEnvelope({ devices, envelope }) {
     const resolved = this.resolvePath();
     const dir = path.dirname(resolved);
     await fs.mkdir(dir, { recursive: true });
     const tmp = `${resolved}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const { envelope } = await this.loadEnvelope();
-    const payload = JSON.stringify({ ...(envelope || {}), devices: list }, null, 2);
+    const payload = JSON.stringify({ ...(envelope || {}), devices }, null, 2);
     await fs.writeFile(tmp, payload, "utf8");
     await fs.rename(tmp, resolved);
   }
@@ -132,6 +170,33 @@ function validateOverrideList(list) {
   }
 }
 
+function validateVoiceMicList(list) {
+  if (!Array.isArray(list)) throw new DeviceOverridesStoreError("invalid_device_override", "voice_control.mics must be an array");
+  const ids = new Set();
+  const errors = [];
+  list.forEach((entry, idx) => {
+    const prefix = `voice_control.mics[${idx}]`;
+    if (!isPlainObject(entry)) {
+      errors.push(`${prefix} must be an object`);
+      return;
+    }
+    const id = String(entry.id || "").trim();
+    if (!id) {
+      errors.push(`${prefix}.id is required`);
+      return;
+    }
+    if (ids.has(id)) errors.push(`${prefix}.id duplicate: ${id}`);
+    ids.add(id);
+    if (entry.placement !== undefined && !isPlainObject(entry.placement)) errors.push(`${prefix}.placement must be an object`);
+    if (entry.placement?.coordinates !== undefined && !isPlainObject(entry.placement.coordinates)) {
+      errors.push(`${prefix}.placement.coordinates must be an object`);
+    }
+  });
+  if (errors.length) {
+    throw new DeviceOverridesStoreError("invalid_device_override", errors.join("; "), { details: errors });
+  }
+}
+
 function mergeOverride(existing, patch) {
   const out = { ...(existing || {}) };
   for (const [k, v] of Object.entries(patch || {})) {
@@ -145,6 +210,19 @@ function mergeOverride(existing, patch) {
     }
     if (k === "semantics" && isPlainObject(v)) {
       out.semantics = mergeSemantics(out.semantics, v);
+      continue;
+    }
+    out[k] = v;
+  }
+  out.id = String(patch?.id || out.id || "").trim();
+  return out;
+}
+
+function mergeVoiceMic(existing, patch) {
+  const out = { ...(existing || {}) };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (k === "placement" && isPlainObject(v)) {
+      out.placement = deepMerge(out.placement || {}, v);
       continue;
     }
     out[k] = v;
@@ -175,4 +253,39 @@ function deepMerge(a, b) {
 
 function isPlainObject(v) {
   return v && typeof v === "object" && !Array.isArray(v);
+}
+
+function resolveVoiceEnvelope(envelope) {
+  if (isPlainObject(envelope?.voice_control)) {
+    return {
+      key: "voice_control",
+      voiceEnvelope: {
+        meta: { ...envelope.voice_control },
+        mics: normalizeVoiceMicList(envelope.voice_control.mics)
+      }
+    };
+  }
+  if (isPlainObject(envelope?.voice)) {
+    return {
+      key: "voice",
+      voiceEnvelope: {
+        meta: { ...envelope.voice },
+        mics: normalizeVoiceMicList(envelope.voice.mics)
+      }
+    };
+  }
+  return { key: "voice_control", voiceEnvelope: { meta: {}, mics: [] } };
+}
+
+function normalizeVoiceMicList(value) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(value) ? value : []) {
+    if (!isPlainObject(item)) continue;
+    const id = String(item.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ ...item, id });
+  }
+  return out;
 }

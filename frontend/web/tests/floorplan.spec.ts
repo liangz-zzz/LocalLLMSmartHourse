@@ -438,6 +438,32 @@ test.describe("floorplan editor", () => {
     await expect(page.getByTestId("floorplan-open-z2m")).toHaveAttribute("href", z2mBase);
   });
 
+  test("device mode keeps canvas cursor neutral and device markers clickable", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await expect(page.getByTestId("floorplan-canvas")).toHaveCSS("cursor", "default");
+    await expect(page.getByTestId("floorplan-canvas")).toHaveCSS("user-select", "none");
+    await expect(page.getByTestId("floorplan-device-light1")).toHaveCSS("cursor", "pointer");
+    await page.getByTestId("floorplan-device-light1").click();
+    await expect(page.getByText("当前选中：客厅灯")).toBeVisible();
+  });
+
+  test("placed device can be dragged to a new position", async ({ page }) => {
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    const marker = page.getByTestId("floorplan-device-light1");
+    const before = await marker.boundingBox();
+    if (!before) throw new Error("device marker not visible before drag");
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width / 2 + 60, before.y + before.height / 2 + 30, { steps: 8 });
+    await page.mouse.up();
+    const after = await marker.boundingBox();
+    if (!after) throw new Error("device marker not visible after drag");
+    expect(after.x).toBeGreaterThan(before.x + 30);
+    expect(after.y).toBeGreaterThan(before.y + 10);
+  });
+
   test("can place a device inside an already defined room area", async ({ page }) => {
     await openFloorplanEditor(page);
     await page.getByTestId("mode-rooms").click();

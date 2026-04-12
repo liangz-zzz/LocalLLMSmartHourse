@@ -69,8 +69,8 @@ services:
       - |
           set -euo pipefail
           cd /app
-          mkdir -p /app/node_modules
-          chown -R node:node /app/node_modules
+          mkdir -p /app/node_modules /app/.next
+          chown -R node:node /app/node_modules /app/.next
           su node -c "cd /app && npm ci"
           until curl -fsS --max-time 2 "http://api-gateway:${API_HTTP_PORT:-4000}/health" >/dev/null 2>&1; do echo "[web] waiting for api-gateway:${API_HTTP_PORT:-4000}"; sleep 1; done
           until curl -fsS --max-time 2 "http://llm-bridge:5000/health" >/dev/null 2>&1; do echo "[web] waiting for llm-bridge:5000"; sleep 1; done

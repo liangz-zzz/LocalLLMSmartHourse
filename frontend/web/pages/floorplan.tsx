@@ -1,7 +1,7 @@
 import Head from "next/head";
 import Script from "next/script";
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { Device } from "../lib/device-types";
 import { setStoredFloorplanId } from "../lib/floorplan-context";
@@ -160,10 +160,14 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-function toNormalizedPoint(evt: ReactPointerEvent, rect: DOMRect): Point2D {
-  const x = clamp01((evt.clientX - rect.left) / rect.width);
-  const y = clamp01((evt.clientY - rect.top) / rect.height);
+function toNormalizedPointFromClient(clientX: number, clientY: number, rect: DOMRect): Point2D {
+  const x = clamp01((clientX - rect.left) / rect.width);
+  const y = clamp01((clientY - rect.top) / rect.height);
   return { x, y };
+}
+
+function toNormalizedPoint(evt: ReactPointerEvent, rect: DOMRect): Point2D {
+  return toNormalizedPointFromClient(evt.clientX, evt.clientY, rect);
 }
 
 function resolveAssetUrl(url: string) {
@@ -653,6 +657,7 @@ export default function FloorplanPage() {
   const [status, setStatus] = useState<string>("");
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [draggingDeviceId, setDraggingDeviceId] = useState<string | null>(null);
   const [draftRoomPoints, setDraftRoomPoints] = useState<Point2D[]>([]);
   const [draftRoomName, setDraftRoomName] = useState<string>("");
   const [isDrawingRoom, setIsDrawingRoom] = useState<boolean>(false);
@@ -702,6 +707,15 @@ export default function FloorplanPage() {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const draggingDeviceRef = useRef<string | null>(null);
+  const draggingDevicePointerIdRef = useRef<number | null>(null);
+  const draggingDeviceHandleRef = useRef<SVGCircleElement | null>(null);
+  const draggingDeviceCleanupRef = useRef<(() => void) | null>(null);
+  const draggingDeviceBodyStyleRef = useRef<{
+    userSelect: string;
+    webkitUserSelect: string;
+    cursor: string;
+    htmlCursor: string;
+  } | null>(null);
   const draggingHandleRef = useRef<{ roomId: string; index: number } | null>(null);
   const replaceImageInputRef = useRef<HTMLInputElement | null>(null);
   const replaceModelInputRef = useRef<HTMLInputElement | null>(null);
@@ -1143,6 +1157,82 @@ export default function FloorplanPage() {
       setStatus("设备点位已添加，可在右侧继续调整高度、旋转和语义信息");
       return;
     }
+  };
+
+  const handleDevicePointerDown = (evt: ReactPointerEvent<SVGCircleElement> | ReactMouseEvent<SVGCircleElement>, deviceId: string) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (mode === "devices") {
+      if (draggingDeviceRef.current === deviceId) return;
+      draggingDeviceCleanupRef.current?.();
+      draggingDeviceCleanupRef.current = null;
+      if (!draggingDeviceBodyStyleRef.current) {
+        draggingDeviceBodyStyleRef.current = {
+          userSelect: document.body.style.userSelect,
+          webkitUserSelect: document.body.style.webkitUserSelect,
+          cursor: document.body.style.cursor,
+          htmlCursor: document.documentElement.style.cursor
+        };
+      }
+      document.body.style.userSelect = "none";
+      document.body.style.webkitUserSelect = "none";
+      document.body.style.cursor = "grabbing";
+      document.documentElement.style.cursor = "grabbing";
+      draggingDeviceRef.current = deviceId;
+      draggingDeviceHandleRef.current = evt.currentTarget;
+      draggingDeviceHandleRef.current.style.cursor = "grabbing";
+      if ("pointerId" in evt) {
+        draggingDevicePointerIdRef.current = evt.pointerId;
+        evt.currentTarget.setPointerCapture?.(evt.pointerId);
+      }
+      const handleWindowPointerMove = (event: PointerEvent) => {
+        if (event.cancelable) event.preventDefault();
+        moveDraggingDevice(event.clientX, event.clientY);
+      };
+      const handleWindowPointerUp = () => {
+        handlePointerUp();
+      };
+      const handleWindowMouseMove = (event: MouseEvent) => {
+        if (event.cancelable) event.preventDefault();
+        moveDraggingDevice(event.clientX, event.clientY);
+      };
+      const handleWindowMouseUp = () => {
+        handlePointerUp();
+      };
+      const handleWindowBlur = () => {
+        handlePointerUp();
+      };
+      window.addEventListener("pointermove", handleWindowPointerMove);
+      window.addEventListener("pointerup", handleWindowPointerUp);
+      window.addEventListener("pointercancel", handleWindowPointerUp);
+      window.addEventListener("mousemove", handleWindowMouseMove);
+      window.addEventListener("mouseup", handleWindowMouseUp);
+      window.addEventListener("blur", handleWindowBlur);
+      draggingDeviceCleanupRef.current = () => {
+        window.removeEventListener("pointermove", handleWindowPointerMove);
+        window.removeEventListener("pointerup", handleWindowPointerUp);
+        window.removeEventListener("pointercancel", handleWindowPointerUp);
+        window.removeEventListener("mousemove", handleWindowMouseMove);
+        window.removeEventListener("mouseup", handleWindowMouseUp);
+        window.removeEventListener("blur", handleWindowBlur);
+      };
+      setDraggingDeviceId(deviceId);
+    }
+    setSelectedDeviceId(deviceId);
+  };
+
+  const moveDraggingDevice = (clientX: number, clientY: number) => {
+    if (!draggingDeviceRef.current || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const point = toNormalizedPointFromClient(clientX, clientY, rect);
+    updateDraft((prev) => ({
+      ...prev,
+      devices: prev.devices.map((device) => {
+        if (device.deviceId !== draggingDeviceRef.current) return device;
+        const roomId = findRoomForPoint(prev.rooms || [], point);
+        return { ...device, x: point.x, y: point.y, roomId };
+      })
+    }));
   };
 
   const finishRoom = () => {
@@ -1720,14 +1810,7 @@ export default function FloorplanPage() {
     const point = toNormalizedPoint(evt, rect);
 
     if (draggingDeviceRef.current) {
-      updateDraft((prev) => ({
-        ...prev,
-        devices: prev.devices.map((device) => {
-          if (device.deviceId !== draggingDeviceRef.current) return device;
-          const roomId = findRoomForPoint(prev.rooms || [], point);
-          return { ...device, x: point.x, y: point.y, roomId };
-        })
-      }));
+      moveDraggingDevice(evt.clientX, evt.clientY);
       return;
     }
 
@@ -1746,9 +1829,37 @@ export default function FloorplanPage() {
   };
 
   const handlePointerUp = () => {
+    if (draggingDeviceHandleRef.current && draggingDevicePointerIdRef.current !== null) {
+      try {
+        draggingDeviceHandleRef.current.releasePointerCapture?.(draggingDevicePointerIdRef.current);
+      } catch {
+        // Ignore if the pointer was already released by the browser.
+      }
+    }
+    if (draggingDeviceHandleRef.current) {
+      draggingDeviceHandleRef.current.style.cursor = "pointer";
+    }
+    draggingDeviceCleanupRef.current?.();
+    draggingDeviceCleanupRef.current = null;
+    if (draggingDeviceBodyStyleRef.current) {
+      document.body.style.userSelect = draggingDeviceBodyStyleRef.current.userSelect;
+      document.body.style.webkitUserSelect = draggingDeviceBodyStyleRef.current.webkitUserSelect;
+      document.body.style.cursor = draggingDeviceBodyStyleRef.current.cursor;
+      document.documentElement.style.cursor = draggingDeviceBodyStyleRef.current.htmlCursor;
+      draggingDeviceBodyStyleRef.current = null;
+    }
     draggingDeviceRef.current = null;
+    draggingDevicePointerIdRef.current = null;
+    draggingDeviceHandleRef.current = null;
     draggingHandleRef.current = null;
+    setDraggingDeviceId(null);
   };
+
+  useEffect(() => {
+    return () => {
+      handlePointerUp();
+    };
+  }, []);
 
   const svgRoomPaths = draft?.rooms.map((room) => {
     const points = room.polygon.map((p) => `${p.x * imageWidth},${p.y * imageHeight}`).join(" ");
@@ -3257,11 +3368,15 @@ export default function FloorplanPage() {
                             width: canvasRenderWidth,
                             height: canvasRenderHeight,
                             display: "block",
+                            userSelect: "none",
+                            WebkitUserSelect: "none",
                             cursor:
                               mode === "devices"
                                 ? placingDeviceId
                                   ? "crosshair"
-                                  : "grab"
+                                  : draggingDeviceId
+                                    ? "grabbing"
+                                    : "default"
                                 : mode === "rooms" && isDrawingRoom
                                   ? "crosshair"
                                   : mode === "calibration"
@@ -3271,6 +3386,7 @@ export default function FloorplanPage() {
                           onPointerDown={(evt) => handleSvgClick(evt)}
                           onPointerMove={handlePointerMove}
                           onPointerUp={handlePointerUp}
+                          onPointerCancel={handlePointerUp}
                           data-testid="floorplan-canvas"
                         >
                           <image href={resolveAssetUrl(draft.image.url)} width={imageWidth} height={imageHeight} />
@@ -3324,13 +3440,20 @@ export default function FloorplanPage() {
                                 fill={room.id === selectedRoomId ? "rgba(14, 116, 144, 0.2)" : "rgba(14, 116, 144, 0.12)"}
                                 stroke={room.id === selectedRoomId ? "#0e7490" : "#0ea5a4"}
                                 strokeWidth={2}
+                                pointerEvents={mode === "rooms" ? "auto" : "none"}
                                 onPointerDown={(evt) => {
                                   if (mode !== "rooms") return;
                                   evt.stopPropagation();
                                   setSelectedRoomId(room.id);
                                 }}
                               />
-                              <text x={room.polygon[0].x * imageWidth + 6} y={room.polygon[0].y * imageHeight + 16} fontSize="12" fill="#0f172a">
+                              <text
+                                x={room.polygon[0].x * imageWidth + 6}
+                                y={room.polygon[0].y * imageHeight + 16}
+                                fontSize="12"
+                                fill="#0f172a"
+                                pointerEvents="none"
+                              >
                                 {room.name}
                               </text>
                               {mode === "rooms" &&
@@ -3341,6 +3464,7 @@ export default function FloorplanPage() {
                                     cy={point.y * imageHeight}
                                     r={5}
                                     fill="#0f172a"
+                                    style={{ cursor: "pointer" }}
                                     onPointerDown={(evt) => {
                                       evt.stopPropagation();
                                       draggingHandleRef.current = { roomId: room.id, index: idx };
@@ -3362,24 +3486,43 @@ export default function FloorplanPage() {
                               <circle
                                 cx={device.x * imageWidth}
                                 cy={device.y * imageHeight}
+                                r={16}
+                                fill="transparent"
+                                pointerEvents="all"
+                                style={{
+                                  cursor: mode === "devices" ? (draggingDeviceId === device.deviceId ? "grabbing" : "pointer") : "pointer",
+                                  touchAction: "none"
+                                }}
+                                data-testid={`floorplan-device-${device.deviceId}`}
+                                onPointerDown={(evt) => handleDevicePointerDown(evt, device.deviceId)}
+                                onMouseDown={(evt) => handleDevicePointerDown(evt, device.deviceId)}
+                              />
+                              <circle
+                                cx={device.x * imageWidth}
+                                cy={device.y * imageHeight}
                                 r={8}
                                 fill={color}
                                 stroke={device.deviceId === selectedDeviceId ? "#0f172a" : "white"}
                                 strokeWidth={2}
-                                data-testid={`floorplan-device-${device.deviceId}`}
-                                onPointerDown={(evt) => {
-                                  evt.stopPropagation();
-                                  if (mode === "devices") {
-                                    draggingDeviceRef.current = device.deviceId;
-                                  }
-                                  setSelectedDeviceId(device.deviceId);
-                                }}
+                                pointerEvents="none"
                               />
-                              <text x={device.x * imageWidth + 12} y={device.y * imageHeight - 6} fontSize="12" fill="#0f172a">
+                              <text
+                                x={device.x * imageWidth + 12}
+                                y={device.y * imageHeight - 6}
+                                fontSize="12"
+                                fill="#0f172a"
+                                pointerEvents="none"
+                              >
                                 {deviceMap[device.deviceId]?.name || device.deviceId}
                               </text>
                               {label && (
-                                <text x={device.x * imageWidth + 12} y={device.y * imageHeight + 10} fontSize="11" fill="#64748b">
+                                <text
+                                  x={device.x * imageWidth + 12}
+                                  y={device.y * imageHeight + 10}
+                                  fontSize="11"
+                                  fill="#64748b"
+                                  pointerEvents="none"
+                                >
                                   {label}
                                 </text>
                               )}

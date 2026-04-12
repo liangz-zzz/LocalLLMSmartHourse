@@ -93,6 +93,26 @@ export function buildServer({
     haSyncService?.schedule?.(reason);
   };
 
+  const listVisibleDevices = async () => {
+    const list = (await store.list()) || [];
+    if (!deviceOverridesStore?.listVoiceMics) return list;
+    const synthetic = await buildVoiceSatelliteDevices(deviceOverridesStore);
+    if (!synthetic.length) return list;
+    const existingIds = new Set(list.map((item) => String(item?.id || "").trim()).filter(Boolean));
+    return [...list, ...synthetic.filter((item) => !existingIds.has(String(item?.id || "").trim()))];
+  };
+
+  const getVisibleDevice = async (id) => {
+    const deviceId = String(id || "").trim();
+    if (!deviceId) return null;
+    const found = await store.get(deviceId);
+    if (found) return found;
+    if (!deviceOverridesStore?.getVoiceMic) return null;
+    const [voiceMic, override] = await Promise.all([deviceOverridesStore.getVoiceMic(deviceId), deviceOverridesStore.get(deviceId)]);
+    if (!voiceMic) return null;
+    return buildVoiceSatelliteDevice({ mic: voiceMic, override });
+  };
+
   const resolveFloorplanFilter = async (req, reply) => {
     const floorplanId = String(req.query?.floorplanId || "").trim();
     if (!floorplanId) return null;
@@ -228,7 +248,7 @@ export function buildServer({
   });
 
   app.get("/devices", { preHandler: authGuard }, async (req, reply) => {
-    let list = await store.list();
+    let list = await listVisibleDevices();
     const floorplan = await resolveFloorplanFilter(req, reply);
     if (floorplan === Symbol.for("handled")) return;
     if (floorplan) {
@@ -239,7 +259,7 @@ export function buildServer({
   });
 
   app.get("/devices/:id", { preHandler: authGuard }, async (req, reply) => {
-    const device = await store.get(req.params.id);
+    const device = await getVisibleDevice(req.params.id);
     if (!device) {
       return reply.code(404).send({ error: "not_found" });
     }
@@ -509,6 +529,7 @@ export function buildServer({
     if (!floorplanStore) return reply.code(503).send({ error: "floorplan_store_unavailable" });
     try {
       const created = await floorplanStore.create(req.body || {});
+      await syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan: created });
       logger?.info("floorplan.created", { id: created?.id, actor: getActor(req) });
       triggerHaSync("floorplan.created");
       return created;
@@ -525,6 +546,7 @@ export function buildServer({
     }
     try {
       const updated = await floorplanStore.update(req.params.id, payload);
+      await syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan: updated });
       logger?.info("floorplan.updated", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("floorplan.updated");
       return updated;
@@ -618,8 +640,12 @@ export function buildServer({
   app.get("/device-overrides/:id", { preHandler: authGuard }, async (req, reply) => {
     if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
     try {
-      const item = await deviceOverridesStore.get(req.params.id);
-      if (!item) return reply.code(404).send({ error: "device_override_not_found" });
+      const [item, voiceMic] = await Promise.all([
+        deviceOverridesStore.get(req.params.id),
+        deviceOverridesStore.getVoiceMic?.(req.params.id) || null
+      ]);
+      if (!item && !voiceMic) return reply.code(404).send({ error: "device_override_not_found" });
+      if (voiceMic) return buildVoiceSatelliteOverride({ mic: voiceMic, override: item });
       return item;
     } catch (err) {
       return handleDeviceOverridesError(err, reply, logger);
@@ -633,9 +659,20 @@ export function buildServer({
       return reply.code(400).send({ error: "device_override_id_mismatch" });
     }
     try {
+      const existingVoiceMic = await deviceOverridesStore.getVoiceMic?.(req.params.id);
       const updated = await deviceOverridesStore.upsert(req.params.id, payload);
+      if (existingVoiceMic && deviceOverridesStore.upsertVoiceMic) {
+        await deviceOverridesStore.upsertVoiceMic(req.params.id, {
+          name: updated.name,
+          placement: updated.placement
+        });
+      }
       logger?.info("device_override.upserted", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("device_override.upserted");
+      if (existingVoiceMic) {
+        const nextVoiceMic = await deviceOverridesStore.getVoiceMic(req.params.id);
+        return buildVoiceSatelliteOverride({ mic: nextVoiceMic, override: updated });
+      }
       return updated;
     } catch (err) {
       return handleDeviceOverridesError(err, reply, logger);
@@ -920,6 +957,97 @@ function handleSceneRunError(err, reply, logger) {
     return reply.code(500).send({ error: "scene_run_error", message: err.message });
   }
   throw err;
+}
+
+async function buildVoiceSatelliteDevices(deviceOverridesStore) {
+  const [mics, overrides] = await Promise.all([deviceOverridesStore.listVoiceMics(), deviceOverridesStore.list()]);
+  const overrideMap = new Map(overrides.map((item) => [String(item?.id || "").trim(), item]));
+  return mics.map((mic) => buildVoiceSatelliteDevice({ mic, override: overrideMap.get(String(mic?.id || "").trim()) }));
+}
+
+function buildVoiceSatelliteDevice({ mic, override }) {
+  const id = String(mic?.id || "").trim();
+  const name = String(override?.name || mic?.name || humanizeIdentifier(id) || id);
+  const tags = Array.from(new Set([...(override?.semantics?.tags || []), "voice", "satellite", "microphone"]));
+  const aliases = Array.from(new Set([...(override?.semantics?.aliases || []), id, name]));
+  return {
+    id,
+    name,
+    protocol: "voice_satellite",
+    placement: deepMergePlain(mic?.placement || {}, override?.placement || {}),
+    bindings: {
+      ...(override?.bindings || {}),
+      voice_control: {
+        satellite_id: id,
+        transport: "ws_satellite",
+        ...(override?.bindings?.voice_control || {})
+      }
+    },
+    traits: {
+      availability: {
+        state: mic?.enabled === false ? "offline" : "online"
+      }
+    },
+    capabilities: Array.isArray(override?.capabilities) ? override.capabilities : [],
+    semantics: {
+      ...(override?.semantics || {}),
+      tags,
+      aliases,
+      description: override?.semantics?.description || "Voice satellite / wake microphone"
+    }
+  };
+}
+
+function buildVoiceSatelliteOverride({ mic, override }) {
+  return {
+    ...(override || {}),
+    id: String(mic?.id || override?.id || "").trim(),
+    name: override?.name || mic?.name || humanizeIdentifier(mic?.id || ""),
+    placement: deepMergePlain(mic?.placement || {}, override?.placement || {}),
+    semantics: {
+      ...(override?.semantics || {}),
+      tags: Array.from(new Set([...(override?.semantics?.tags || []), "voice", "satellite", "microphone"])),
+      aliases: Array.from(new Set([...(override?.semantics?.aliases || []), String(mic?.id || "").trim()].filter(Boolean)))
+    }
+  };
+}
+
+async function syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan }) {
+  if (!deviceOverridesStore?.getVoiceMic || !deviceOverridesStore?.upsertVoiceMic) return;
+  for (const item of floorplan?.devices || []) {
+    const deviceId = String(item?.deviceId || "").trim();
+    if (!deviceId) continue;
+    const mic = await deviceOverridesStore.getVoiceMic(deviceId);
+    if (!mic) continue;
+    await deviceOverridesStore.upsertVoiceMic(deviceId, {
+      placement: {
+        coordinates: {
+          x: item.x,
+          y: item.y
+        }
+      }
+    });
+  }
+}
+
+function deepMergePlain(a, b) {
+  const out = { ...(a || {}) };
+  for (const [key, value] of Object.entries(b || {})) {
+    if (value && typeof value === "object" && !Array.isArray(value) && out[key] && typeof out[key] === "object" && !Array.isArray(out[key])) {
+      out[key] = deepMergePlain(out[key], value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function humanizeIdentifier(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function storeAsset({ file, filename, mimetype, kind, assetsDir, maxImageBytes, maxModelBytes }) {
