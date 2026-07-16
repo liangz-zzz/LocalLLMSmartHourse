@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildFloorplanCoordinateMap, calculateFloorplanDeviceCoordinates, getFloorplanScaleMetrics } from "../src/floorplan-coordinates.js";
+import {
+  buildFloorplanCoordinateMap,
+  buildFloorplanPlacementMap,
+  calculateFloorplanDeviceCoordinates,
+  getFloorplanScaleMetrics
+} from "../src/floorplan-coordinates.js";
 
 test("floorplan scale converts normalized image positions to meters", () => {
   const plan = {
@@ -36,4 +41,27 @@ test("coordinate map skips unscaled legacy floorplans", () => {
     { id: "legacy", image: { width: 100, height: 80 }, rooms: [], devices: [{ deviceId: "light1", x: 0.2, y: 0.3 }] }
   ]);
   assert.equal(coordinates.size, 0);
+});
+
+test("placement map resolves floorplan room ids to room names", () => {
+  const placements = buildFloorplanPlacementMap([
+    {
+      id: "floor1",
+      image: { width: 1000, height: 500 },
+      imageScale: {
+        points: [
+          { x: 0.1, y: 0.2 },
+          { x: 0.4, y: 0.2 }
+        ],
+        distanceMeters: 3
+      },
+      rooms: [{ id: "living", name: "客厅" }],
+      devices: [{ deviceId: "light1", x: 0.2, y: 0.3, roomId: "living" }]
+    }
+  ]);
+
+  assert.equal(placements.get("light1").room, "客厅");
+  assert.equal(placements.get("light1").roomId, "living");
+  assert.equal(placements.get("light1").floorplanId, "floor1");
+  assert.equal(placements.get("light1").coordinates.floorplanId, "floor1");
 });

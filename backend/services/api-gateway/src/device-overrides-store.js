@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const RESERVED_TOP_LEVEL_KEYS = new Set(["devices", "voice_control", "voice", "virtual", "virtual_models", "$schema", "version"]);
+const FLOORPLAN_PLACEMENT_META_KEY = "_floorplanPlacement";
 
 export class DeviceOverridesStoreError extends Error {
   constructor(code, message, extra) {
@@ -85,12 +86,12 @@ export class DeviceOverridesStore {
     return merged;
   }
 
-  async reconcileFloorplanCoordinates(coordinateMap) {
-    const coordinates = coordinateMap instanceof Map ? coordinateMap : new Map();
+  async reconcileFloorplanPlacements(placementMap) {
+    const placements = placementMap instanceof Map ? placementMap : new Map();
     const { devices, envelope } = await this.loadEnvelope();
-    const nextDevices = reconcileCoordinateEntries(devices, coordinates, { addMissing: true });
+    const nextDevices = reconcileFloorplanPlacementEntries(devices, placements, { addMissing: true });
     const { key, voiceEnvelope } = resolveVoiceEnvelope(envelope);
-    const nextMics = reconcileCoordinateEntries(voiceEnvelope.mics, coordinates, { addMissing: false });
+    const nextMics = reconcileFloorplanPlacementEntries(voiceEnvelope.mics, placements, { addMissing: false });
 
     validateOverrideList(nextDevices);
     validateVoiceMicList(nextMics);
@@ -99,7 +100,7 @@ export class DeviceOverridesStore {
       [key]: { ...(voiceEnvelope.meta || {}), mics: nextMics }
     };
     await this.saveEnvelope({ devices: nextDevices, envelope: nextEnvelope });
-    return { devices: nextDevices.length, voiceMics: nextMics.length, coordinates: coordinates.size };
+    return { devices: nextDevices.length, voiceMics: nextMics.length, placements: placements.size };
   }
 
   async delete(id) {
@@ -247,7 +248,7 @@ function mergeVoiceMic(existing, patch) {
   return out;
 }
 
-function reconcileCoordinateEntries(entries, coordinates, { addMissing }) {
+function reconcileFloorplanPlacementEntries(entries, placements, { addMissing }) {
   const next = [];
   const seen = new Set();
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -257,18 +258,17 @@ function reconcileCoordinateEntries(entries, coordinates, { addMissing }) {
       continue;
     }
     seen.add(id);
-    const coordinate = coordinates.get(id);
-    if (coordinate) {
-      next.push({
-        ...entry,
-        placement: { ...(entry.placement || {}), coordinates: coordinate }
-      });
+    const derived = placements.get(id);
+    if (derived) {
+      next.push(applyFloorplanPlacement(entry, derived));
       continue;
     }
-    if (entry?.placement?.coordinates?.source === "floorplan") {
+    if (entry?.placement?.coordinates?.source === "floorplan" || isPlainObject(entry?.[FLOORPLAN_PLACEMENT_META_KEY])) {
       const placement = { ...(entry.placement || {}) };
-      delete placement.coordinates;
+      if (placement.coordinates?.source === "floorplan") delete placement.coordinates;
+      clearManagedFloorplanRoom(placement, entry[FLOORPLAN_PLACEMENT_META_KEY]);
       const cleaned = { ...entry };
+      delete cleaned[FLOORPLAN_PLACEMENT_META_KEY];
       if (Object.keys(placement).length) cleaned.placement = placement;
       else delete cleaned.placement;
       if (Object.keys(cleaned).some((key) => key !== "id")) next.push(cleaned);
@@ -278,12 +278,51 @@ function reconcileCoordinateEntries(entries, coordinates, { addMissing }) {
   }
 
   if (addMissing) {
-    for (const [id, coordinate] of coordinates.entries()) {
+    for (const [id, derived] of placements.entries()) {
       if (seen.has(id)) continue;
-      next.push({ id, placement: { coordinates: coordinate } });
+      next.push(applyFloorplanPlacement({ id }, derived));
     }
   }
   return next;
+}
+
+function applyFloorplanPlacement(entry, derived) {
+  const placement = { ...(entry?.placement || {}) };
+  if (derived?.coordinates) {
+    placement.coordinates = derived.coordinates;
+  } else if (placement.coordinates?.source === "floorplan") {
+    delete placement.coordinates;
+  }
+
+  const previousMeta = isPlainObject(entry?.[FLOORPLAN_PLACEMENT_META_KEY]) ? entry[FLOORPLAN_PLACEMENT_META_KEY] : null;
+  const currentRoom = String(placement.room || "").trim();
+  const derivedRoom = String(derived?.room || "").trim();
+  const previouslyManagedRoom = Boolean(previousMeta?.managesRoom && currentRoom === String(previousMeta.room || "").trim());
+  const shouldManageRoom = Boolean(derivedRoom && (!currentRoom || currentRoom === "unknown_room" || previouslyManagedRoom));
+
+  if (shouldManageRoom) {
+    placement.room = derivedRoom;
+  } else if (!derivedRoom && previouslyManagedRoom) {
+    delete placement.room;
+  }
+
+  return {
+    ...entry,
+    placement,
+    [FLOORPLAN_PLACEMENT_META_KEY]: {
+      floorplanId: String(derived?.floorplanId || "").trim(),
+      roomId: String(derived?.roomId || "").trim(),
+      room: derivedRoom,
+      managesRoom: shouldManageRoom
+    }
+  };
+}
+
+function clearManagedFloorplanRoom(placement, meta) {
+  if (!isPlainObject(meta) || !meta.managesRoom) return;
+  const currentRoom = String(placement.room || "").trim();
+  const managedRoom = String(meta.room || "").trim();
+  if (currentRoom && currentRoom === managedRoom) delete placement.room;
 }
 
 function validateCoordinates(value, prefix, errors) {

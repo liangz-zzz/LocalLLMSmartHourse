@@ -5,8 +5,9 @@
 ## 1. 数据来源
 
 - `floorplans.json` 保存可编辑的图片、比例尺、房间和设备图像位置。
-- `devices.config.json` 保存派生后的设备米制坐标，供 Device Adapter、API 和 Agent 读取。
-- 户型布点是 `source=floorplan` 坐标的事实来源；API Gateway 在启动及每次户型增删改后进行全量协调。
+- `devices.config.json` 保存派生后的设备房间和米制坐标，供 Device Adapter、API 和 Agent 读取。
+- 户型布点是自动房间和 `source=floorplan` 坐标的事实来源；API Gateway 在启动及每次户型增删改后进行全量协调。
+- 设备覆盖项使用内部 `_floorplanPlacement` 元数据跟踪自动房间来源；该字段不会进入统一设备读模型。
 
 ## 2. 户型模型
 
@@ -79,6 +80,7 @@ physicalZ = device.height ?? 0
 ```json
 {
   "placement": {
+    "room": "客厅",
     "coordinates": {
       "x": 2.48,
       "y": 1.536,
@@ -98,7 +100,9 @@ physicalZ = device.height ?? 0
 
 - 前端使用相同公式提供实时预览；后端重新计算并作为可信结果。
 - 有设备的户型必须具备图片宽高和有效比例尺。
-- API Gateway 从所有户型构建 `deviceId -> coordinates` 映射，并批量更新普通设备覆盖和 `voice_control.mics[]`。
+- API Gateway 从所有户型构建 `deviceId -> { room, coordinates }` 映射，并批量更新普通设备覆盖和 `voice_control.mics[]`。
+- `roomId` 通过当前户型的房间表解析为房间名称并写入 `placement.room`；移动设备或重命名房间时自动更新。
+- 首次协调仅接管空值或 `unknown_room`；用户后续手工修改 `placement.room` 后，协调逻辑保留手工值。
 - 当前户型中的设备坐标覆盖已有手工坐标；设备移出全部户型后，仅删除 `source=floorplan` 的坐标。
 - `GET /devices` 与 `GET /devices/:id` 直接合并最新覆盖配置，不等待 Adapter 热加载。
 - 启动协调用于修复跨文件写入中断或旧数据未同步的情况。

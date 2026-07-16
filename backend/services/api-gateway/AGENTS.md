@@ -18,7 +18,7 @@
 - 场景文件：通过 `SCENES_PATH`（或 `CONFIG_DIR/scenes.json`）配置；与设备配置文件同目录便于管理。
 - Agentic 场景：`AGENTIC_SCENE_ENABLED=true` 时启用；最近执行报告可通过 `GET /scene-runs/:runId` 查询（内存 TTL 由 `AGENTIC_SCENE_RUN_TTL_MS` 控制）。
 - 户型文件：通过 `FLOORPLANS_PATH`（或 `CONFIG_DIR/floorplans.json`）配置；仅支持 PNG/JPG 2D 底图，资产目录使用 `ASSETS_DIR`（默认 `${CONFIG_DIR}/assets`），上传限制由 `ASSET_MAX_IMAGE_MB` 控制。
-- 户型设备坐标：两点比例尺将归一化布点换算为米制 `placement.coordinates`；户型保存/删除及网关启动时会协调到 `devices.config.json`。
+- 户型设备位置：`roomId` 对应的房间名称同步为 `placement.room`，两点比例尺将归一化布点换算为米制 `placement.coordinates`；户型保存/删除及网关启动时会协调到 `devices.config.json`，并保留用户手工房间覆盖。
 - 设备覆盖配置：`/device-overrides` 仅维护 `devices[]`，保存时会保留 `virtual`/`voice_control` 等顶层段，避免覆盖模拟器配置。
 - 模拟设备管理：`/virtual-devices/config` 管理实例配置，`/virtual-devices/models`/`/virtual-devices/models/:id` 管理可复用型号模板（`virtual_models`）。
 

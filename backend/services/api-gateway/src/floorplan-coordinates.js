@@ -58,6 +58,32 @@ export function buildFloorplanCoordinateMap(floorplans) {
   return coordinates;
 }
 
+export function buildFloorplanPlacementMap(floorplans) {
+  const placements = new Map();
+  for (const plan of Array.isArray(floorplans) ? floorplans : []) {
+    const floorplanId = String(plan?.id || "").trim();
+    const roomsById = new Map();
+    for (const room of Array.isArray(plan?.rooms) ? plan.rooms : []) {
+      const roomId = String(room?.id || "").trim();
+      const roomName = String(room?.name || "").trim();
+      if (roomId && roomName) roomsById.set(roomId, roomName);
+    }
+
+    for (const device of Array.isArray(plan?.devices) ? plan.devices : []) {
+      const deviceId = String(device?.deviceId || "").trim();
+      if (!deviceId) continue;
+      const roomId = String(device?.roomId || "").trim();
+      placements.set(deviceId, {
+        floorplanId,
+        roomId,
+        room: roomsById.get(roomId) || "",
+        coordinates: calculateFloorplanDeviceCoordinates(plan, device) || undefined
+      });
+    }
+  }
+  return placements;
+}
+
 export function isFloorplanCoordinates(value) {
   return Boolean(value && typeof value === "object" && value.source === FLOORPLAN_COORDINATE_SOURCE);
 }

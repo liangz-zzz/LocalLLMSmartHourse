@@ -16,7 +16,7 @@ import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
 import { SceneRunnerError } from "./scene-runner.js";
 import { DeviceIdentityResolver } from "./device-identity.js";
 import { filterDevicesForFloorplan, getSceneScopeFloorplanIds, sceneMatchesFloorplan } from "./floorplan-utils.js";
-import { buildFloorplanCoordinateMap } from "./floorplan-coordinates.js";
+import { buildFloorplanPlacementMap } from "./floorplan-coordinates.js";
 
 export function buildServer({
   store,
@@ -534,7 +534,7 @@ export function buildServer({
     if (!floorplanStore) return reply.code(503).send({ error: "floorplan_store_unavailable" });
     try {
       const created = await floorplanStore.create(req.body || {});
-      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
+      await reconcileFloorplanPlacements({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.created", { id: created?.id, actor: getActor(req) });
       triggerHaSync("floorplan.created");
       return created;
@@ -551,7 +551,7 @@ export function buildServer({
     }
     try {
       const updated = await floorplanStore.update(req.params.id, payload);
-      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
+      await reconcileFloorplanPlacements({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.updated", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("floorplan.updated");
       return updated;
@@ -564,7 +564,7 @@ export function buildServer({
     if (!floorplanStore) return reply.code(503).send({ error: "floorplan_store_unavailable" });
     try {
       const result = await floorplanStore.delete(req.params.id);
-      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
+      await reconcileFloorplanPlacements({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.deleted", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("floorplan.deleted");
       return { status: "deleted", removed: result.removed };
@@ -1018,10 +1018,10 @@ function buildVoiceSatelliteOverride({ mic, override }) {
   };
 }
 
-async function reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore }) {
-  if (!floorplanStore?.list || !deviceOverridesStore?.reconcileFloorplanCoordinates) return;
+async function reconcileFloorplanPlacements({ floorplanStore, deviceOverridesStore }) {
+  if (!floorplanStore?.list || !deviceOverridesStore?.reconcileFloorplanPlacements) return;
   const floorplans = await floorplanStore.list();
-  await deviceOverridesStore.reconcileFloorplanCoordinates(buildFloorplanCoordinateMap(floorplans));
+  await deviceOverridesStore.reconcileFloorplanPlacements(buildFloorplanPlacementMap(floorplans));
 }
 
 function applyVisibleDeviceOverride(device, override) {

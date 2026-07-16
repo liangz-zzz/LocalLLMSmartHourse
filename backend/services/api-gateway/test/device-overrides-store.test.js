@@ -132,7 +132,7 @@ test("upsertVoiceMic preserves virtual/device envelope and updates placement", a
   });
 });
 
-test("reconcileFloorplanCoordinates updates derived coordinates and preserves manual coordinates", async () => {
+test("reconcileFloorplanPlacements updates derived placement and preserves manual placement", async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, "devices.config.json");
     await fs.writeFile(
@@ -164,17 +164,63 @@ test("reconcileFloorplanCoordinates updates derived coordinates and preserves ma
       "utf8"
     );
     const store = new DeviceOverridesStore({ deviceOverridesPath: filePath });
-    const coordinates = new Map([
-      ["new_light", { x: 5, y: 6, z: 1.2, unit: "m", frame: "floorplan_image", floorplanId: "floor2", source: "floorplan" }]
+    const placements = new Map([
+      [
+        "new_light",
+        {
+          floorplanId: "floor2",
+          roomId: "bedroom",
+          room: "次卧",
+          coordinates: { x: 5, y: 6, z: 1.2, unit: "m", frame: "floorplan_image", floorplanId: "floor2", source: "floorplan" }
+        }
+      ]
     ]);
 
-    await store.reconcileFloorplanCoordinates(coordinates);
+    await store.reconcileFloorplanPlacements(placements);
     const saved = JSON.parse(await fs.readFile(filePath, "utf8"));
     assert.deepEqual(saved.devices.find((item) => item.id === "manual_sensor").placement.coordinates, { x: 1, y: 2, z: 0 });
     assert.equal(saved.devices.find((item) => item.id === "old_light").placement.coordinates, undefined);
+    assert.equal(saved.devices.find((item) => item.id === "old_light").placement.room, "living_room");
     assert.equal(saved.devices.find((item) => item.id === "old_light").name, "旧灯");
     assert.equal(saved.devices.find((item) => item.id === "new_light").placement.coordinates.floorplanId, "floor2");
+    assert.equal(saved.devices.find((item) => item.id === "new_light").placement.room, "次卧");
+    assert.equal(saved.devices.find((item) => item.id === "new_light")._floorplanPlacement.managesRoom, true);
     assert.equal(saved.voice_control.mics[0].placement.coordinates, undefined);
     assert.equal(saved.voice_control.mics[0].placement.room, "living_room");
+  });
+});
+
+test("floorplan-managed rooms follow moves and renames without overwriting manual room overrides", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = path.join(dir, "devices.config.json");
+    await fs.writeFile(filePath, JSON.stringify({ devices: [] }), "utf8");
+    const store = new DeviceOverridesStore({ deviceOverridesPath: filePath });
+    const coordinates = { x: 1, y: 2, z: 0, unit: "m", frame: "floorplan_image", floorplanId: "floor1", source: "floorplan" };
+
+    await store.reconcileFloorplanPlacements(
+      new Map([["light1", { floorplanId: "floor1", roomId: "living", room: "客厅", coordinates }]])
+    );
+    let saved = JSON.parse(await fs.readFile(filePath, "utf8"));
+    assert.equal(saved.devices[0].placement.room, "客厅");
+
+    await store.reconcileFloorplanPlacements(
+      new Map([["light1", { floorplanId: "floor1", roomId: "bedroom", room: "主卧", coordinates }]])
+    );
+    saved = JSON.parse(await fs.readFile(filePath, "utf8"));
+    assert.equal(saved.devices[0].placement.room, "主卧");
+
+    await store.upsert("light1", { placement: { room: "自定义房间" } });
+    await store.reconcileFloorplanPlacements(
+      new Map([["light1", { floorplanId: "floor1", roomId: "bedroom", room: "重命名后的主卧", coordinates }]])
+    );
+    saved = JSON.parse(await fs.readFile(filePath, "utf8"));
+    assert.equal(saved.devices[0].placement.room, "自定义房间");
+    assert.equal(saved.devices[0]._floorplanPlacement.managesRoom, false);
+
+    await store.reconcileFloorplanPlacements(new Map());
+    saved = JSON.parse(await fs.readFile(filePath, "utf8"));
+    assert.equal(saved.devices[0].placement.room, "自定义房间");
+    assert.equal(saved.devices[0].placement.coordinates, undefined);
+    assert.equal(saved.devices[0]._floorplanPlacement, undefined);
   });
 });

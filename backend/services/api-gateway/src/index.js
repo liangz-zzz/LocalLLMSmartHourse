@@ -9,7 +9,7 @@ import { SceneStore } from "./scene-store.js";
 import { FloorplanStore } from "./floorplan-store.js";
 import { AutomationStore } from "./automation-store.js";
 import { DeviceOverridesStore } from "./device-overrides-store.js";
-import { buildFloorplanCoordinateMap } from "./floorplan-coordinates.js";
+import { buildFloorplanPlacementMap } from "./floorplan-coordinates.js";
 import { VirtualDevicesStore } from "./virtual-devices-store.js";
 import { SceneRunner } from "./scene-runner.js";
 import { DeviceIdentityResolver } from "./device-identity.js";
@@ -79,10 +79,10 @@ async function main() {
   virtualDevicesStore = new VirtualDevicesStore({ deviceConfigPath: config.deviceOverridesPath, logger });
   try {
     const floorplans = await floorplanStore.list();
-    const result = await deviceOverridesStore.reconcileFloorplanCoordinates(buildFloorplanCoordinateMap(floorplans));
-    logger.info("Reconciled floorplan device coordinates", result);
+    const result = await deviceOverridesStore.reconcileFloorplanPlacements(buildFloorplanPlacementMap(floorplans));
+    logger.info("Reconciled floorplan device placements", result);
   } catch (err) {
-    logger.warn("Failed to reconcile floorplan device coordinates at startup", err?.message || String(err));
+    logger.warn("Failed to reconcile floorplan device placements at startup", err?.message || String(err));
   }
 
   if (config.mode === "redis") {

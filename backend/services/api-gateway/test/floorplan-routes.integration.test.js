@@ -130,9 +130,10 @@ test("floorplan updates persist physical coordinates for devices and voice satel
 
     const payload = {
       ...buildPlan(),
+      rooms: [{ id: "living", name: "客厅", polygon: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }] }],
       devices: [
-        { deviceId: "living-room-respeaker", x: 0.62, y: 0.18, height: 1.1 },
-        { deviceId: "plug_living_room_1", x: 0.5, y: 0.25, height: 0.4 }
+        { deviceId: "living-room-respeaker", x: 0.62, y: 0.18, height: 1.1, roomId: "living" },
+        { deviceId: "plug_living_room_1", x: 0.5, y: 0.25, height: 0.4, roomId: "living" }
       ]
     };
     const createdRes = await fetch(`${baseUrl}/floorplans`, {
@@ -153,12 +154,14 @@ test("floorplan updates persist physical coordinates for devices and voice satel
 
     const plugOverride = saved.devices.find((item) => item.id === "plug_living_room_1");
     assert.ok(plugOverride);
+    assert.equal(plugOverride.placement.room, "客厅");
     assert.ok(Math.abs(plugOverride.placement.coordinates.x - 0.5 * 1000 * metersPerPixel) < 1e-12);
     assert.equal(plugOverride.placement.coordinates.source, "floorplan");
 
     const deviceRes = await fetch(`${baseUrl}/devices/plug_living_room_1`);
     assert.equal(deviceRes.status, 200);
     const device = await deviceRes.json();
+    assert.equal(device.placement.room, "客厅");
     assert.equal(device.placement.coordinates.floorplanId, "floor1");
     assert.equal(device.placement.coordinates.z, 0.4);
 
