@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import mqtt from "mqtt";
-import { normalizeZigbee2Mqtt } from "./normalize.js";
+import { buildZigbeeDeviceId, normalizeZigbee2Mqtt, normalizeZigbeeIeeeAddress } from "./normalize.js";
 import { buildActionResult } from "./action-results.js";
 import { applyDeviceOverrides, loadDeviceOverrides, loadVoiceControlConfig } from "./device-config.js";
 import { connectHaStateSubscription, fetchHaStates, normalizeHomeAssistantEntity, shouldIncludeHaEntity } from "./ha.js";
@@ -73,6 +73,9 @@ export class DeviceAdapter {
     this.deviceOverridesLastMtimeMs = null;
     this.deviceOverridesRefreshing = false;
     this.deviceOverridesResolvedPath = "";
+    this.zigbeeDevicesByFriendly = new Map();
+    this.pendingZigbeeStates = new Map();
+    this.mqttMessageQueue = Promise.resolve();
   }
 
   async start() {
@@ -119,6 +122,7 @@ export class DeviceAdapter {
       await new Promise((resolve) => this.client.end(false, {}, resolve));
       this.client = null;
     }
+    await this.mqttMessageQueue;
   }
 
   startDeviceOverridesPolling() {
@@ -144,7 +148,7 @@ export class DeviceAdapter {
       this.voiceControlConfig = mergeVoiceControlConfig(this.voiceControlConfig, loadedVoiceConfig);
       const devices = await this.store.list();
       for (const device of devices) {
-        const override = this.deviceOverrides.get(device.id);
+        const override = this.getDeviceOverride(device);
         const normalized = applyDeviceOverrides({ base: device, existing: null, override });
         await this.store.upsert(normalized);
       }
@@ -296,8 +300,10 @@ export class DeviceAdapter {
     const devicePath = path.join(new URL(this.mockDataDir).pathname, "device.json");
     const statePath = path.join(new URL(this.mockDataDir).pathname, "state.json");
     const [device, state] = await Promise.all([readJson(devicePath), readJson(statePath)]);
-    const base = normalizeZigbee2Mqtt({ device, state, placement: this.deviceOverrides.get(device?.friendly_name)?.placement });
-    const normalized = applyDeviceOverrides({ base, existing: null, override: this.deviceOverrides.get(base.id) });
+    const id = buildZigbeeDeviceId(device);
+    const override = this.getZigbeeOverride(id, device?.friendly_name);
+    const base = normalizeZigbee2Mqtt({ device, state, placement: override?.placement });
+    const normalized = applyDeviceOverrides({ base, existing: null, override });
     await this.store.upsert(normalized);
     this.logger.info("Loaded mock device", normalized.id);
   }
@@ -407,42 +413,111 @@ export class DeviceAdapter {
         reject(err);
       });
 
-      client.on("message", async (topic, payload) => {
-        try {
-          if (topic === "zigbee2mqtt/bridge/devices") {
-            const devices = parseJson(payload);
-            if (Array.isArray(devices)) {
-              this.logger.info("Received device list", devices.length);
-              // we only store bindings now; state will come from per-device topics
-              for (const dev of devices) {
-                const id = dev?.friendly_name || dev?.ieee_address || "unknown_device";
-                const existing = await this.store.get(id);
-                const override = this.deviceOverrides.get(id);
-                const base = normalizeZigbee2Mqtt({ device: dev, state: {}, placement: override?.placement || existing?.placement });
-                const normalized = applyDeviceOverrides({ base, existing, override });
-                await this.store.upsert(normalized);
-              }
-            }
-            return;
-          }
-
-          const match = topic.match(/^zigbee2mqtt\/([^/]+)$/);
-          if (match) {
-            const friendly = match[1];
-            const state = parseJson(payload);
-            const existing = await this.store.get(friendly);
-            const deviceMeta = existing?.bindings?.zigbee2mqtt || { friendly_name: friendly };
-            const override = this.deviceOverrides.get(friendly);
-            const base = normalizeZigbee2Mqtt({ device: deviceMeta, state, placement: override?.placement || existing?.placement });
-            const normalized = applyDeviceOverrides({ base, existing, override });
-            await this.store.upsert(normalized);
-            this.logger.debug("Updated state", friendly);
-          }
-        } catch (err) {
-          this.logger.error("Failed to handle MQTT message", err);
-        }
+      client.on("message", (topic, payload) => {
+        this.mqttMessageQueue = this.mqttMessageQueue
+          .then(() => this.handleMqttMessage(topic, payload))
+          .catch((err) => {
+            this.logger.error("Failed to handle MQTT message", err);
+          });
       });
     });
+  }
+
+  async handleMqttMessage(topic, payload) {
+    if (topic === "zigbee2mqtt/bridge/devices") {
+      const devices = parseJson(payload);
+      if (Array.isArray(devices)) {
+        await this.syncZigbeeDevices(devices);
+      }
+      return;
+    }
+
+    const match = topic.match(/^zigbee2mqtt\/([^/]+)$/);
+    if (!match) return;
+
+    const friendlyName = match[1];
+    const state = parseJson(payload);
+    if (!state || typeof state !== "object") return;
+    await this.updateZigbeeState(friendlyName, state);
+  }
+
+  async syncZigbeeDevices(devices) {
+    const discovered = devices.filter((device) => !isCoordinatorDevice(device));
+    const existingDevices = await this.store.list();
+    const canonicalIds = new Set();
+    const nextDevicesByFriendly = new Map();
+
+    this.logger.info("Received device list", devices.length, { discovered: discovered.length });
+
+    for (const device of discovered) {
+      const id = buildZigbeeDeviceId(device);
+      const friendlyName = String(device?.friendly_name || device?.ieee_address || "unknown_device");
+      const existing = findExistingZigbeeDevice(existingDevices, id, device);
+      const override = this.getZigbeeOverride(id, friendlyName);
+      const pendingState = this.pendingZigbeeStates.get(friendlyName);
+      const base = normalizeZigbee2Mqtt({
+        device,
+        state: pendingState || {},
+        placement: override?.placement || existing?.placement
+      });
+
+      if (!pendingState && existing?.traits) {
+        base.traits = existing.traits;
+      }
+
+      const normalized = applyDeviceOverrides({
+        base,
+        existing: existingDeviceMetadata(existing),
+        override
+      });
+
+      canonicalIds.add(id);
+      nextDevicesByFriendly.set(friendlyName, device);
+      this.pendingZigbeeStates.delete(friendlyName);
+      await this.store.upsert(normalized);
+    }
+
+    this.zigbeeDevicesByFriendly = nextDevicesByFriendly;
+
+    for (const existing of existingDevices) {
+      if (!existing?.bindings?.zigbee2mqtt) continue;
+      if (canonicalIds.has(existing.id)) continue;
+      await this.store.remove(existing.id);
+      this.logger.info("Removed stale Zigbee2MQTT device", existing.id);
+    }
+  }
+
+  async updateZigbeeState(friendlyName, state) {
+    const device = this.zigbeeDevicesByFriendly.get(friendlyName);
+    if (!device) {
+      this.pendingZigbeeStates.set(friendlyName, state);
+      return;
+    }
+
+    const id = buildZigbeeDeviceId(device);
+    const existing = await this.store.get(id);
+    const override = this.getZigbeeOverride(id, friendlyName);
+    const base = normalizeZigbee2Mqtt({
+      device,
+      state,
+      placement: override?.placement || existing?.placement
+    });
+    const normalized = applyDeviceOverrides({
+      base,
+      existing: existingDeviceMetadata(existing),
+      override
+    });
+    await this.store.upsert(normalized);
+    this.logger.debug("Updated state", id);
+  }
+
+  getZigbeeOverride(id, friendlyName) {
+    return this.deviceOverrides.get(id) || this.deviceOverrides.get(friendlyName);
+  }
+
+  getDeviceOverride(device) {
+    const friendlyName = device?.bindings?.zigbee2mqtt?.friendly_name;
+    return this.getZigbeeOverride(device?.id, friendlyName);
   }
 }
 
@@ -452,6 +527,42 @@ function parseJson(buf) {
   } catch (_e) {
     return undefined;
   }
+}
+
+function isCoordinatorDevice(device) {
+  return String(device?.type || "").trim().toLowerCase() === "coordinator";
+}
+
+function findExistingZigbeeDevice(devices, canonicalId, discovered) {
+  const ieeeAddress = normalizeZigbeeIeeeAddress(discovered?.ieee_address);
+  const friendlyName = String(discovered?.friendly_name || "");
+  const candidates = devices.filter((device) => {
+    if (device?.id === canonicalId) return true;
+    const existingIeeeAddress = normalizeZigbeeIeeeAddress(device?.bindings?.zigbee2mqtt?.ieee_address);
+    return Boolean(ieeeAddress && ieeeAddress === existingIeeeAddress);
+  });
+
+  candidates.sort((a, b) => existingDeviceScore(b, canonicalId, friendlyName) - existingDeviceScore(a, canonicalId, friendlyName));
+  return candidates[0];
+}
+
+function existingDeviceScore(device, canonicalId, friendlyName) {
+  let score = 0;
+  const room = String(device?.placement?.room || "").trim();
+  if (room && room !== "unknown_room") score += 10_000;
+  if (device?.id === canonicalId) score += 1_000;
+  if (device?.id === friendlyName || device?.bindings?.zigbee2mqtt?.friendly_name === friendlyName) score += 100;
+  if (device?.semantics?.aliases?.length || device?.semantics?.summary) score += 10;
+  return score;
+}
+
+function existingDeviceMetadata(device) {
+  if (!device) return null;
+  return {
+    placement: device.placement,
+    semantics: device.semantics,
+    capabilities: device.capabilities
+  };
 }
 
 async function readJson(p) {

@@ -4,9 +4,21 @@ function toSwitchState(state) {
   return lower === "on" ? "on" : "off";
 }
 
+export function normalizeZigbeeIeeeAddress(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function buildZigbeeDeviceId(device) {
+  const ieeeAddress = normalizeZigbeeIeeeAddress(device?.ieee_address);
+  if (ieeeAddress) return `zigbee:${ieeeAddress}`;
+
+  const friendlyName = String(device?.friendly_name || "unknown_device").trim();
+  return `zigbee:${friendlyName}`;
+}
+
 export function normalizeZigbee2Mqtt({ device, state, placement }) {
   const friendly = device?.friendly_name || device?.ieee_address || "unknown_device";
-  const id = friendly;
+  const id = buildZigbeeDeviceId(device);
 
   const power = typeof state?.power === "number" ? state.power : undefined;
   const energy = typeof state?.energy === "number" ? state.energy : undefined;

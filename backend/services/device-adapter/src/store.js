@@ -16,6 +16,10 @@ export class MemoryStore {
   async get(id) {
     return this.map.get(id);
   }
+
+  async remove(id) {
+    this.map.delete(id);
+  }
 }
 
 export class RedisStore {
@@ -74,6 +78,10 @@ export class RedisStore {
       this.logger?.warn?.("Invalid JSON in Redis for", id);
       return undefined;
     }
+  }
+
+  async remove(id) {
+    await this.redis.del(this.key(id));
   }
 
   async clearTestPrefix() {

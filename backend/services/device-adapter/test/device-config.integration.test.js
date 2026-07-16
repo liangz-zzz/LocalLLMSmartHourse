@@ -66,7 +66,7 @@ test("device overrides apply to discovered zigbee2mqtt device", async () => {
 
   client.publish("zigbee2mqtt/kettle_plug", JSON.stringify({ state: "OFF", linkquality: 100 }));
 
-  const stored = await waitFor(async () => await store.get("kettle_plug"), 5000);
+  const stored = await waitFor(async () => await store.get("zigbee:0xa4c1388d484371ba"), 5000);
   assert.equal(stored.name, "烧水壶插座");
   assert.equal(stored.placement.room, "kitchen");
   assert.deepEqual(stored.capabilities.map((c) => c.action).sort(), ["turn_off", "turn_on"]);
@@ -87,4 +87,3 @@ async function waitFor(fn, timeoutMs = 2000, intervalMs = 50) {
   }
   throw new Error("waitFor timeout");
 }
-

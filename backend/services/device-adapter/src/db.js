@@ -47,3 +47,8 @@ export async function upsertDeviceAndState(device) {
     });
   });
 }
+
+export async function deleteDevice(id) {
+  const prisma = getPrisma();
+  await prisma.device.deleteMany({ where: { id } });
+}

@@ -20,6 +20,8 @@ test("RedisStore upsert/list/get roundtrip", async () => {
   assert.equal(list.length, 1);
   const fetched = await store.get("d1");
   assert.equal(fetched.name, "demo");
+  await store.remove("d1");
+  assert.equal(await store.get("d1"), undefined);
 
   await store.clearTestPrefix();
   await store.close();
@@ -58,7 +60,7 @@ test("DeviceAdapter writes normalized device to Redis", async () => {
   const state = { state: "ON", power: 5, energy: 0.1 };
   client.publish("zigbee2mqtt/test_plug", JSON.stringify(state));
 
-  const stored = await waitFor(async () => await store.get("test_plug"), 5000);
+  const stored = await waitFor(async () => await store.get("zigbee:0xabc"), 5000);
   assert.ok(stored);
   assert.equal(stored.traits.switch.state, "on");
   assert.equal(stored.traits.switch.power_w, 5);

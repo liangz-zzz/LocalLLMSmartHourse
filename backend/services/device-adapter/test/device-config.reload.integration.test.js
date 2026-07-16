@@ -72,13 +72,17 @@ test("device overrides hot-reload updates stored device", async () => {
 
   client.publish("zigbee2mqtt/kettle_plug", JSON.stringify({ state: "OFF", linkquality: 100 }));
 
-  const stored1 = await waitFor(async () => await store.get("kettle_plug"), 5000);
+  const stored1 = await waitFor(async () => await store.get("zigbee:0xa4c1388d484371ba"), 5000);
   assert.equal(stored1.name, "烧水壶插座 A");
 
   await new Promise((r) => setTimeout(r, 30));
   await writeOverrides("烧水壶插座 B");
 
-  const stored2 = await waitFor(async () => await store.get("kettle_plug"), 5000, (device) => device?.name === "烧水壶插座 B");
+  const stored2 = await waitFor(
+    async () => await store.get("zigbee:0xa4c1388d484371ba"),
+    5000,
+    (device) => device?.name === "烧水壶插座 B"
+  );
   assert.equal(stored2.name, "烧水壶插座 B");
 
   client.end(true);
@@ -96,4 +100,3 @@ async function waitFor(fn, timeoutMs = 2000, predicate = (x) => Boolean(x), inte
   }
   throw new Error("waitFor timeout");
 }
-

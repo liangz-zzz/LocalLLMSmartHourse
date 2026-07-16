@@ -5,7 +5,7 @@ import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { MemoryStore } from "../src/store.js";
 import { normalizeZigbee2Mqtt } from "../src/normalize.js";
-import { ensureDatabaseUrl, upsertDeviceAndState } from "../src/db.js";
+import { deleteDevice, ensureDatabaseUrl, upsertDeviceAndState } from "../src/db.js";
 
 process.env.DATABASE_URL ||= "postgres://smarthome:smarthome@db:5432/smarthome";
 
@@ -34,8 +34,8 @@ test("persists device and state to Postgres when dbEnabled", async () => {
   assert.ok(saved.states[0]);
   assert.equal(saved.states[0].traits.switch.state, "on");
 
-  await prisma.deviceState.deleteMany({ where: { deviceId: normalized.id } });
-  await prisma.device.deleteMany({ where: { id: normalized.id } });
+  await deleteDevice(normalized.id);
+  assert.equal(await prisma.device.findUnique({ where: { id: normalized.id } }), null);
 });
 
 test.after(async () => {

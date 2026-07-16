@@ -180,16 +180,15 @@ function buildFingerprint(device) {
 }
 
 function computeStableKey(device, fingerprint) {
-  const parts = [
-    String(device?.protocol || ""),
-    String(device?.placement?.room || ""),
-    String(device?.semantics?.vendor || ""),
-    String(device?.semantics?.model || ""),
-    String(fingerprint?.zigbee_ieee_address || ""),
-    String(fingerprint?.ha_entity_id || ""),
-    String(device?.name || ""),
-    String(device?.id || "")
-  ];
+  const protocol = normalizeToken(device?.protocol);
+  const zigbeeIeeeAddress = normalizeToken(fingerprint?.zigbee_ieee_address);
+  const haEntityId = normalizeToken(fingerprint?.ha_entity_id);
+  const stableId = normalizeToken(device?.id);
+  const parts = zigbeeIeeeAddress
+    ? ["zigbee", zigbeeIeeeAddress]
+    : haEntityId
+      ? ["ha", haEntityId]
+      : [protocol, stableId];
   const digest = createHash("sha1")
     .update(parts.join("|"))
     .digest("hex")

@@ -3,8 +3,8 @@
 目标：跨协议/厂商表示设备，供 API、前端、LLM 共用。重点是可操作性（capabilities）、状态（traits），以及用于 LLM/人理解的位置信息（placement/semantics）。
 
 ## 字段总览
-- `id` (string): 稳定唯一 ID（UUID 或 slug）
-- `name` (string): 展示名称
+- `id` (string): 协议内稳定唯一 ID；Zigbee2MQTT 设备使用 `zigbee:<IEEE address>`，不随重命名变化
+- `name` (string): 可变的展示名称，不参与设备去重
 - `placement` (object): 位置/安装方式/描述，详见下节
 - `protocol` (string): 主协议（`zigbee` | `wifi` | `bluetooth_mesh` | `matter` ...）
 - `bindings` (object): 底层实体映射，如 `zigbee2mqtt.topic`, `ha_entity_id`, `voice_control`, `vendor_extra`

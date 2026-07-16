@@ -3,7 +3,7 @@ import { Logger } from "./log.js";
 import { MemoryStore, RedisStore } from "./store.js";
 import { DeviceAdapter } from "./adapter.js";
 import { ActionsSubscriber } from "./actions-subscriber.js";
-import { ensureDatabaseUrl, upsertDeviceAndState } from "./db.js";
+import { deleteDevice, ensureDatabaseUrl, upsertDeviceAndState } from "./db.js";
 
 async function main() {
   const config = loadConfig();
@@ -48,6 +48,11 @@ async function main() {
     adapter.store.upsert = async (device) => {
       await originalUpsert(device);
       await upsertDeviceAndState(device);
+    };
+    const originalRemove = adapter.store.remove.bind(adapter.store);
+    adapter.store.remove = async (id) => {
+      await originalRemove(id);
+      await deleteDevice(id);
     };
   }
 

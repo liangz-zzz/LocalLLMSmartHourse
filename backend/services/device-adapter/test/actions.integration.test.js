@@ -18,7 +18,14 @@ test("adapter publishes MQTT set payload on redis action", async () => {
   const port = server.address().port;
   const mqttUrl = `mqtt://127.0.0.1:${port}`;
 
-  const store = new RedisStore({ url: redisUrl, prefix: `act_test_${Date.now()}`, updatesChannel: null });
+  const testId = Date.now();
+  const actionsChannel = `test:device:actions:${testId}`;
+  const store = new RedisStore({
+    url: redisUrl,
+    prefix: `act_test_${testId}`,
+    updatesChannel: null,
+    actionResultsChannel: `test:device:action_results:${testId}`
+  });
   await store.clearTestPrefix();
 
   const adapter = new DeviceAdapter({
@@ -32,7 +39,7 @@ test("adapter publishes MQTT set payload on redis action", async () => {
   });
   const actionsSubscriber = new ActionsSubscriber({
     redisUrl,
-    channel: process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
+    channel: actionsChannel,
     logger: new Logger("error"),
     onAction: (action) => adapter.handleAction(action)
   });
@@ -49,7 +56,7 @@ test("adapter publishes MQTT set payload on redis action", async () => {
 
   // seed device metadata
   await store.upsert({
-    id: "living_room_plug",
+    id: "zigbee:0x00158d00045abcde",
     name: "living room plug",
     placement: { room: "living_room" },
     protocol: "zigbee",
@@ -60,8 +67,8 @@ test("adapter publishes MQTT set payload on redis action", async () => {
 
   const pub = new Redis(redisUrl);
   await pub.publish(
-    process.env.REDIS_ACTIONS_CHANNEL || "device:actions",
-    JSON.stringify({ id: "living_room_plug", action: "turn_on", params: {} })
+    actionsChannel,
+    JSON.stringify({ id: "zigbee:0x00158d00045abcde", action: "turn_on", params: {} })
   );
 
   const msg = await waitFor(() => mqttMessages[0], 5000);
