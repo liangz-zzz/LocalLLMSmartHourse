@@ -38,6 +38,9 @@ export type DeviceBindings = {
     topic?: string;
     friendly_name?: string;
     ieee_address?: string;
+    endpoint?: string;
+    state_property?: string;
+    operation_mode_property?: string;
   };
   ha_entity_id?: string;
   ha?: { entity_id?: string };
@@ -52,6 +55,12 @@ export type Device = {
   bindings?: DeviceBindings;
   traits?: Record<string, any>;
   capabilities?: Capability[];
+  composition?: {
+    role: "panel" | "relay_channel";
+    parentId?: string;
+    childIds?: string[];
+    endpoint?: string;
+  };
   semantics?: Record<string, any>;
 };
 

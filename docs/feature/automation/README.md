@@ -18,7 +18,7 @@
 {
   "id": "string",
   "enabled": true,
-  "trigger": { "type": "device|time|interval", "..." : "..." },
+  "trigger": { "type": "device|device_event|time|interval", "..." : "..." },
   "when": { "all|any|not|time|deviceId+traitPath+operator+value": "..." },
   "forMs": 600000,
   "cooldownMs": 3600000,
@@ -30,8 +30,9 @@
 ```
 
 ### trigger（什么时候开始检查/执行）
-当前支持三类触发器：
+当前支持四类触发器：
 - `device`：设备状态更新触发（可选要求 trait 变化/匹配某个值）。
+- `device_event`：瞬时设备事件触发，当前用于墙壁开关单击/双击/组合键；事件带唯一 ID，只消费一次且不保存为持续状态。
 - `time`：每天固定时刻触发（按容器 `TZ` 时区）。
 - `interval`：固定间隔触发（轮询式定时）。
 
@@ -58,6 +59,19 @@
 ```json
 { "type": "interval", "everyMs": 60000 }
 ```
+
+`device_event` 触发（简化）：
+```json
+{
+  "type": "device_event",
+  "deviceId": "zigbee:0x00158d0000001234",
+  "eventType": "button",
+  "gesture": "double",
+  "selector": "left"
+}
+```
+
+面板软件绑定会编译为这里的标准 Automation，并复用相同执行引擎；不要在 Home Assistant 中再创建同源自动化，以免一次按键触发两次。
 
 ### when（触发后需要满足的条件）
 支持组合表达式（递归）：

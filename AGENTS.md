@@ -52,4 +52,5 @@
   - `docs/feature/automation/README.md`（自动化/规则：用户可配置联动，复用 Scene）
   - `docs/feature/device_simulation/README.md`（设备模拟：基于配置注入虚拟设备并复用 Agent 控制链路）
   - `docs/feature/floorplan_editor/README.md`（2D 户型编辑与设备坐标：比例尺、布点、米制坐标绑定）
+  - `docs/feature/switch_binding/README.md`（墙壁开关：硬接灯路、直控/解耦模式与软件改绑）
 - Dev 容器：见 `.devcontainer/AGENTS.md`，默认附着 `api-gateway` 服务，命令保持 `sleep infinity` 供开发者启动自定义任务。 

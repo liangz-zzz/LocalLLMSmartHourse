@@ -13,6 +13,39 @@
 - `semantics` (object): 自然语言描述/标签/偏好，供 LLM 知识库
 - `telemetry` (object): 元数据，如 `last_seen`, `battery`, `rssi`
 - `identity` (object): 稳定业务身份（`stableKey/fingerprint/aliasKeys`），用于设备重连后的稳定匹配
+- `composition` (object): 复合设备层级；多键墙壁开关以一个 `panel` 父设备和多个 `relay_channel` 子设备表示
+
+### 多键墙壁开关
+
+双键/三键面板在户型图中只布置父设备。每个真实继电器是一个可寻址子设备：
+
+```json
+{
+  "id": "zigbee:0x00158d0000001234:left",
+  "name": "玄关开关 · 左路",
+  "composition": {
+    "role": "relay_channel",
+    "parentId": "zigbee:0x00158d0000001234",
+    "endpoint": "left"
+  },
+  "bindings": {
+    "zigbee2mqtt": {
+      "topic": "zigbee2mqtt/entrance_panel",
+      "endpoint": "left",
+      "state_property": "state_left",
+      "operation_mode_property": "operation_mode_left"
+    }
+  },
+  "traits": {
+    "switch": { "state": "off", "operation_mode": "control_relay" }
+  }
+}
+```
+
+- 子设备 ID 使用 `zigbee:<IEEE>:<endpoint>`，重命名面板不会改变绑定。
+- `control_relay` 表示按键直接控制本路硬接继电器；`decoupled` 表示按键只上报事件。模式是每个通道的设备状态，切换后必须等待状态回读。
+- 硬接线关系由 `relay_channel` 本身表达，软件绑定不会改变实际接线。用户可通过子设备名称记录“这一路实际接了哪盏灯”。
+- 软件改绑属于自动化配置，详见 `docs/feature/switch_binding/README.md`。
 
 ### placement（位置/安装/描述）
 ```json

@@ -32,6 +32,99 @@ const TOOLS = [
     }
   },
   {
+    name: "switch_bindings.list",
+    description: "List switch-panel software bindings, optionally for one panel id.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { panelId: { type: "string" } }
+    }
+  },
+  {
+    name: "switch_bindings.get",
+    description: "Get one switch-panel software binding by id.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: { id: { type: "string" } }
+    }
+  },
+  {
+    name: "switch_bindings.upsert",
+    description: "Validate or create/update a switch-panel binding. This write always requires dry-run followed by explicit confirmation.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["binding"],
+      properties: {
+        binding: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "name", "source", "targets"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            enabled: { type: "boolean" },
+            source: {
+              type: "object",
+              additionalProperties: false,
+              required: ["panelId", "selector", "trigger"],
+              properties: {
+                panelId: { type: "string" },
+                selector: { type: "string" },
+                trigger: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["button", "state"] },
+                    gesture: { type: "string", enum: ["single", "double"] },
+                    value: { type: "string", enum: ["on", "off"] }
+                  },
+                  required: ["type"],
+                  additionalProperties: false
+                }
+              }
+            },
+            targets: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["type"],
+                properties: {
+                  type: { type: "string", enum: ["device", "scene"] },
+                  deviceId: { type: "string" },
+                  action: { type: "string" },
+                  params: { type: "object" },
+                  sceneId: { type: "string" }
+                }
+              }
+            }
+          }
+        },
+        dryRun: { type: "boolean" },
+        confirm: { type: "boolean" },
+        requestId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "switch_bindings.delete",
+    description: "Validate or delete one switch-panel binding. This write always requires dry-run followed by explicit confirmation.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        dryRun: { type: "boolean" },
+        confirm: { type: "boolean" },
+        requestId: { type: "string" }
+      }
+    }
+  },
+  {
     name: "scenes.plan",
     description: "Build an agentic execution plan for a goal-based scene.",
     inputSchema: {
@@ -183,6 +276,10 @@ export async function callTool({ name, args, config }) {
     if (name === "system.health") return await systemHealth({ config });
     if (name === "devices.list") return await devicesList({ args, config });
     if (name === "scenes.list") return await scenesList({ args, config });
+    if (name === "switch_bindings.list") return await switchBindingsList({ args, config });
+    if (name === "switch_bindings.get") return await switchBindingsGet({ args, config });
+    if (name === "switch_bindings.upsert") return await switchBindingsUpsert({ args, config });
+    if (name === "switch_bindings.delete") return await switchBindingsDelete({ args, config });
     if (name === "scenes.plan") return await scenesPlan({ args, config });
     if (name === "scenes.agent_run") return await scenesAgentRun({ args, config });
     if (name === "devices.get") return await devicesGet({ args, config });
@@ -246,6 +343,106 @@ async function scenesList({ args, config }) {
   });
   const items = Array.isArray(res?.items) ? res.items : [];
   return asJsonResult({ items, count: items.length });
+}
+
+async function switchBindingsList({ args, config }) {
+  const panelId = String(args?.panelId || "").trim();
+  const query = panelId ? `?panelId=${encodeURIComponent(panelId)}` : "";
+  const res = await fetchJson(`${config.apiGatewayBase}/switch-bindings${query}`, {
+    headers: authHeaders(config)
+  });
+  const items = Array.isArray(res?.items) ? res.items : [];
+  return asJsonResult({ items, count: items.length });
+}
+
+async function switchBindingsGet({ args, config }) {
+  const id = String(args?.id || "").trim();
+  if (!id) return asError("invalid_args", "id is required");
+  const item = await fetchJson(`${config.apiGatewayBase}/switch-bindings/${encodeURIComponent(id)}`, {
+    headers: authHeaders(config)
+  });
+  return asJsonResult(item);
+}
+
+async function switchBindingsUpsert({ args, config }) {
+  const binding = isPlainObject(args?.binding) ? clone(args.binding) : null;
+  const id = String(binding?.id || "").trim();
+  const dryRun = typeof args?.dryRun === "boolean" ? args.dryRun : config.defaultDryRun;
+  const confirm = typeof args?.confirm === "boolean" ? args.confirm : false;
+  const requestId = String(args?.requestId || "").trim();
+  if (!binding || !id) return asError("invalid_args", "binding.id and binding are required");
+
+  return withIdempotency(requestId ? `${requestId}:${dryRun ? "dryrun" : "apply"}` : "", async () => {
+    const existing = await fetchOptionalJson(`${config.apiGatewayBase}/switch-bindings/${encodeURIComponent(id)}`, {
+      headers: authHeaders(config)
+    });
+    const validateQuery = existing ? `?currentId=${encodeURIComponent(id)}` : "";
+    let validation;
+    try {
+      validation = await fetchJson(`${config.apiGatewayBase}/switch-bindings/validate${validateQuery}`, {
+        method: "POST",
+        headers: { ...authHeaders(config), "Content-Type": "application/json" },
+        body: JSON.stringify(binding)
+      });
+    } catch (err) {
+      return asError("binding_validation_failed", err?.message || String(err));
+    }
+
+    const operation = existing ? "update" : "create";
+    if (dryRun) {
+      return asJsonResult({
+        requestId: requestId || undefined,
+        status: "dry_run_ok",
+        operation,
+        binding: validation?.binding || binding,
+        next: {
+          tool: "switch_bindings.upsert",
+          args: { binding: validation?.binding || binding, dryRun: false, confirm: true }
+        }
+      });
+    }
+    if (!confirm) return asError("confirmation_required", "switch binding write requires confirm=true");
+
+    const response = await fetchJson(
+      existing ? `${config.apiGatewayBase}/switch-bindings/${encodeURIComponent(id)}` : `${config.apiGatewayBase}/switch-bindings`,
+      {
+        method: existing ? "PUT" : "POST",
+        headers: { ...authHeaders(config), "Content-Type": "application/json" },
+        body: JSON.stringify(validation?.binding || binding)
+      }
+    );
+    return asJsonResult({ requestId: requestId || undefined, status: operation === "create" ? "created" : "updated", binding: response });
+  });
+}
+
+async function switchBindingsDelete({ args, config }) {
+  const id = String(args?.id || "").trim();
+  const dryRun = typeof args?.dryRun === "boolean" ? args.dryRun : config.defaultDryRun;
+  const confirm = typeof args?.confirm === "boolean" ? args.confirm : false;
+  const requestId = String(args?.requestId || "").trim();
+  if (!id) return asError("invalid_args", "id is required");
+
+  return withIdempotency(requestId ? `${requestId}:${dryRun ? "dryrun" : "apply"}` : "", async () => {
+    const existing = await fetchOptionalJson(`${config.apiGatewayBase}/switch-bindings/${encodeURIComponent(id)}`, {
+      headers: authHeaders(config)
+    });
+    if (!existing) return asError("switch_binding_not_found", `switch binding ${id} not found`);
+    if (dryRun) {
+      return asJsonResult({
+        requestId: requestId || undefined,
+        status: "dry_run_ok",
+        operation: "delete",
+        binding: existing,
+        next: { tool: "switch_bindings.delete", args: { id, dryRun: false, confirm: true } }
+      });
+    }
+    if (!confirm) return asError("confirmation_required", "switch binding delete requires confirm=true");
+    const response = await fetchJson(`${config.apiGatewayBase}/switch-bindings/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(config)
+    });
+    return asJsonResult({ requestId: requestId || undefined, status: "deleted", id, response });
+  });
 }
 
 async function scenesPlan({ args, config }) {
@@ -520,6 +717,16 @@ function sanitizeDeviceForAgent(device) {
 
 async function fetchJson(url, init = {}) {
   const res = await fetch(url, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`upstream ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+async function fetchOptionalJson(url, init = {}) {
+  const res = await fetch(url, init);
+  if (res.status === 404) return null;
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`upstream ${res.status}: ${text.slice(0, 200)}`);

@@ -12,6 +12,7 @@
 - `feature/scene_integration/README.md`: 场景集成（JSON 场景配置、API/MCP/Agent 执行链路）文档索引。
 - `feature/device_simulation/README.md`: 设备模拟（配置注入虚拟设备、与 Agent 透明交互）设计与运行说明。
 - `feature/voice_assistant/README.md`: 离线语音入口（唤醒词/VAD/STT/TTS 与 Agent 对接）。
+- `feature/switch_binding/README.md`: 多键墙壁开关的硬接灯路、工作模式、软件绑定、REST/MCP 与安全改绑流程。
 
 写作规范
 - 使用 Markdown，尽量短小精悍，包含决策/权衡。

@@ -84,7 +84,7 @@ export default function Home() {
     if (typeof window === "undefined") return "";
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const host = window.location.hostname;
-    const port = process.env.NEXT_PUBLIC_WS_PORT || "4001";
+    const port = process.env.NEXT_PUBLIC_WS_PORT || "4000";
     return `${proto}://${host}:${port}/ws`;
   };
 

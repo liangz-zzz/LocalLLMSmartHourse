@@ -8,6 +8,7 @@ import { RuleStore } from "./rule-store.js";
 import { SceneStore } from "./scene-store.js";
 import { FloorplanStore } from "./floorplan-store.js";
 import { AutomationStore } from "./automation-store.js";
+import { SwitchBindingStore } from "./switch-binding-store.js";
 import { DeviceOverridesStore } from "./device-overrides-store.js";
 import { buildFloorplanPlacementMap } from "./floorplan-coordinates.js";
 import { VirtualDevicesStore } from "./virtual-devices-store.js";
@@ -61,6 +62,7 @@ async function main() {
   let sceneStore;
   let floorplanStore;
   let automationStore;
+  let switchBindingStore;
   let deviceOverridesStore;
   let virtualDevicesStore;
   let sceneRunner;
@@ -75,6 +77,7 @@ async function main() {
   sceneStore = new SceneStore({ scenesPath: config.scenesPath, logger });
   floorplanStore = new FloorplanStore({ floorplansPath: config.floorplansPath, logger });
   automationStore = new AutomationStore({ automationsPath: config.automationsPath, logger });
+  switchBindingStore = new SwitchBindingStore({ automationStore, deviceStore: store, sceneStore });
   deviceOverridesStore = new DeviceOverridesStore({ deviceOverridesPath: config.deviceOverridesPath, logger });
   virtualDevicesStore = new VirtualDevicesStore({ deviceConfigPath: config.deviceOverridesPath, logger });
   try {
@@ -135,6 +138,7 @@ async function main() {
     sceneStore,
     floorplanStore,
     automationStore,
+    switchBindingStore,
     deviceOverridesStore,
     virtualDevicesStore,
     sceneRunner,

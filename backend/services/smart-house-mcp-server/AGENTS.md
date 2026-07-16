@@ -4,6 +4,7 @@
 - 读取：设备列表/详情/状态/最近动作回执、场景列表
 - 写入：设备动作下发与场景执行（`actions.batch_invoke` 支持 `type=scene` 与 `wait_for`；严格校验 capabilities/参数；支持 dry-run/确认门禁）
 - Agentic 场景工具：`scenes.plan` / `scenes.agent_run`（goal-based 场景规划与执行）；设备选择工具 `devices.resolve`。
+- 开关绑定：`switch_bindings.list/get` 读取，`switch_bindings.upsert/delete` 写入；写入先调用网关 validate 做 dry-run，并要求 `dryRun=false + confirm=true` 才落盘。
 - 审计：为每次工具调用生成 `traceId/requestId` 并记录（后续可写入 DB/日志系统）
 
 约定

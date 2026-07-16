@@ -9,6 +9,8 @@ export class MemoryStore {
     this.map.set(device.id, device);
   }
 
+  async publishDeviceEvent() {}
+
   async list() {
     return Array.from(this.map.values());
   }
@@ -41,6 +43,11 @@ export class RedisStore {
     if (this.updatesChannel) {
       await this.redis.publish(this.updatesChannel, JSON.stringify(device));
     }
+  }
+
+  async publishDeviceEvent(device, event) {
+    if (!this.updatesChannel || !device || !event) return;
+    await this.redis.publish(this.updatesChannel, JSON.stringify({ ...device, event }));
   }
 
   async publishActionResult(result) {

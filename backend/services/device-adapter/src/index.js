@@ -45,8 +45,8 @@ async function main() {
   if (config.dbEnabled) {
     ensureDatabaseUrl(config.databaseUrl);
     const originalUpsert = adapter.store.upsert.bind(adapter.store);
-    adapter.store.upsert = async (device) => {
-      await originalUpsert(device);
+    adapter.store.upsert = async (device, options) => {
+      await originalUpsert(device, options);
       await upsertDeviceAndState(device);
     };
     const originalRemove = adapter.store.remove.bind(adapter.store);

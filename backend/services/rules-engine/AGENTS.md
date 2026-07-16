@@ -32,6 +32,7 @@
 
 支持的 trigger（可扩展）
 - `device`：监听某个设备更新（可选按 `traitPath/operator/value/changed` 匹配）。
+- `device_event`：匹配瞬时按键事件（`deviceId/eventType/gesture/selector`），按事件 ID 去重且不重放。
 - `interval`：按固定间隔触发（`everyMs`）。
 - `time`：每天固定时刻触发（`at: "HH:MM" | string[]`，按容器时区 `TZ`）。
 

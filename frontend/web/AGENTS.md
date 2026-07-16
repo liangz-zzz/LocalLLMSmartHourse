@@ -17,12 +17,13 @@
 - `pages/_app.tsx` + `components/app-shell.tsx`：共享壳层，统一主导航和 HA / Zigbee2MQTT 外部入口。
 - `pages/index.tsx`：Command Center，只保留设备摘要、LLM chat / intent、系统摘要和跳转入口，不再作为主设备控制台。
 - `pages/ha-hub.tsx`：集中承载 HA 生态深链入口（Overview / Devices / Automations / Scenes / History / Logbook）。
-- `pages/floorplan.tsx`：2D 户型编辑（比例尺、房间/设备布点、米制坐标预览、外部系统跳转）。
+- `pages/floorplan.tsx`：2D 户型编辑（比例尺、房间/设备布点、米制坐标预览、外部系统跳转）；多键面板只布父设备，属性区通过 `components/switch-panel-inspector.tsx` 管理灯路、模式和软件绑定。
 - `pages/virtual-devices.tsx`：虚拟设备概览页，入口仍聚焦到 floorplan 工作区。
 - `pages/scenes.tsx`：高级场景编排，保留 wait_for / step-based / scene 引用等高阶能力。
 - `pages/automations.tsx`、`pages/devices/[id].tsx`：过渡/调试入口，正式用户流程优先导向 HA。
 - `pages/api/devices.ts`：代理网关 `http://localhost:4000/devices`（可用 `API_HTTP_BASE` 覆盖）。
 - `pages/api/devices/[id]/actions.ts`：代理设备动作下发。
+- `pages/api/switch-bindings.ts` / `pages/api/switch-bindings/[id].ts`：代理墙壁开关软件绑定 CRUD。
 - `pages/api/floorplans.ts`/`pages/api/floorplans/[id].ts`：代理户型 CRUD。
 - `pages/api/assets.ts`：代理资产上传；`pages/api/assets/[...path].ts` 代理资产访问。
 - `pages/api/scenes.ts`/`pages/api/scenes/[id]/expanded.ts`：代理场景列表与展开。
@@ -35,7 +36,7 @@
 - `lib/api-client.ts`：轻量 API SDK（devices/actions/rules）供前端/集成复用，默认基址 `API_HTTP_BASE`/`NEXT_PUBLIC_API_HTTP_BASE`。
 
 环境变量
-- `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址；留空时默认推断 `ws://<当前访问主机>:4001/ws`，`NEXT_PUBLIC_WS_PORT` 覆盖端口。
+- `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址；留空时默认推断 `ws://<当前访问主机>:4000/ws`（WebSocket 与 REST 共用 Fastify 端口），`NEXT_PUBLIC_WS_PORT` 可覆盖端口。
 - `NEXT_PUBLIC_HA_BASE_URL`：浏览器可访问的 HA 地址；留空时默认跟随当前访问主机名，端口由 `NEXT_PUBLIC_HA_PORT` 指定。
 - `NEXT_PUBLIC_Z2M_BASE_URL`：浏览器可访问的 Zigbee2MQTT Web 地址；留空时默认跟随当前访问主机名，端口由 `NEXT_PUBLIC_Z2M_PORT` 指定。
 - `NEXT_PUBLIC_HA_PORT` / `NEXT_PUBLIC_Z2M_PORT`：当上面两个 base URL 留空时，用于补足默认端口。

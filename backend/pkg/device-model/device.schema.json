@@ -48,7 +48,10 @@
           "properties": {
             "topic": { "type": "string" },
             "friendly_name": { "type": "string" },
-            "ieee_address": { "type": "string" }
+            "ieee_address": { "type": "string" },
+            "endpoint": { "type": "string", "minLength": 1 },
+            "state_property": { "type": "string", "minLength": 1 },
+            "operation_mode_property": { "type": "string", "minLength": 1 }
           },
           "required": ["topic"],
           "additionalProperties": false
@@ -185,7 +188,8 @@
           "properties": {
             "state": { "type": "string", "enum": ["on", "off"] },
             "power_w": { "type": "number" },
-            "energy_kwh": { "type": "number" }
+            "energy_kwh": { "type": "number" },
+            "operation_mode": { "type": "string", "enum": ["control_relay", "decoupled"] }
           },
           "required": ["state"],
           "additionalProperties": false
@@ -260,6 +264,23 @@
         },
         "additionalProperties": false
       }
+    },
+    "composition": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string", "enum": ["panel", "relay_channel"] },
+        "parentId": { "type": "string", "minLength": 1 },
+        "childIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "endpoint": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "role": { "const": "relay_channel" } }, "required": ["role"] },
+          "then": { "required": ["parentId", "endpoint"] }
+        }
+      ],
+      "additionalProperties": false
     },
     "semantics": {
       "type": "object",

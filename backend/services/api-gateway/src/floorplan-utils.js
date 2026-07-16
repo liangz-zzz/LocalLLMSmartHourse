@@ -15,7 +15,11 @@ export function getFloorplanDeviceIds(plan) {
 
 export function filterDevicesForFloorplan(devices, plan) {
   const ids = getFloorplanDeviceIds(plan);
-  return (devices || []).filter((device) => ids.has(String(device?.id || "").trim()));
+  return (devices || []).filter((device) => {
+    if (ids.has(String(device?.id || "").trim())) return true;
+    if (device?.composition?.role !== "relay_channel") return false;
+    return ids.has(String(device?.composition?.parentId || "").trim());
+  });
 }
 
 export function getSceneScopeFloorplanIds(scene) {

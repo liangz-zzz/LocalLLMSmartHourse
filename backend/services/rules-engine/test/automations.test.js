@@ -128,6 +128,44 @@ test("AutomationEngine triggers device action on changed value", async () => {
   assert.equal(published[0].actor, "automation:auto1");
 });
 
+test("AutomationEngine fires a matching button event once and does not replay it as state", async () => {
+  const clock = new FakeClock();
+  const published = [];
+  const engine = new AutomationEngine({
+    clock,
+    publishAction: async (action) => published.push(action),
+    expandScene: async () => ({ steps: [] }),
+    logger: { info() {}, warn() {}, error() {} }
+  });
+
+  engine.setAutomations([
+    {
+      id: "panel_double_left",
+      enabled: true,
+      trigger: {
+        type: "device_event",
+        deviceId: "panel1",
+        eventType: "button",
+        gesture: "double",
+        selector: "left"
+      },
+      then: [{ type: "device", deviceId: "light1", action: "toggle" }]
+    }
+  ]);
+
+  const event = { id: "event-1", type: "button", gesture: "double", selector: "left" };
+  engine.handleDeviceUpdate({ id: "panel1", traits: {}, event });
+  await flushMicrotasks();
+  engine.handleDeviceUpdate({ id: "panel1", traits: {}, event });
+  engine.handleDeviceUpdate({ id: "panel1", traits: {} });
+  engine.handleDeviceUpdate({ id: "panel1", traits: {}, event: { ...event, id: "event-2", gesture: "single" } });
+  await flushMicrotasks();
+
+  assert.equal(published.length, 1);
+  assert.equal(published[0].id, "light1");
+  assert.equal(published[0].actor, "automation:panel_double_left");
+});
+
 test("AutomationEngine schedules forMs and cancels when condition becomes false", async () => {
   const clock = new FakeClock();
   const published = [];

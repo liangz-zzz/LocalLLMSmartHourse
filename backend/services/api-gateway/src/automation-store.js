@@ -183,6 +183,21 @@ function validateTrigger(trigger, prefix, errors) {
     }
     return;
   }
+  if (type === "device_event") {
+    if (typeof trigger.deviceId !== "string" || !trigger.deviceId.trim()) {
+      errors.push(`${prefix}.deviceId is required`);
+    }
+    if (trigger.eventType !== undefined && trigger.eventType !== "button") {
+      errors.push(`${prefix}.eventType must be "button"`);
+    }
+    if (!["single", "double"].includes(trigger.gesture)) {
+      errors.push(`${prefix}.gesture must be "single" or "double"`);
+    }
+    if (typeof trigger.selector !== "string" || !trigger.selector.trim()) {
+      errors.push(`${prefix}.selector is required`);
+    }
+    return;
+  }
   if (type === "time") {
     const at = trigger.at;
     if (!isStringOrStringArray(at) || (Array.isArray(at) && at.length === 0)) {
@@ -320,4 +335,3 @@ function isTimeOfDay(value) {
   const mm = Number(m[2]);
   return Number.isInteger(hh) && Number.isInteger(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59;
 }
-

@@ -11,6 +11,7 @@ import imageSize from "image-size";
 import { SceneStoreError } from "./scene-store.js";
 import { FloorplanStoreError } from "./floorplan-store.js";
 import { AutomationStoreError } from "./automation-store.js";
+import { SwitchBindingStoreError } from "./switch-binding-store.js";
 import { DeviceOverridesStoreError } from "./device-overrides-store.js";
 import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
 import { SceneRunnerError } from "./scene-runner.js";
@@ -28,6 +29,7 @@ export function buildServer({
   sceneStore,
   floorplanStore,
   automationStore,
+  switchBindingStore,
   deviceOverridesStore,
   virtualDevicesStore,
   sceneRunner,
@@ -632,6 +634,73 @@ export function buildServer({
     }
   });
 
+  // Switch panel bindings (stored as validated automations)
+  app.get("/switch-bindings", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    try {
+      const items = await switchBindingStore.list({ panelId: req.query?.panelId });
+      return { items, count: items.length };
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
+  app.post("/switch-bindings/validate", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    try {
+      const currentId = String(req.query?.currentId || "").trim() || undefined;
+      const binding = await switchBindingStore.validate(req.body || {}, { currentId });
+      return { status: "valid", binding };
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
+  app.get("/switch-bindings/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    try {
+      const item = await switchBindingStore.get(req.params.id);
+      if (!item) return reply.code(404).send({ error: "switch_binding_not_found" });
+      return item;
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
+  app.post("/switch-bindings", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    try {
+      const created = await switchBindingStore.create(req.body || {});
+      logger?.info("switch_binding.created", { id: created.id, actor: getActor(req) });
+      return created;
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
+  app.put("/switch-bindings/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    if (req.body?.id && req.body.id !== req.params.id) return reply.code(400).send({ error: "switch_binding_id_mismatch" });
+    try {
+      const updated = await switchBindingStore.update(req.params.id, req.body || {});
+      logger?.info("switch_binding.updated", { id: updated.id, actor: getActor(req) });
+      return updated;
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
+  app.delete("/switch-bindings/:id", { preHandler: authGuard }, async (req, reply) => {
+    if (!switchBindingStore) return reply.code(503).send({ error: "switch_binding_store_unavailable" });
+    try {
+      const result = await switchBindingStore.delete(req.params.id);
+      logger?.info("switch_binding.deleted", { id: req.params.id, actor: getActor(req) });
+      return { status: "deleted", removed: result.removed };
+    } catch (err) {
+      return handleSwitchBindingError(err, reply, logger);
+    }
+  });
+
   // Device overrides (file-backed, device-adapter compatible)
   app.get("/device-overrides", { preHandler: authGuard }, async (_req, reply) => {
     if (!deviceOverridesStore) return reply.code(503).send({ error: "device_overrides_store_unavailable" });
@@ -914,6 +983,20 @@ function handleAutomationError(err, reply, logger) {
     logger?.warn?.("Automation store error", { error: err.code, message: err.message });
     return reply.code(500).send({ error: "automation_store_error", message: err.message });
   }
+  throw err;
+}
+
+function handleSwitchBindingError(err, reply, logger) {
+  if (err instanceof SwitchBindingStoreError) {
+    if (err.code === "switch_binding_not_found") return reply.code(404).send({ error: err.code });
+    if (err.code === "switch_binding_exists") return reply.code(409).send({ error: err.code, reason: err.message });
+    if (err.code === "invalid_switch_binding") {
+      return reply.code(400).send({ error: err.code, reason: err.message, details: err.details || [] });
+    }
+    logger?.warn?.("Switch binding store error", { error: err.code, message: err.message });
+    return reply.code(500).send({ error: "switch_binding_store_error", message: err.message });
+  }
+  if (err instanceof AutomationStoreError) return handleAutomationError(err, reply, logger);
   throw err;
 }
 

@@ -2,6 +2,7 @@ import Head from "next/head";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
+import SwitchPanelInspector from "../components/switch-panel-inspector";
 import type { Device } from "../lib/device-types";
 import { setStoredFloorplanId } from "../lib/floorplan-context";
 import { getDeviceExternalLinks, useIntegrationBases } from "../lib/integrations";
@@ -629,7 +630,7 @@ export default function FloorplanPage() {
       if (!active) return;
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
       const host = window.location.hostname;
-      const port = process.env.NEXT_PUBLIC_WS_PORT || "4001";
+      const port = process.env.NEXT_PUBLIC_WS_PORT || "4000";
       const wsUrl = process.env.NEXT_PUBLIC_WS_BASE || `${proto}://${host}:${port}/ws`;
       ws = new WebSocket(wsUrl);
       ws.onmessage = (evt) => {
@@ -744,7 +745,10 @@ export default function FloorplanPage() {
   const selectedPlacedDevice = draft?.devices.find((device) => device.deviceId === selectedDeviceId) || null;
   const selectedDevice = selectedPlacedDevice ? deviceMap[selectedPlacedDevice.deviceId] : null;
   const selectedDeviceLinks = getDeviceExternalLinks(selectedDevice, { haBase, z2mBase });
-  const availablePlacementDevices = draft ? devices.filter((device) => !draft.devices.some((item) => item.deviceId === device.id)) : devices;
+  const placeableDevices = devices.filter((device) => device.composition?.role !== "relay_channel");
+  const availablePlacementDevices = draft
+    ? placeableDevices.filter((device) => !draft.devices.some((item) => item.deviceId === device.id))
+    : placeableDevices;
   const availablePlacementDeviceIds = new Set(availablePlacementDevices.map((device) => device.id));
   const persistedImageScale = draft?.imageScale || null;
   const imageScaleMetrics = getImageScaleMetrics(persistedImageScale, imageWidth, imageHeight);
@@ -2062,6 +2066,18 @@ export default function FloorplanPage() {
               {selectedDevice?.placement?.zone ? ` · zone=${selectedDevice.placement.zone}` : ""}
             </p>
           </div>
+
+          {selectedDevice?.composition?.role === "panel" && (
+            <SwitchPanelInspector
+              panel={selectedDevice}
+              channels={devices.filter(
+                (device) => device.composition?.role === "relay_channel" && device.composition.parentId === selectedDevice.id
+              )}
+              devices={devices}
+              scenes={scenes}
+              onRefreshDevices={refreshDevices}
+            />
+          )}
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e2e8f0" }}>
             <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>设备元信息覆盖（devices.config.json）</h4>

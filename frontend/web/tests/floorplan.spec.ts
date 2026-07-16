@@ -421,6 +421,119 @@ test.describe("floorplan editor", () => {
     await expect(page.getByText("已保存（约 1~2 秒后生效）")).toBeVisible();
   });
 
+  test("multi-gang panel stays one floorplan point and manages channels, modes, and bindings inline", async ({ page }) => {
+    const panelDevices: any[] = [
+      {
+        id: "panel1",
+        name: "玄关双键开关",
+        protocol: "zigbee",
+        placement: { room: "entryway" },
+        bindings: { zigbee2mqtt: { topic: "zigbee2mqtt/panel1" } },
+        traits: {},
+        capabilities: [],
+        composition: { role: "panel", childIds: ["panel1:left", "panel1:right"] }
+      },
+      {
+        id: "panel1:left",
+        name: "玄关左路 · 走廊灯",
+        protocol: "zigbee",
+        placement: { room: "entryway" },
+        bindings: {
+          zigbee2mqtt: {
+            topic: "zigbee2mqtt/panel1",
+            endpoint: "left",
+            state_property: "state_left",
+            operation_mode_property: "operation_mode_left"
+          }
+        },
+        traits: { switch: { state: "on", operation_mode: "control_relay" } },
+        capabilities: [
+          { action: "turn_on" },
+          { action: "turn_off" },
+          { action: "toggle" },
+          { action: "set_operation_mode", parameters: [{ name: "mode", type: "enum", enum: ["control_relay", "decoupled"] }] }
+        ],
+        composition: { role: "relay_channel", parentId: "panel1", endpoint: "left" }
+      },
+      {
+        id: "panel1:right",
+        name: "玄关右路 · 门厅灯",
+        protocol: "zigbee",
+        placement: { room: "entryway" },
+        bindings: {
+          zigbee2mqtt: {
+            topic: "zigbee2mqtt/panel1",
+            endpoint: "right",
+            state_property: "state_right",
+            operation_mode_property: "operation_mode_right"
+          }
+        },
+        traits: { switch: { state: "off", operation_mode: "control_relay" } },
+        capabilities: [
+          { action: "turn_on" },
+          { action: "turn_off" },
+          { action: "toggle" },
+          { action: "set_operation_mode", parameters: [{ name: "mode", type: "enum", enum: ["control_relay", "decoupled"] }] }
+        ],
+        composition: { role: "relay_channel", parentId: "panel1", endpoint: "right" }
+      }
+    ];
+    const devices = [...baseDevices, ...panelDevices];
+    const bindings: any[] = [];
+
+    await page.route("**/api/devices/*", async (route) => {
+      const url = route.request().url();
+      const id = decodeURIComponent(url.split("/api/devices/")[1] || "");
+      const device = devices.find((item) => item.id === id);
+      route.fulfill(device ? { status: 200, json: device } : { status: 404, json: { error: "not_found" } });
+    });
+    await page.route("**/api/devices/*/actions", async (route) => {
+      const url = route.request().url();
+      const encodedId = url.split("/api/devices/")[1]?.split("/actions")[0] || "";
+      const id = decodeURIComponent(encodedId);
+      const body = JSON.parse(route.request().postData() || "{}");
+      const device = devices.find((item) => item.id === id);
+      if (device && body.action === "set_operation_mode") device.traits.switch.operation_mode = body.params.mode;
+      route.fulfill({ status: 200, json: { status: "queued" } });
+    });
+    await page.route("**/api/devices", (route) => route.fulfill({ json: { items: devices } }));
+    await page.route("**/api/switch-bindings**", async (route) => {
+      const method = route.request().method();
+      if (method === "GET") {
+        route.fulfill({ status: 200, json: { items: bindings, count: bindings.length } });
+        return;
+      }
+      if (method === "POST") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        bindings.push(body);
+        route.fulfill({ status: 200, json: body });
+        return;
+      }
+      route.fulfill({ status: 405, json: { error: "method_not_allowed" } });
+    });
+
+    await openFloorplanEditor(page);
+    await page.getByTestId("mode-devices").click();
+    await expect(page.getByTestId("start-place-panel1")).toBeVisible();
+    await expect(page.getByTestId("start-place-panel1:left")).toHaveCount(0);
+    await expect(page.getByTestId("start-place-panel1:right")).toHaveCount(0);
+    await page.getByTestId("start-place-panel1").click();
+    await clickCanvasPoint(page, 0.72, 0.4);
+
+    await expect(page.getByTestId("switch-panel-inspector")).toBeVisible();
+    await expect(page.getByTestId("switch-channel-left")).toContainText("继电器已通");
+    await expect(page.getByTestId("switch-channel-right")).toContainText("继电器已断");
+
+    await page.getByTestId("switch-channel-mode-left").selectOption("decoupled");
+    await expect(page.getByText(/设备状态回读一致/)).toBeVisible();
+
+    await page.getByTestId("switch-binding-add").click();
+    await page.getByRole("button", { name: "+ 设备" }).click();
+    await page.getByTestId("switch-binding-save").click();
+    await expect(page.getByText("绑定已保存，规则引擎已立即生效")).toBeVisible();
+    await expect(page.locator('[data-testid^="switch-binding-switch_"]')).toHaveCount(1);
+  });
+
   test("can place a real device from the placement list and see it on canvas", async ({ page }) => {
     await openFloorplanEditor(page);
     await page.getByTestId("mode-devices").click();

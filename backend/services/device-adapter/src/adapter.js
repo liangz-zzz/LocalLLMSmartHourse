@@ -1,7 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
 import mqtt from "mqtt";
-import { buildZigbeeDeviceId, normalizeZigbee2Mqtt, normalizeZigbeeIeeeAddress } from "./normalize.js";
+import {
+  buildZigbeeDeviceId,
+  normalizeZigbee2Mqtt,
+  normalizeZigbee2MqttDevices,
+  normalizeZigbeeIeeeAddress,
+  parseZigbeeButtonEvent
+} from "./normalize.js";
 import { buildActionResult } from "./action-results.js";
 import { applyDeviceOverrides, loadDeviceOverrides, loadVoiceControlConfig } from "./device-config.js";
 import { connectHaStateSubscription, fetchHaStates, normalizeHomeAssistantEntity, shouldIncludeHaEntity } from "./ha.js";
@@ -75,7 +81,9 @@ export class DeviceAdapter {
     this.deviceOverridesResolvedPath = "";
     this.zigbeeDevicesByFriendly = new Map();
     this.pendingZigbeeStates = new Map();
+    this.zigbeeStateByFriendly = new Map();
     this.mqttMessageQueue = Promise.resolve();
+    this.deviceEventCounter = 0;
   }
 
   async start() {
@@ -148,8 +156,17 @@ export class DeviceAdapter {
       this.voiceControlConfig = mergeVoiceControlConfig(this.voiceControlConfig, loadedVoiceConfig);
       const devices = await this.store.list();
       for (const device of devices) {
-        const override = this.getDeviceOverride(device);
-        const normalized = applyDeviceOverrides({ base: device, existing: null, override });
+        let normalized;
+        if (device?.composition?.role === "relay_channel") {
+          const friendlyName = device?.bindings?.zigbee2mqtt?.friendly_name;
+          const panelOverride = this.getZigbeeOverride(device.composition.parentId, friendlyName);
+          const inheritedPlacement = panelOverride?.placement ? { placement: panelOverride.placement } : null;
+          normalized = applyDeviceOverrides({ base: device, existing: null, override: inheritedPlacement });
+          normalized = applyDeviceOverrides({ base: normalized, existing: null, override: this.deviceOverrides.get(device.id) });
+        } else {
+          const override = this.getDeviceOverride(device);
+          normalized = applyDeviceOverrides({ base: device, existing: null, override });
+        }
         await this.store.upsert(normalized);
       }
     } finally {
@@ -199,7 +216,7 @@ export class DeviceAdapter {
 
     if (!preferHa && hasZ2M) {
       const topic = `${device.bindings.zigbee2mqtt.topic}/set`;
-      const payload = buildZ2MSetPayload(action);
+      const payload = buildZ2MSetPayload(action, device.bindings.zigbee2mqtt);
       this.logger.info("Publishing action to MQTT", topic, payload, { actor: action.actor });
       this.client.publish(topic, JSON.stringify(payload));
       await this.store.publishActionResult?.(
@@ -454,27 +471,29 @@ export class DeviceAdapter {
       const friendlyName = String(device?.friendly_name || device?.ieee_address || "unknown_device");
       const existing = findExistingZigbeeDevice(existingDevices, id, device);
       const override = this.getZigbeeOverride(id, friendlyName);
-      const pendingState = this.pendingZigbeeStates.get(friendlyName);
-      const base = normalizeZigbee2Mqtt({
+      const pendingState = this.pendingZigbeeStates.get(friendlyName) || this.zigbeeStateByFriendly.get(friendlyName);
+      const bases = normalizeZigbee2MqttDevices({
         device,
         state: pendingState || {},
         placement: override?.placement || existing?.placement
       });
 
-      if (!pendingState && existing?.traits) {
-        base.traits = existing.traits;
+      for (const base of bases) {
+        const existingBase = base.id === id ? existing : existingDevices.find((item) => item?.id === base.id);
+        if (!pendingState && existingBase?.traits && base.composition?.role !== "panel") base.traits = existingBase.traits;
+        const endpointOverride = this.deviceOverrides.get(base.id);
+        const inheritedOverride = base.composition?.role === "relay_channel" && override?.placement ? { placement: override.placement } : null;
+        const existingMetadata =
+          base.composition?.role === "panel" ? { placement: existingBase?.placement } : existingDeviceMetadata(existingBase);
+        let normalized = applyDeviceOverrides({ base, existing: existingMetadata, override: inheritedOverride });
+        normalized = applyDeviceOverrides({ base: normalized, existing: null, override: endpointOverride || (base.id === id ? override : null) });
+        canonicalIds.add(base.id);
+        await this.store.upsert(normalized);
       }
 
-      const normalized = applyDeviceOverrides({
-        base,
-        existing: existingDeviceMetadata(existing),
-        override
-      });
-
-      canonicalIds.add(id);
       nextDevicesByFriendly.set(friendlyName, device);
+      if (pendingState) this.zigbeeStateByFriendly.set(friendlyName, pendingState);
       this.pendingZigbeeStates.delete(friendlyName);
-      await this.store.upsert(normalized);
     }
 
     this.zigbeeDevicesByFriendly = nextDevicesByFriendly;
@@ -490,25 +509,46 @@ export class DeviceAdapter {
   async updateZigbeeState(friendlyName, state) {
     const device = this.zigbeeDevicesByFriendly.get(friendlyName);
     if (!device) {
-      this.pendingZigbeeStates.set(friendlyName, state);
+      const mergedPending = { ...(this.pendingZigbeeStates.get(friendlyName) || {}), ...state };
+      this.pendingZigbeeStates.set(friendlyName, mergedPending);
+      this.zigbeeStateByFriendly.set(friendlyName, mergedPending);
       return;
     }
 
     const id = buildZigbeeDeviceId(device);
     const existing = await this.store.get(id);
     const override = this.getZigbeeOverride(id, friendlyName);
-    const base = normalizeZigbee2Mqtt({
+    const mergedState = { ...(this.zigbeeStateByFriendly.get(friendlyName) || {}), ...state };
+    this.zigbeeStateByFriendly.set(friendlyName, mergedState);
+    const bases = normalizeZigbee2MqttDevices({
       device,
-      state,
+      state: mergedState,
       placement: override?.placement || existing?.placement
     });
-    const normalized = applyDeviceOverrides({
-      base,
-      existing: existingDeviceMetadata(existing),
-      override
-    });
-    await this.store.upsert(normalized);
-    this.logger.debug("Updated state", id);
+    const normalizedById = new Map();
+    for (const base of bases) {
+      const existingBase = base.id === id ? existing : await this.store.get(base.id);
+      const endpointOverride = this.deviceOverrides.get(base.id);
+      const inheritedOverride = base.composition?.role === "relay_channel" && override?.placement ? { placement: override.placement } : null;
+      const existingMetadata =
+        base.composition?.role === "panel" ? { placement: existingBase?.placement } : existingDeviceMetadata(existingBase);
+      let normalized = applyDeviceOverrides({ base, existing: existingMetadata, override: inheritedOverride });
+      normalized = applyDeviceOverrides({ base: normalized, existing: null, override: endpointOverride || (base.id === id ? override : null) });
+      normalizedById.set(base.id, normalized);
+      await this.store.upsert(normalized);
+    }
+
+    const buttonEvent = parseZigbeeButtonEvent(device, state);
+    const parent = normalizedById.get(id);
+    if (buttonEvent && parent) {
+      this.deviceEventCounter += 1;
+      await this.store.publishDeviceEvent?.(parent, {
+        ...buttonEvent,
+        id: `${id}:${Date.now()}:${this.deviceEventCounter}`,
+        occurredAt: new Date().toISOString()
+      });
+    }
+    this.logger.debug("Updated state", id, { children: bases.length - 1, event: buttonEvent?.raw });
   }
 
   getZigbeeOverride(id, friendlyName) {
@@ -570,9 +610,15 @@ async function readJson(p) {
   return JSON.parse(raw);
 }
 
-function buildZ2MSetPayload(action) {
-  if (action.action === "turn_on") return { state: "ON" };
-  if (action.action === "turn_off") return { state: "OFF" };
+function buildZ2MSetPayload(action, binding = {}) {
+  const stateProperty = String(binding?.state_property || "state");
+  const operationModeProperty = String(binding?.operation_mode_property || "operation_mode");
+  if (action.action === "turn_on") return { [stateProperty]: "ON" };
+  if (action.action === "turn_off") return { [stateProperty]: "OFF" };
+  if (action.action === "toggle") return { [stateProperty]: "TOGGLE" };
+  if (action.action === "set_operation_mode") {
+    return { [operationModeProperty]: action.params?.mode || "control_relay" };
+  }
   if (action.action === "set_brightness") {
     const b = action.params?.brightness ?? action.params?.level;
     return { state: "ON", brightness: b ?? 254 };
@@ -600,7 +646,7 @@ function buildZ2MSetPayload(action) {
     const mode = action.params?.mode || "auto";
     return { state: "ON", fan_mode: mode, mode };
   }
-  return { state: "TOGGLE" };
+  return { [stateProperty]: "TOGGLE" };
 }
 
 function resolveFsPath(p) {

@@ -12,6 +12,7 @@
 - 每轮会加载 `devices.list` + `scenes.list`，计划支持 `type=scene`（`sceneId` 必须来自 `scenes.list`）。
 - 写操作默认不执行：必须显式确认（`confirm=true` 或识别为用户确认语句）才会真实下发。
 - 若模型调用 `scenes.agent_run`（Agentic 场景执行），同样按写操作处理：默认注入 `dryRun=true`，仅在允许写入时才真实执行。
+- 开关改绑始终需要确认，不受 `AGENT_EXECUTION_MODE=auto` 影响：模型先读 `switch_bindings.list/get`，`upsert/delete` 只生成已校验提案，确认轮才真实写入。
 
 运行
 - 环境变量：

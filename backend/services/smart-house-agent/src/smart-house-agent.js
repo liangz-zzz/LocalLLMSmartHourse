@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 const MAX_ITERATIONS = 8;
-const WRITE_TOOLS = new Set(["devices.invoke", "actions.batch_invoke", "scenes.agent_run"]);
+const BINDING_WRITE_TOOLS = new Set(["switch_bindings.upsert", "switch_bindings.delete"]);
+const WRITE_TOOLS = new Set(["devices.invoke", "actions.batch_invoke", "scenes.agent_run", ...BINDING_WRITE_TOOLS]);
 const MAX_TOOL_CALLS_PER_TURN = 16;
 
 export function createAgent({ config, logger, sessionStore, mcp, llm }) {
@@ -197,6 +198,49 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         session.state.pending = null;
         await sessionStore.save(session);
 
+        if (Array.isArray(pending.writes) && pending.writes.length) {
+          const results = [];
+          for (let index = 0; index < pending.writes.length; index += 1) {
+            const write = pending.writes[index];
+            const result = await mcp.callTool(write.name, {
+              ...(write.args || {}),
+              dryRun: false,
+              confirm: true,
+              requestId: `${pending.planId}:${index + 1}`
+            });
+            results.push({ name: write.name, args: write.args || {}, result, ok: !isToolError(result) });
+            if (isToolError(result)) break;
+          }
+          const exec = { results };
+          const text = summarizeBindingWrites(exec);
+          appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+          appendMessage(session, { role: "assistant", content: text }, config.maxMessages);
+          await sessionStore.save(session);
+          const failed = results.find((item) => !item.ok);
+          queuePrewarm({ reason: failed ? "post_turn_binding_confirm_error" : "post_turn_binding_confirm", force: true });
+          if (failed) {
+            return {
+              traceId,
+              sessionId: session.id,
+              type: "error",
+              error: failed.result?.error || "switch_binding_write_failed",
+              planId: pending.planId,
+              writes: pending.writes,
+              result: exec,
+              message: text
+            };
+          }
+          return {
+            traceId,
+            sessionId: session.id,
+            type: "executed",
+            planId: pending.planId,
+            writes: pending.writes,
+            result: exec,
+            message: text
+          };
+        }
+
         const exec = await mcp.callTool("actions.batch_invoke", {
           dryRun: false,
           confirm: true,
@@ -251,6 +295,8 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
     const toolCalls = [];
     const toolCallKeys = new Set();
     const toolCache = new Map();
+    const bindingWriteProposals = [];
+    const bindingWriteProposalKeys = new Set();
 
     // Strategy A: Always preload the full device list so the model can ground
     // deviceId selection and avoid hallucinating non-existent ids.
@@ -356,6 +402,17 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
               const id = String(safeArgs?.deviceId || "").trim();
               rememberLastDevice(session, { deviceId: id, inventory: deviceInventory, from: name });
             }
+            if (BINDING_WRITE_TOOLS.has(name) && result?.status === "dry_run_ok" && result?.next?.tool) {
+              const next = {
+                name: String(result.next.tool),
+                args: isPlainObject(result.next.args) ? result.next.args : safeArgs
+              };
+              const proposalKey = `${next.name}:${stableStringify(next.args)}`;
+              if (!bindingWriteProposalKeys.has(proposalKey)) {
+                bindingWriteProposalKeys.add(proposalKey);
+                bindingWriteProposals.push(next);
+              }
+            }
           }
 
           messages.push({ role: "system", content: toolResultMessage({ name, result }) });
@@ -376,6 +433,27 @@ export function createAgent({ config, logger, sessionStore, mcp, llm }) {
         const planType = normalizePlanType(plan?.type || parsed.planType || parsed.kind);
         const proposed = Array.isArray(plan?.actions) ? plan.actions : Array.isArray(parsed.actions) ? parsed.actions : [];
         const actions = normalizeActions(proposed);
+
+        if (bindingWriteProposals.length) {
+          const planId = String(plan?.planId || parsed.planId || randomUUID()).trim();
+          session.state.pending = { planId, writes: bindingWriteProposals, createdAt: Date.now() };
+          await sessionStore.save(session);
+          const base = assistant || `已校验 ${bindingWriteProposals.length} 项开关绑定变更。`;
+          const msg = withConfirmationHint(base);
+          appendMessage(session, { role: "user", content: trimmed }, config.maxMessages);
+          appendMessage(session, { role: "assistant", content: msg }, config.maxMessages);
+          await sessionStore.save(session);
+          queuePrewarm({ reason: "post_turn_binding_propose", force: usedStandby });
+          return {
+            traceId,
+            sessionId: session.id,
+            type: "propose",
+            planId,
+            writes: bindingWriteProposals,
+            message: msg,
+            toolCalls
+          };
+        }
 
         if (actions.length) {
           const planId = String(plan?.planId || parsed.planId || randomUUID()).trim();
@@ -523,6 +601,9 @@ function buildSystemPrompt({ toolsText }) {
     "- If multiple matching candidates remain inside the wakeSource room, return plan.type=clarify instead of guessing.",
     "- If the user explicitly names another room or a specific device, that overrides wakeSource.",
     "- If the user asks about current state, call devices.state/devices.get first.",
+    "- For switch-panel relationships, call switch_bindings.list/get to read the current source of truth before proposing a change.",
+    "- To create/update/delete a switch binding, call switch_bindings.upsert/delete. These tools only validate during the planning turn; summarize the exact proposed relationship and ask for confirmation. Never claim the binding changed after dry-run.",
+    "- Never combine a switch-binding write proposal with device control actions in the same plan.",
     "- For clear control commands, return plan.type=execute with plan.actions.",
     "- If you want the user to confirm first (uncertainty/high impact), return plan.type=propose with plan.actions.",
     "- If unclear, return plan.type=clarify and ask a concise clarifying question in assistant.",
@@ -531,7 +612,13 @@ function buildSystemPrompt({ toolsText }) {
 }
 
 function buildContextPrompt({ session }) {
-  const pending = session.state?.pending ? { planId: session.state.pending.planId, actions: session.state.pending.actions } : null;
+  const pending = session.state?.pending
+    ? {
+        planId: session.state.pending.planId,
+        actions: session.state.pending.actions || null,
+        writes: session.state.pending.writes || null
+      }
+    : null;
   const lastDevice =
     session.state?.lastDeviceId || session.state?.lastDeviceName || session.state?.lastRoom
       ? { id: session.state?.lastDeviceId || null, name: session.state?.lastDeviceName || null, room: session.state?.lastRoom || null }
@@ -629,6 +716,24 @@ function summarizeBatch(exec) {
   const fail = results.length - ok;
   if (!fail) return `已提交执行（${ok}/${results.length} 成功入队）。`;
   return `已提交执行（成功 ${ok}，失败 ${fail}）。`;
+}
+
+function summarizeBindingWrites(exec) {
+  const results = Array.isArray(exec?.results) ? exec.results : [];
+  if (!results.length) return "绑定修改失败：没有执行结果。";
+  const failed = results.find((item) => !item?.ok);
+  if (failed) {
+    const detail = String(failed?.result?.message || failed?.result?.error || "unknown error");
+    return `绑定修改失败：${detail}。`;
+  }
+  const created = results.filter((item) => item?.result?.status === "created").length;
+  const updated = results.filter((item) => item?.result?.status === "updated").length;
+  const deleted = results.filter((item) => item?.result?.status === "deleted").length;
+  const parts = [];
+  if (created) parts.push(`新增 ${created} 项`);
+  if (updated) parts.push(`更新 ${updated} 项`);
+  if (deleted) parts.push(`删除 ${deleted} 项`);
+  return `开关绑定已修改（${parts.join("，") || `${results.length} 项`}）。`;
 }
 
 function withConfirmationHint(text) {

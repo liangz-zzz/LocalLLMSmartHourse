@@ -29,7 +29,10 @@ function makeMcpStub(impl = {}) {
         { name: "devices.get", description: "get", inputSchema: { type: "object" } },
         { name: "devices.state", description: "state", inputSchema: { type: "object" } },
         { name: "devices.invoke", description: "invoke", inputSchema: { type: "object" } },
-        { name: "actions.batch_invoke", description: "batch", inputSchema: { type: "object" } }
+        { name: "actions.batch_invoke", description: "batch", inputSchema: { type: "object" } },
+        { name: "switch_bindings.list", description: "bindings", inputSchema: { type: "object" } },
+        { name: "switch_bindings.upsert", description: "upsert binding", inputSchema: { type: "object" } },
+        { name: "switch_bindings.delete", description: "delete binding", inputSchema: { type: "object" } }
       ]
     }),
     callTool: async (name, args) => {
@@ -252,6 +255,63 @@ test("agent proposes actions then executes on confirmation", async () => {
   assert.equal(exec.planId, "p1");
   assert.equal(mcp.calls.at(-1).name, "actions.batch_invoke");
   assert.equal(llm.calls.length, 1, "LLM should not be called during confirmation execution");
+});
+
+test("agent can read and propose a switch binding but writes it only after confirmation", async () => {
+  const sessionStore = createSessionStore({ config: { ...baseConfig, redisUrl: "" } });
+  const binding = {
+    id: "panel1_left_single",
+    name: "左键控制主灯",
+    enabled: true,
+    source: { panelId: "panel1", selector: "left", trigger: { type: "button", gesture: "single" } },
+    targets: [{ type: "device", deviceId: "main_light", action: "toggle" }]
+  };
+  const mcp = makeMcpStub({
+    "devices.list": async () => ({
+      items: [
+        { id: "panel1", name: "门口开关", composition: { role: "panel", childIds: ["panel1:left", "panel1:right"] } },
+        { id: "main_light", name: "客厅主灯", capabilities: [{ action: "toggle" }] }
+      ],
+      count: 2
+    }),
+    "switch_bindings.list": async () => ({ items: [], count: 0 }),
+    "switch_bindings.upsert": async (args) => {
+      if (args.dryRun) {
+        assert.equal(args.confirm, false);
+        return {
+          status: "dry_run_ok",
+          operation: "create",
+          binding,
+          next: { tool: "switch_bindings.upsert", args: { binding, dryRun: false, confirm: true } }
+        };
+      }
+      assert.equal(args.confirm, true);
+      return { status: "created", binding };
+    }
+  });
+  const llm = makeLlmStub([
+    { type: "tool_calls", tool_calls: [{ name: "switch_bindings.list", arguments: { panelId: "panel1" } }] },
+    { type: "tool_calls", tool_calls: [{ name: "switch_bindings.upsert", arguments: { binding, dryRun: false, confirm: true } }] },
+    { type: "final", assistant: "将门口开关左键单击改为切换客厅主灯。", plan: { planId: "binding-plan-1", type: "propose", actions: [] } }
+  ]);
+
+  const agent = createAgent({ config: baseConfig, sessionStore, mcp, llm });
+  const proposed = await agent.turn({ sessionId: "s_binding", input: "让门口开关左键控制客厅主灯", confirm: false });
+  assert.equal(proposed.type, "propose");
+  assert.equal(proposed.planId, "binding-plan-1");
+  assert.equal(proposed.writes[0].name, "switch_bindings.upsert");
+  const planningWrite = mcp.calls.find((call) => call.name === "switch_bindings.upsert");
+  assert.equal(planningWrite.args.dryRun, true);
+  assert.equal(planningWrite.args.confirm, false);
+
+  const executed = await agent.turn({ sessionId: "s_binding", input: "确认", confirm: false });
+  assert.equal(executed.type, "executed");
+  assert.match(executed.message, /新增 1 项/);
+  const writes = mcp.calls.filter((call) => call.name === "switch_bindings.upsert");
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].args.dryRun, false);
+  assert.equal(writes[1].args.confirm, true);
+  assert.equal(llm.calls.length, 3, "confirmation must not call the LLM again");
 });
 
 test("agent auto-executes when plan.type=execute", async () => {

@@ -28,6 +28,7 @@
 - `MODE=db` 时使用 Prisma 读取 `DATABASE_URL`（schema 位于 `backend/prisma/schema.prisma`，表 `Device`/`DeviceState`）。
 - 动作结果持久化：默认开启（`ACTION_RESULTS_PERSIST`），在 Redis 模式监听动作结果并落库表 `ActionResult`，可通过 `GET /devices/:id/actions` 查询。
 - 规则管理：REST `GET /rules`/`GET /rules/:id`/`POST /rules`/`PUT /rules/:id`/`DELETE /rules/:id`，依赖 Postgres（Rule 表）。
+- 开关绑定：REST `GET/POST /switch-bindings`、`GET/PUT/DELETE /switch-bindings/:id`；`POST /switch-bindings/validate` 只校验不持久化。绑定编译并保存为 `kind=switch_binding` 的 Automation，共用 `automations.json`。
 
 命令（通过 compose 容器）
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm api-gateway npm install`

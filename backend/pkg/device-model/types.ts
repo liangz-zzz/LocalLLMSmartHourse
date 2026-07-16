@@ -25,6 +25,9 @@ export interface Zigbee2MqttBinding {
   topic: string; // e.g. zigbee2mqtt/living_room_plug
   friendly_name?: string;
   ieee_address?: string;
+  endpoint?: string;
+  state_property?: string;
+  operation_mode_property?: string;
 }
 
 export interface HABinding {
@@ -108,6 +111,14 @@ export interface SwitchTrait {
   state: SwitchState;
   power_w?: number;
   energy_kwh?: number;
+  operation_mode?: "control_relay" | "decoupled";
+}
+
+export interface DeviceComposition {
+  role: "panel" | "relay_channel";
+  parentId?: string;
+  childIds?: string[];
+  endpoint?: string;
 }
 
 export interface DimmerTrait {
@@ -187,6 +198,7 @@ export interface DeviceModel {
   bindings: DeviceBindings;
   traits: DeviceTraits;
   capabilities: Capability[];
+  composition?: DeviceComposition;
   semantics?: Semantics;
   identity?: DeviceIdentity;
 }

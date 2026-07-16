@@ -45,6 +45,23 @@ components:
           type: object
         identity:
           $ref: "#/components/schemas/DeviceIdentity"
+        composition:
+          $ref: "#/components/schemas/DeviceComposition"
+    DeviceComposition:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [panel, relay_channel]
+        parentId:
+          type: string
+        childIds:
+          type: array
+          items:
+            type: string
+        endpoint:
+          type: string
     DeviceIdentity:
       type: object
       properties:
@@ -184,6 +201,78 @@ components:
               type: object
         enabled:
           type: boolean
+    SwitchBindingTrigger:
+      oneOf:
+        - type: object
+          required: [type, gesture]
+          properties:
+            type:
+              const: button
+            gesture:
+              type: string
+              enum: [single, double]
+          additionalProperties: false
+        - type: object
+          required: [type, value]
+          properties:
+            type:
+              const: state
+            value:
+              type: string
+              enum: [on, off]
+          additionalProperties: false
+    SwitchBindingSource:
+      type: object
+      required: [panelId, selector, trigger]
+      properties:
+        panelId:
+          type: string
+        selector:
+          type: string
+          description: Channel endpoint or a supported combo selector.
+        trigger:
+          $ref: "#/components/schemas/SwitchBindingTrigger"
+      additionalProperties: false
+    SwitchBindingTarget:
+      oneOf:
+        - type: object
+          required: [type, deviceId, action]
+          properties:
+            type:
+              const: device
+            deviceId:
+              type: string
+            action:
+              type: string
+            params:
+              type: object
+          additionalProperties: false
+        - type: object
+          required: [type, sceneId]
+          properties:
+            type:
+              const: scene
+            sceneId:
+              type: string
+          additionalProperties: false
+    SwitchBinding:
+      type: object
+      required: [id, name, enabled, source, targets]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        enabled:
+          type: boolean
+        source:
+          $ref: "#/components/schemas/SwitchBindingSource"
+        targets:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/SwitchBindingTarget"
+      additionalProperties: false
     Point2D:
       type: object
       required: [x, y]
@@ -814,6 +903,151 @@ paths:
                   status:
                     type: string
                     example: deleted
+  /switch-bindings:
+    get:
+      summary: List switch-panel software bindings
+      security:
+        - ApiKey: []
+      parameters:
+        - in: query
+          name: panelId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Binding list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, count]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SwitchBinding"
+                  count:
+                    type: integer
+        "503":
+          description: Switch binding store unavailable
+    post:
+      summary: Create a switch-panel software binding
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchBinding"
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SwitchBinding"
+        "400":
+          description: Invalid binding, target, action parameter, or state cycle
+        "409":
+          description: The same source is already bound
+  /switch-bindings/validate:
+    post:
+      summary: Validate and compile a switch binding without persisting it
+      security:
+        - ApiKey: []
+      parameters:
+        - in: query
+          name: currentId
+          description: Existing binding id when validating an update.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchBinding"
+      responses:
+        "200":
+          description: Valid
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, binding]
+                properties:
+                  status:
+                    type: string
+                    const: valid
+                  binding:
+                    $ref: "#/components/schemas/SwitchBinding"
+        "400":
+          description: Invalid binding
+        "409":
+          description: The same source is already bound
+  /switch-bindings/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get one switch-panel software binding
+      security:
+        - ApiKey: []
+      responses:
+        "200":
+          description: Binding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SwitchBinding"
+        "404":
+          description: Not found
+    put:
+      summary: Update a switch-panel software binding
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchBinding"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SwitchBinding"
+        "400":
+          description: Invalid binding or id mismatch
+        "404":
+          description: Not found
+        "409":
+          description: The same source is already bound
+    delete:
+      summary: Delete a switch-panel software binding
+      security:
+        - ApiKey: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: deleted
+                  removed:
+                    type: string
+        "404":
+          description: Not found
   /floorplans:
     get:
       summary: List floorplans

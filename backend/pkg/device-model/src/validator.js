@@ -33,7 +33,10 @@ const placementSchema = z.object({
 const zigbeeBinding = z.object({
   topic: z.string().min(1),
   friendly_name: z.string().optional(),
-  ieee_address: z.string().optional()
+  ieee_address: z.string().optional(),
+  endpoint: z.string().min(1).optional(),
+  state_property: z.string().min(1).optional(),
+  operation_mode_property: z.string().min(1).optional()
 });
 
 const voiceControlSlotSchema = z.object({
@@ -118,8 +121,23 @@ const bindingsSchema = z.object({
 const switchTrait = z.object({
   state: z.enum(["on", "off"]),
   power_w: z.number().optional(),
-  energy_kwh: z.number().optional()
+  energy_kwh: z.number().optional(),
+  operation_mode: z.enum(["control_relay", "decoupled"]).optional()
 });
+
+const compositionSchema = z
+  .object({
+    role: z.enum(["panel", "relay_channel"]),
+    parentId: z.string().min(1).optional(),
+    childIds: z.array(z.string().min(1)).optional(),
+    endpoint: z.string().min(1).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.role === "relay_channel") {
+      if (!value.parentId) ctx.addIssue({ code: "custom", path: ["parentId"], message: "parentId is required for relay_channel" });
+      if (!value.endpoint) ctx.addIssue({ code: "custom", path: ["endpoint"], message: "endpoint is required for relay_channel" });
+    }
+  });
 
 const dimmerTrait = z.object({
   state: z.enum(["on", "off"]),
@@ -196,6 +214,7 @@ export const deviceSchema = z.object({
   bindings: bindingsSchema,
   traits: traitsSchema,
   capabilities: z.array(capabilitySchema),
+  composition: compositionSchema.optional(),
   semantics: semanticsSchema.optional(),
   identity: identitySchema.optional()
 });

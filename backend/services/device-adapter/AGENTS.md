@@ -11,6 +11,7 @@
 - 首期协议：Zigbee via zigbee2mqtt；并支持 Home Assistant 作为数据源（`MODE=ha`）。
 - 绑定：保持 `bindings.zigbee2mqtt.topic` 与 `bindings.ha_entity_id`，便于多协议共存。
 - 状态缓存：Redis；事件源：MQTT 订阅 `zigbee2mqtt/#`，落库 Postgres。
+- 多键面板：Zigbee2MQTT 双键/三键开关归一化为一个 `panel` 父设备和多个 `relay_channel` 子设备；按键 action 作为瞬时 `device.event` 发布，不能写入持续状态缓存。
 - 位置信息：解析/维护 `placement` 与 `semantics`，供 LLM 使用；可通过 `devices.config.json` 覆盖（见下）。
 - HA 映射：支持 turn_on/off、set_brightness、set_cover_position/tilt、set_temperature、set_hvac_mode、set_fan_mode、set_color_temp；无可用通路时返回错误 reason。
 - Voice 外呼映射：支持 `bindings.voice_control`（唤醒词→应答关键词→动作语音模板），并可按“最近麦克风”静态选择输入设备。
@@ -23,6 +24,7 @@
 - `devices.config.json`: 设备元信息覆盖（`name/placement/semantics/capabilities`），以稳定 `id` 为键（Zigbee2MQTT 使用 `zigbee:<IEEE address>`）；迁移期仍兼容以当前 `friendly_name` 为键。可用 `DEVICE_CONFIG_PATH` 或 `CONFIG_DIR/devices.config.json` 指定路径（默认 `./devices.config.json`）。
   - 可选 `voice_control` 顶层段：`defaults.ack_keywords`、`mic_selection.max_distance`、`mics[]`（用于语音设备应答监听；同时也作为 ws 语音卫星的注册表，`mics[].id` 需与卫星 `hello.deviceId` 对齐并提供 `placement.room`）。
   - 可选 `virtual` 顶层段由 `device-simulator` 使用，适配器会忽略该段，避免误解析为设备覆盖项。
+  - 继电器子设备可用稳定 ID `zigbee:<IEEE>:<endpoint>` 单独覆盖名称，用于记录实际硬接灯具。
 
 运行与测试
 - 安装依赖：`docker compose -f deploy/docker-compose.yml run --rm device-adapter npm install`（使用 compose 服务与挂载的 node_modules 卷）。

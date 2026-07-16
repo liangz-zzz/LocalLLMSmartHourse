@@ -33,7 +33,8 @@ export class DeviceIdentityResolver {
       out?.bindings?.ha?.entity_id,
       out?.bindings?.ha_entity_id,
       out?.bindings?.zigbee2mqtt?.friendly_name,
-      out?.bindings?.zigbee2mqtt?.ieee_address
+      out?.bindings?.zigbee2mqtt?.ieee_address,
+      out?.bindings?.zigbee2mqtt?.endpoint
     ]);
 
     out.identity = {
@@ -175,17 +176,19 @@ function buildFingerprint(device) {
     model: String(device?.semantics?.model || ""),
     ha_entity_id: String(device?.bindings?.ha?.entity_id || device?.bindings?.ha_entity_id || ""),
     zigbee_topic: String(device?.bindings?.zigbee2mqtt?.topic || ""),
-    zigbee_ieee_address: String(device?.bindings?.zigbee2mqtt?.ieee_address || "")
+    zigbee_ieee_address: String(device?.bindings?.zigbee2mqtt?.ieee_address || ""),
+    zigbee_endpoint: String(device?.bindings?.zigbee2mqtt?.endpoint || "")
   };
 }
 
 function computeStableKey(device, fingerprint) {
   const protocol = normalizeToken(device?.protocol);
   const zigbeeIeeeAddress = normalizeToken(fingerprint?.zigbee_ieee_address);
+  const zigbeeEndpoint = normalizeToken(fingerprint?.zigbee_endpoint);
   const haEntityId = normalizeToken(fingerprint?.ha_entity_id);
   const stableId = normalizeToken(device?.id);
   const parts = zigbeeIeeeAddress
-    ? ["zigbee", zigbeeIeeeAddress]
+    ? ["zigbee", zigbeeIeeeAddress, ...(zigbeeEndpoint ? [zigbeeEndpoint] : [])]
     : haEntityId
       ? ["ha", haEntityId]
       : [protocol, stableId];

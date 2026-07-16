@@ -63,9 +63,12 @@ export class AutomationEngine {
 
   handleDeviceUpdate(device) {
     if (!device || typeof device !== "object" || typeof device.id !== "string") return;
-    const id = device.id;
+    const transientEvent = device.event && typeof device.event === "object" ? device.event : null;
+    const snapshot = transientEvent ? { ...device } : device;
+    if (transientEvent) delete snapshot.event;
+    const id = snapshot.id;
     const prev = this.devices.get(id);
-    this.devices.set(id, device);
+    this.devices.set(id, snapshot);
 
     this._resolveWaitersForDevice(id);
 
@@ -90,8 +93,17 @@ export class AutomationEngine {
       if (!aid) continue;
       const state = this._state(aid);
       if (!this._cooldownOk(a, state)) continue;
-      if (!matchesDeviceTrigger(a?.trigger, { device, prev })) continue;
-      this._maybeScheduleOrExecute(a, state, { kind: "device", deviceId: id });
+      if (!matchesAutomationTrigger(a?.trigger, { device: snapshot, prev, event: transientEvent })) continue;
+      if (String(a?.trigger?.type || "") === "device_event") {
+        const eventId = String(transientEvent?.id || "").trim();
+        if (!eventId || state.lastEventId === eventId) continue;
+        state.lastEventId = eventId;
+      }
+      this._maybeScheduleOrExecute(a, state, {
+        kind: transientEvent ? "device_event" : "device",
+        deviceId: id,
+        eventId: transientEvent?.id
+      });
     }
   }
 
@@ -104,6 +116,7 @@ export class AutomationEngine {
       pendingSinceMs: null,
       cooldownUntilMs: null,
       executing: false,
+      lastEventId: null,
       intervalHandle: null,
       timeHandle: null
     };
@@ -347,9 +360,10 @@ export class AutomationEngine {
   }
 }
 
-function matchesDeviceTrigger(trigger, { device, prev }) {
+function matchesAutomationTrigger(trigger, { device, prev, event }) {
   if (!trigger || typeof trigger !== "object") return false;
   const type = String(trigger.type || "").trim();
+  if (type === "device_event") return matchesDeviceEventTrigger(trigger, { device, event });
   if (type !== "device") return false;
 
   const deviceIds = normalizeStringArray(trigger.deviceId);
@@ -379,6 +393,15 @@ function matchesDeviceTrigger(trigger, { device, prev }) {
 
   // traitPath exists and changed requirement satisfied.
   return true;
+}
+
+function matchesDeviceEventTrigger(trigger, { device, event }) {
+  if (!event || typeof event !== "object") return false;
+  if (String(trigger.deviceId || "").trim() !== device.id) return false;
+  const eventType = String(trigger.eventType || "button").trim();
+  if (String(event.type || "").trim() !== eventType) return false;
+  if (String(trigger.gesture || "").trim() !== String(event.gesture || "").trim()) return false;
+  return String(trigger.selector || "").trim() === String(event.selector || "").trim();
 }
 
 function evaluateCondition(cond, ctx) {
