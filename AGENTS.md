@@ -51,5 +51,5 @@
   - `docs/feature/scene_integration/README.md`（场景集成：JSON 场景配置 + API/MCP/Agent 执行链路）
   - `docs/feature/automation/README.md`（自动化/规则：用户可配置联动，复用 Scene）
   - `docs/feature/device_simulation/README.md`（设备模拟：基于配置注入虚拟设备并复用 Agent 控制链路）
-  - `docs/feature/floorplan_editor/README.md`（户型编辑与 3D 预览：2D 编辑、三点校准、API 设计）
+  - `docs/feature/floorplan_editor/README.md`（2D 户型编辑与设备坐标：比例尺、布点、米制坐标绑定）
 - Dev 容器：见 `.devcontainer/AGENTS.md`，默认附着 `api-gateway` 服务，命令保持 `sleep infinity` 供开发者启动自定义任务。 

@@ -85,6 +85,23 @@ export class DeviceOverridesStore {
     return merged;
   }
 
+  async reconcileFloorplanCoordinates(coordinateMap) {
+    const coordinates = coordinateMap instanceof Map ? coordinateMap : new Map();
+    const { devices, envelope } = await this.loadEnvelope();
+    const nextDevices = reconcileCoordinateEntries(devices, coordinates, { addMissing: true });
+    const { key, voiceEnvelope } = resolveVoiceEnvelope(envelope);
+    const nextMics = reconcileCoordinateEntries(voiceEnvelope.mics, coordinates, { addMissing: false });
+
+    validateOverrideList(nextDevices);
+    validateVoiceMicList(nextMics);
+    const nextEnvelope = {
+      ...(envelope || {}),
+      [key]: { ...(voiceEnvelope.meta || {}), mics: nextMics }
+    };
+    await this.saveEnvelope({ devices: nextDevices, envelope: nextEnvelope });
+    return { devices: nextDevices.length, voiceMics: nextMics.length, coordinates: coordinates.size };
+  }
+
   async delete(id) {
     const list = await this.list();
     const deviceId = String(id || "").trim();
@@ -162,6 +179,7 @@ function validateOverrideList(list) {
     if (ids.has(id)) errors.push(`${prefix}.id duplicate: ${id}`);
     ids.add(id);
     if (entry.placement !== undefined && !isPlainObject(entry.placement)) errors.push(`${prefix}.placement must be an object`);
+    validateCoordinates(entry.placement?.coordinates, `${prefix}.placement.coordinates`, errors);
     if (entry.semantics !== undefined && !isPlainObject(entry.semantics)) errors.push(`${prefix}.semantics must be an object`);
     if (entry.capabilities !== undefined && !Array.isArray(entry.capabilities)) errors.push(`${prefix}.capabilities must be an array`);
   });
@@ -188,9 +206,7 @@ function validateVoiceMicList(list) {
     if (ids.has(id)) errors.push(`${prefix}.id duplicate: ${id}`);
     ids.add(id);
     if (entry.placement !== undefined && !isPlainObject(entry.placement)) errors.push(`${prefix}.placement must be an object`);
-    if (entry.placement?.coordinates !== undefined && !isPlainObject(entry.placement.coordinates)) {
-      errors.push(`${prefix}.placement.coordinates must be an object`);
-    }
+    validateCoordinates(entry.placement?.coordinates, `${prefix}.placement.coordinates`, errors);
   });
   if (errors.length) {
     throw new DeviceOverridesStoreError("invalid_device_override", errors.join("; "), { details: errors });
@@ -229,6 +245,66 @@ function mergeVoiceMic(existing, patch) {
   }
   out.id = String(patch?.id || out.id || "").trim();
   return out;
+}
+
+function reconcileCoordinateEntries(entries, coordinates, { addMissing }) {
+  const next = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const id = String(entry?.id || "").trim();
+    if (!id) {
+      next.push(entry);
+      continue;
+    }
+    seen.add(id);
+    const coordinate = coordinates.get(id);
+    if (coordinate) {
+      next.push({
+        ...entry,
+        placement: { ...(entry.placement || {}), coordinates: coordinate }
+      });
+      continue;
+    }
+    if (entry?.placement?.coordinates?.source === "floorplan") {
+      const placement = { ...(entry.placement || {}) };
+      delete placement.coordinates;
+      const cleaned = { ...entry };
+      if (Object.keys(placement).length) cleaned.placement = placement;
+      else delete cleaned.placement;
+      if (Object.keys(cleaned).some((key) => key !== "id")) next.push(cleaned);
+      continue;
+    }
+    next.push(entry);
+  }
+
+  if (addMissing) {
+    for (const [id, coordinate] of coordinates.entries()) {
+      if (seen.has(id)) continue;
+      next.push({ id, placement: { coordinates: coordinate } });
+    }
+  }
+  return next;
+}
+
+function validateCoordinates(value, prefix, errors) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  for (const key of ["x", "y", "z", "lat", "lon"]) {
+    if (value[key] !== undefined && !Number.isFinite(value[key])) errors.push(`${prefix}.${key} must be a number`);
+  }
+  if (value.source === "floorplan") {
+    for (const key of ["x", "y", "z"]) {
+      if (!Number.isFinite(value[key])) errors.push(`${prefix}.${key} is required for floorplan coordinates`);
+    }
+    if (value.unit !== "m") errors.push(`${prefix}.unit must be m for floorplan coordinates`);
+    if (value.frame !== "floorplan_image") errors.push(`${prefix}.frame must be floorplan_image for floorplan coordinates`);
+    if (typeof value.floorplanId !== "string" || !value.floorplanId.trim()) {
+      errors.push(`${prefix}.floorplanId is required for floorplan coordinates`);
+    }
+  }
 }
 
 function mergeSemantics(a, b) {

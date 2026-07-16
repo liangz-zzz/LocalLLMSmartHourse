@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getFloorplanScaleMetrics } from "./floorplan-coordinates.js";
 
-const DEFAULT_VERSION = 1;
+const DEFAULT_VERSION = 2;
 
 export class FloorplanStoreError extends Error {
   constructor(code, message, extra) {
@@ -26,7 +27,7 @@ export class FloorplanStore {
 
   async list() {
     const { floorplans } = await this.load();
-    validateFloorplanList(floorplans);
+    validateFloorplanList(floorplans, { allowUnscaledDevices: true });
     return floorplans;
   }
 
@@ -38,17 +39,19 @@ export class FloorplanStore {
   async create(plan) {
     const data = await this.load();
     const list = data.floorplans;
-    const id = String(plan?.id || "").trim();
+    const normalizedPlan = normalizeFloorplanFor2d(plan);
+    const id = String(normalizedPlan?.id || "").trim();
     if (!id) {
       throw new FloorplanStoreError("invalid_floorplan", "floorplan id is required");
     }
     if (list.some((item) => item?.id === id)) {
       throw new FloorplanStoreError("floorplan_exists", `floorplan ${id} already exists`);
     }
-    const next = list.concat([plan]);
-    validateFloorplanList(next);
+    const next = list.concat([normalizedPlan]);
+    validateFloorplanList(next, { allowUnscaledDevices: true });
+    validateFloorplanList([normalizedPlan]);
     await this.save({ version: data.version, floorplans: next });
-    return plan;
+    return normalizedPlan;
   }
 
   async update(id, plan) {
@@ -59,8 +62,9 @@ export class FloorplanStore {
       throw new FloorplanStoreError("floorplan_not_found", `floorplan ${id} not found`);
     }
     const next = [...list];
-    next[index] = { ...plan, id };
-    validateFloorplanList(next);
+    next[index] = normalizeFloorplanFor2d({ ...plan, id });
+    validateFloorplanList(next, { allowUnscaledDevices: true });
+    validateFloorplanList([next[index]]);
     await this.save({ version: data.version, floorplans: next });
     return next[index];
   }
@@ -98,7 +102,7 @@ export class FloorplanStore {
     const tmp = `${resolved}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = JSON.stringify(
       {
-        version: Number.isFinite(version) && version > 0 ? version : DEFAULT_VERSION,
+        version: Number.isFinite(version) && version > 0 ? Math.max(DEFAULT_VERSION, version) : DEFAULT_VERSION,
         floorplans
       },
       null,
@@ -111,18 +115,38 @@ export class FloorplanStore {
 
 function normalizeFloorplans(parsed) {
   if (Array.isArray(parsed)) {
-    return { version: DEFAULT_VERSION, floorplans: parsed };
+    return { version: DEFAULT_VERSION, floorplans: parsed.map(normalizeFloorplanFor2d) };
   }
   if (parsed && typeof parsed === "object") {
     if (Array.isArray(parsed.floorplans)) {
       const version = Number.isFinite(parsed.version) && parsed.version > 0 ? parsed.version : DEFAULT_VERSION;
-      return { version, floorplans: parsed.floorplans };
+      return { version, floorplans: parsed.floorplans.map(normalizeFloorplanFor2d) };
     }
   }
   return { version: DEFAULT_VERSION, floorplans: [] };
 }
 
-function validateFloorplanList(list) {
+function normalizeFloorplanFor2d(plan) {
+  if (!isPlainObject(plan)) return plan;
+  const {
+    model: _model,
+    modelTransform: _modelTransform,
+    calibrationPoints: _calibrationPoints,
+    ...rest
+  } = plan;
+  return {
+    ...rest,
+    devices: Array.isArray(plan.devices)
+      ? plan.devices.map((device) => {
+          if (!isPlainObject(device)) return device;
+          const { rotation: _rotation, scale: _scale, ...placement } = device;
+          return placement;
+        })
+      : plan.devices
+  };
+}
+
+function validateFloorplanList(list, { allowUnscaledDevices = false } = {}) {
   const errors = [];
   if (!Array.isArray(list)) {
     throw new FloorplanStoreError("invalid_floorplan", "floorplans must be an array");
@@ -156,22 +180,6 @@ function validateFloorplanList(list) {
       validateAsset(plan.image, `${prefix}.image`, errors);
     }
 
-    if (plan.model !== undefined) {
-      if (!isPlainObject(plan.model)) {
-        errors.push(`${prefix}.model must be an object`);
-      } else {
-        validateAsset(plan.model, `${prefix}.model`, errors);
-      }
-    }
-
-    if (plan.modelTransform !== undefined && plan.modelTransform !== null) {
-      validateModelTransform(plan.modelTransform, `${prefix}.modelTransform`, errors);
-    }
-
-    if (plan.calibrationPoints !== undefined && plan.calibrationPoints !== null) {
-      validateCalibrationPoints(plan.calibrationPoints, `${prefix}.calibrationPoints`, errors);
-    }
-
     if (plan.imageScale !== undefined && plan.imageScale !== null) {
       validateImageScaleReference(plan.imageScale, `${prefix}.imageScale`, errors);
     }
@@ -182,6 +190,8 @@ function validateFloorplanList(list) {
 
     if (!Array.isArray(plan.devices)) {
       errors.push(`${prefix}.devices must be an array`);
+    } else if (plan.devices.length && !allowUnscaledDevices && !getFloorplanScaleMetrics(plan)) {
+      errors.push(`${prefix} must have image width, image height, and a valid imageScale before devices can be saved`);
     }
 
     const roomIds = new Set();
@@ -236,12 +246,6 @@ function validateFloorplanList(list) {
         if (device.height !== undefined && (!Number.isFinite(device.height) || device.height < 0)) {
           errors.push(`${devicePrefix}.height must be a non-negative number`);
         }
-        if (device.rotation !== undefined && !Number.isFinite(device.rotation)) {
-          errors.push(`${devicePrefix}.rotation must be a number`);
-        }
-        if (device.scale !== undefined && (!Number.isFinite(device.scale) || device.scale <= 0)) {
-          errors.push(`${devicePrefix}.scale must be a positive number`);
-        }
         if (device.roomId !== undefined && device.roomId !== null && String(device.roomId || "").trim()) {
           const roomId = String(device.roomId || "").trim();
           if (!roomIds.has(roomId)) {
@@ -270,53 +274,6 @@ function validateAsset(asset, prefix, errors) {
   }
   if (asset.size !== undefined && (!Number.isFinite(asset.size) || asset.size < 0)) {
     errors.push(`${prefix}.size must be a non-negative number`);
-  }
-}
-
-function validateModelTransform(transform, prefix, errors) {
-  if (!isPlainObject(transform)) {
-    errors.push(`${prefix} must be an object`);
-    return;
-  }
-  if (!Array.isArray(transform.matrix) || transform.matrix.length !== 4) {
-    errors.push(`${prefix}.matrix must be an array of 4 numbers`);
-  } else {
-    transform.matrix.forEach((value, idx) => {
-      if (!Number.isFinite(value)) {
-        errors.push(`${prefix}.matrix[${idx}] must be a number`);
-      }
-    });
-  }
-  if (!isPlainObject(transform.translate)) {
-    errors.push(`${prefix}.translate must be an object`);
-  } else {
-    if (!Number.isFinite(transform.translate.x)) {
-      errors.push(`${prefix}.translate.x must be a number`);
-    }
-    if (!Number.isFinite(transform.translate.z)) {
-      errors.push(`${prefix}.translate.z must be a number`);
-    }
-  }
-}
-
-function validateCalibrationPoints(calibration, prefix, errors) {
-  if (!isPlainObject(calibration)) {
-    errors.push(`${prefix} must be an object`);
-    return;
-  }
-  if (!Array.isArray(calibration.image) || calibration.image.length !== 3) {
-    errors.push(`${prefix}.image must be an array of 3 points`);
-  } else {
-    calibration.image.forEach((point, idx) => {
-      validatePoint2d(point, `${prefix}.image[${idx}]`, errors, true);
-    });
-  }
-  if (!Array.isArray(calibration.model) || calibration.model.length !== 3) {
-    errors.push(`${prefix}.model must be an array of 3 points`);
-  } else {
-    calibration.model.forEach((point, idx) => {
-      validatePoint3d(point, `${prefix}.model[${idx}]`, errors);
-    });
   }
 }
 
@@ -351,22 +308,6 @@ function validatePoint2d(point, prefix, errors, requireRange) {
     errors.push(`${prefix}.y must be a number`);
   } else if (requireRange && (point.y < 0 || point.y > 1)) {
     errors.push(`${prefix}.y must be between 0 and 1`);
-  }
-}
-
-function validatePoint3d(point, prefix, errors) {
-  if (!isPlainObject(point)) {
-    errors.push(`${prefix} must be an object`);
-    return;
-  }
-  if (!Number.isFinite(point.x)) {
-    errors.push(`${prefix}.x must be a number`);
-  }
-  if (!Number.isFinite(point.y)) {
-    errors.push(`${prefix}.y must be a number`);
-  }
-  if (!Number.isFinite(point.z)) {
-    errors.push(`${prefix}.z must be a number`);
   }
 }
 

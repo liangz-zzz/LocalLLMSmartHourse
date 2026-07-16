@@ -20,7 +20,7 @@ placement 细化（满足“位置/功能描述”需求）
 - `floor` (可选): `1F/2F` 或 `B1`
 - `mount` (可选): `ceiling` | `wall` | `desktop` | `window`
 - `description` (可选): 自然语言说明（例：“客厅南面窗户，双轨窗帘左轨”）
-- `coordinates` (可选): `{ x, y, z }` 室内坐标或 `{ lat, lon }`
+- `coordinates` (可选): `{ x, y, z }` 室内坐标或 `{ lat, lon }`；户型派生坐标同时带 `unit=m/frame=floorplan_image/floorplanId/source=floorplan`
 
 Schema
 - 详见 `docs/device-model.md` 的 JSON Schema/样例。

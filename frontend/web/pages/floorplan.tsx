@@ -1,5 +1,4 @@
 import Head from "next/head";
-import Script from "next/script";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -8,7 +7,6 @@ import { setStoredFloorplanId } from "../lib/floorplan-context";
 import { getDeviceExternalLinks, useIntegrationBases } from "../lib/integrations";
 
 type Point2D = { x: number; y: number };
-type Point3D = { x: number; y: number; z: number };
 
 type FloorplanAsset = {
   assetId?: string;
@@ -17,16 +15,6 @@ type FloorplanAsset = {
   height?: number;
   mime?: string;
   size?: number;
-};
-
-type ModelTransform = {
-  matrix: [number, number, number, number];
-  translate: { x: number; z: number };
-};
-
-type CalibrationPoints = {
-  image: Point2D[];
-  model: Point3D[];
 };
 
 type ImageScaleReference = {
@@ -45,8 +33,6 @@ type FloorplanDevice = {
   x: number;
   y: number;
   height?: number;
-  rotation?: number;
-  scale?: number;
   roomId?: string;
 };
 
@@ -54,9 +40,6 @@ type Floorplan = {
   id: string;
   name: string;
   image: FloorplanAsset;
-  model?: FloorplanAsset;
-  modelTransform?: ModelTransform | null;
-  calibrationPoints?: CalibrationPoints | null;
   imageScale?: ImageScaleReference | null;
   rooms: FloorplanRoom[];
   devices: FloorplanDevice[];
@@ -66,7 +49,6 @@ type FloorplanSummary = {
   id: string;
   name: string;
   image: FloorplanAsset;
-  model?: FloorplanAsset;
   roomCount?: number;
   deviceCount?: number;
 };
@@ -143,15 +125,14 @@ type SceneRunResult = {
   durationMs?: number;
 };
 
-type Mode = "view" | "rooms" | "devices" | "calibration";
+type Mode = "view" | "rooms" | "devices";
 type PageStage = "browse" | "editor";
 type BrowseView = "select" | "create";
 
 const MODE_LABELS: Record<Mode, string> = {
   view: "视图",
   rooms: "房间编辑",
-  devices: "设备编辑",
-  calibration: "校准"
+  devices: "设备编辑"
 };
 
 const pageBg = "linear-gradient(135deg, #f7f3ea 0%, #f0f4f5 50%, #e6eef0 100%)";
@@ -215,12 +196,15 @@ function getPointDistanceInPixels(a: Point2D, b: Point2D, imageWidth: number, im
 }
 
 function getImageScaleMetrics(scale: ImageScaleReference | null | undefined, imageWidth: number, imageHeight: number) {
+  if (!Number.isFinite(imageWidth) || imageWidth <= 0 || !Number.isFinite(imageHeight) || imageHeight <= 0) return null;
   if (!scale?.points?.length || scale.points.length !== 2) return null;
   const pixelDistance = getPointDistanceInPixels(scale.points[0], scale.points[1], imageWidth, imageHeight);
-  if (!Number.isFinite(pixelDistance) || pixelDistance <= 0) return null;
+  if (!Number.isFinite(pixelDistance) || pixelDistance < 1) return null;
   const distanceMeters = Number(scale.distanceMeters);
   if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
   return {
+    imageWidth,
+    imageHeight,
     pixelDistance,
     distanceMeters,
     metersPerPixel: distanceMeters / pixelDistance,
@@ -237,48 +221,13 @@ function slugify(name: string) {
   return cleaned || `floorplan_${Date.now()}`;
 }
 
-function computeTransform(imagePoints: Point2D[], modelPoints: Point3D[]): ModelTransform | null {
-  if (imagePoints.length !== 3 || modelPoints.length !== 3) return null;
-  const [u1, u2, u3] = imagePoints;
-  const [v1, v2, v3] = modelPoints;
-
-  const a = u2.x - u1.x;
-  const b = u3.x - u1.x;
-  const c = u2.y - u1.y;
-  const d = u3.y - u1.y;
-  const det = a * d - b * c;
-  if (!Number.isFinite(det) || Math.abs(det) < 1e-6) return null;
-
-  const inv00 = d / det;
-  const inv01 = -b / det;
-  const inv10 = -c / det;
-  const inv11 = a / det;
-
-  const vx1 = v2.x - v1.x;
-  const vx2 = v3.x - v1.x;
-  const vz1 = v2.z - v1.z;
-  const vz2 = v3.z - v1.z;
-
-  const m00 = vx1 * inv00 + vx2 * inv10;
-  const m01 = vx1 * inv01 + vx2 * inv11;
-  const m10 = vz1 * inv00 + vz2 * inv10;
-  const m11 = vz1 * inv01 + vz2 * inv11;
-
-  const tx = v1.x - (m00 * u1.x + m01 * u1.y);
-  const tz = v1.z - (m10 * u1.x + m11 * u1.y);
-
+function getDevicePhysicalCoordinates(device: FloorplanDevice | null | undefined, metrics: ReturnType<typeof getImageScaleMetrics>) {
+  if (!device || !metrics) return null;
   return {
-    matrix: [m00, m01, m10, m11],
-    translate: { x: tx, z: tz }
+    x: device.x * metrics.imageWidth * metrics.metersPerPixel,
+    y: device.y * metrics.imageHeight * metrics.metersPerPixel,
+    z: device.height ?? 0
   };
-}
-
-function mapTo3d(point: Point2D, transform?: ModelTransform | null) {
-  if (!transform) return null;
-  const [m00, m01, m10, m11] = transform.matrix;
-  const x = m00 * point.x + m01 * point.y + transform.translate.x;
-  const z = m10 * point.x + m11 * point.y + transform.translate.z;
-  return { x, z };
 }
 
 function buildSceneEffects(steps: SceneStep[]): Record<string, SceneEffect> {
@@ -399,245 +348,6 @@ function buildVirtualDraftFromModel({
   };
 }
 
-function ThreePreview({
-  modelUrl,
-  transform,
-  devices,
-  calibrationPoints,
-  mode,
-  sceneEffects,
-  onPickPoint,
-  selectedDeviceId
-}: {
-  modelUrl?: string;
-  transform?: ModelTransform | null;
-  devices: FloorplanDevice[];
-  calibrationPoints: CalibrationPoints;
-  mode: Mode;
-  sceneEffects: Record<string, SceneEffect>;
-  onPickPoint?: (point: Point3D) => void;
-  selectedDeviceId?: string | null;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const threeRef = useRef<{
-    THREE?: any;
-    scene?: any;
-    camera?: any;
-    renderer?: any;
-    controls?: any;
-    loader?: any;
-    raycaster?: any;
-    model?: any;
-    meshes?: any[];
-    markers?: Map<string, any>;
-    calibrationMarkers?: any[];
-    resize?: () => void;
-    cleanup?: () => void;
-  }>({});
-
-  useEffect(() => {
-    let canceled = false;
-    const setup = async () => {
-      if (!containerRef.current) return;
-      // @ts-expect-error The three.js browser bundles are served from /public/vendor at runtime.
-      const THREE = await import(/* webpackIgnore: true */ "/vendor/three/three.module.js");
-      // @ts-expect-error The GLTFLoader browser bundle is served from /public/vendor at runtime.
-      const { GLTFLoader } = await import(/* webpackIgnore: true */ "/vendor/three/GLTFLoader.js");
-      // @ts-expect-error The OrbitControls browser bundle is served from /public/vendor at runtime.
-      const { OrbitControls } = await import(/* webpackIgnore: true */ "/vendor/three/OrbitControls.js");
-      if (canceled || !containerRef.current) return;
-
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color("#f6f3ea");
-      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
-      camera.position.set(6, 6, 6);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setPixelRatio(window.devicePixelRatio || 1);
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-      containerRef.current.innerHTML = "";
-      containerRef.current.appendChild(renderer.domElement);
-
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.target.set(0, 0, 0);
-
-      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-      scene.add(ambient);
-      const directional = new THREE.DirectionalLight(0xffffff, 0.6);
-      directional.position.set(5, 10, 7);
-      scene.add(directional);
-      const grid = new THREE.GridHelper(20, 20, "#d6d3d1", "#e2e8f0");
-      grid.position.y = 0;
-      scene.add(grid);
-
-      const raycaster = new THREE.Raycaster();
-      const meshes: any[] = [];
-      const markers = new Map<string, any>();
-      const calibrationMarkers: any[] = [];
-      const loader = new GLTFLoader();
-
-      const animate = () => {
-        controls.update();
-        renderer.render(scene, camera);
-      };
-      renderer.setAnimationLoop(animate);
-
-      const resize = () => {
-        if (!containerRef.current) return;
-        const { clientWidth, clientHeight } = containerRef.current;
-        renderer.setSize(clientWidth, clientHeight);
-        camera.aspect = clientWidth / clientHeight;
-        camera.updateProjectionMatrix();
-      };
-
-      const onResize = () => resize();
-      window.addEventListener("resize", onResize);
-
-      threeRef.current = {
-        THREE,
-        scene,
-        camera,
-        renderer,
-        controls,
-        loader,
-        raycaster,
-        meshes,
-        markers,
-        calibrationMarkers,
-        resize,
-        cleanup: () => {
-          window.removeEventListener("resize", onResize);
-          renderer.setAnimationLoop(null);
-          renderer.dispose();
-          scene.clear();
-          controls.dispose();
-        }
-      };
-      resize();
-    };
-
-    setup();
-    return () => {
-      canceled = true;
-      threeRef.current.cleanup?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    const state = threeRef.current;
-    if (!state.loader || !state.scene || !state.THREE) return;
-    if (!modelUrl) return;
-
-    const currentModel = state.model;
-    if (currentModel) {
-      state.scene.remove(currentModel);
-      state.model = undefined;
-      state.meshes = [];
-    }
-
-    state.loader.load(
-      modelUrl,
-      (gltf: any) => {
-        if (!state.scene) return;
-        state.model = gltf.scene;
-        state.meshes = [];
-        gltf.scene.traverse((child: any) => {
-          if (child.isMesh) {
-            state.meshes?.push(child);
-          }
-        });
-        state.scene.add(gltf.scene);
-      },
-      undefined,
-      () => {
-        // ignore load errors for now
-      }
-    );
-  }, [modelUrl]);
-
-  useEffect(() => {
-    const state = threeRef.current;
-    if (!state.renderer || !state.raycaster || !state.camera) return;
-    const dom = state.renderer.domElement;
-
-    const handlePointer = (evt: PointerEvent) => {
-      if (mode !== "calibration") return;
-      if (!state.meshes?.length) return;
-      if (calibrationPoints.model.length >= 3) return;
-      const rect = dom.getBoundingClientRect();
-      const x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
-      state.raycaster.setFromCamera({ x, y }, state.camera);
-      const hit = state.raycaster.intersectObjects(state.meshes, true)[0];
-      if (hit && onPickPoint) {
-        onPickPoint({ x: hit.point.x, y: hit.point.y, z: hit.point.z });
-      }
-    };
-
-    dom.addEventListener("pointerdown", handlePointer);
-    return () => {
-      dom.removeEventListener("pointerdown", handlePointer);
-    };
-  }, [mode, calibrationPoints.model.length, onPickPoint]);
-
-  useEffect(() => {
-    const state = threeRef.current;
-    if (!state.scene || !state.THREE) return;
-
-    const markers = state.markers || new Map();
-    state.markers = markers;
-    const deviceIds = new Set(devices.map((d) => d.deviceId));
-
-    for (const [id, mesh] of Array.from(markers.entries())) {
-      if (!deviceIds.has(id)) {
-        state.scene.remove(mesh);
-        markers.delete(id);
-      }
-    }
-
-    devices.forEach((device) => {
-      const effect = sceneEffects[device.deviceId];
-      const highlightColor = effect?.color || "#0f172a";
-      const color = device.deviceId === selectedDeviceId ? "#111827" : highlightColor;
-      const pos2d = { x: device.x, y: device.y };
-      const pos3d = mapTo3d(pos2d, transform);
-      if (!pos3d) return;
-      let marker = markers.get(device.deviceId);
-      if (!marker) {
-        const geometry = new state.THREE.SphereGeometry(0.1, 16, 16);
-        const material = new state.THREE.MeshStandardMaterial({ color });
-        marker = new state.THREE.Mesh(geometry, material);
-        markers.set(device.deviceId, marker);
-        state.scene.add(marker);
-      } else {
-        marker.material.color.set(color);
-      }
-      const scale = device.scale ?? 1;
-      marker.scale.set(scale, scale, scale);
-      marker.position.set(pos3d.x, device.height ?? 0, pos3d.z);
-    });
-  }, [devices, transform, sceneEffects, selectedDeviceId]);
-
-  useEffect(() => {
-    const state = threeRef.current;
-    if (!state.scene || !state.THREE) return;
-
-    state.calibrationMarkers?.forEach((marker: any) => state.scene.remove(marker));
-    state.calibrationMarkers = [];
-
-    calibrationPoints.model.forEach((point) => {
-      const geometry = new state.THREE.SphereGeometry(0.08, 12, 12);
-      const material = new state.THREE.MeshStandardMaterial({ color: "#f97316" });
-      const marker = new state.THREE.Mesh(geometry, material);
-      marker.position.set(point.x, point.y, point.z);
-      state.scene.add(marker);
-      state.calibrationMarkers?.push(marker);
-    });
-  }, [calibrationPoints]);
-
-  return <div ref={containerRef} style={{ width: "100%", height: "100%", borderRadius: "16px", overflow: "hidden" }} />;
-}
-
 export default function FloorplanPage() {
   const router = useRouter();
   const { haBase, z2mBase } = useIntegrationBases();
@@ -662,7 +372,6 @@ export default function FloorplanPage() {
   const [draftRoomName, setDraftRoomName] = useState<string>("");
   const [isDrawingRoom, setIsDrawingRoom] = useState<boolean>(false);
   const [placingDeviceId, setPlacingDeviceId] = useState<string | null>(null);
-  const [calibration, setCalibration] = useState<CalibrationPoints>({ image: [], model: [] });
   const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
 
   const [deviceOverrideDraft, setDeviceOverrideDraft] = useState<any | null>(null);
@@ -692,12 +401,8 @@ export default function FloorplanPage() {
   const [newPlanName, setNewPlanName] = useState<string>("");
   const [newPlanId, setNewPlanId] = useState<string>("");
   const [newImageAsset, setNewImageAsset] = useState<FloorplanAsset | null>(null);
-  const [newModelAsset, setNewModelAsset] = useState<FloorplanAsset | null>(null);
   const [newImageUploading, setNewImageUploading] = useState<boolean>(false);
-  const [newModelUploading, setNewModelUploading] = useState<boolean>(false);
   const [newImageUploadError, setNewImageUploadError] = useState<string>("");
-  const [newModelUploadError, setNewModelUploadError] = useState<string>("");
-  const [show3dPanel, setShow3dPanel] = useState<boolean>(false);
   const [canvasZoom, setCanvasZoom] = useState<number>(1);
   const [canvasViewportSize, setCanvasViewportSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [isSettingImageScale, setIsSettingImageScale] = useState<boolean>(false);
@@ -718,7 +423,6 @@ export default function FloorplanPage() {
   } | null>(null);
   const draggingHandleRef = useRef<{ roomId: string; index: number } | null>(null);
   const replaceImageInputRef = useRef<HTMLInputElement | null>(null);
-  const replaceModelInputRef = useRef<HTMLInputElement | null>(null);
 
   const deviceMap = useMemo(() => {
     const map: Record<string, Device> = {};
@@ -762,7 +466,6 @@ export default function FloorplanPage() {
     setDeviceOverrideDraft(null);
     setDeviceOverrideStatus("");
     setCanvasZoom(1);
-    setShow3dPanel(false);
     setIsSettingImageScale(false);
     setDraftScalePoints([]);
     setScaleDistanceInput("");
@@ -773,7 +476,6 @@ export default function FloorplanPage() {
     setDraft(null);
     setSavedSnapshot("");
     setActiveId(null);
-    setCalibration({ image: [], model: [] });
     setImageDims(null);
     setMode("view");
   };
@@ -883,7 +585,6 @@ export default function FloorplanPage() {
         }
         setDraft(data);
         setSavedSnapshot(JSON.stringify(data));
-        setCalibration(data.calibrationPoints || { image: [], model: [] });
         setImageDims(data?.image?.width && data?.image?.height ? { width: data.image.width, height: data.image.height } : null);
         resetEditorTransientState();
         setScaleDistanceInput(data?.imageScale?.distanceMeters ? String(data.imageScale.distanceMeters) : "");
@@ -957,20 +658,6 @@ export default function FloorplanPage() {
   }, [mode, pageStage]);
 
   useEffect(() => {
-    if (calibration.image.length === 3 && calibration.model.length === 3) {
-      const transform = computeTransform(calibration.image, calibration.model);
-      if (!transform) {
-        setStatus("校准失败：请确保三点不共线且分布分散");
-      }
-      updateDraft((prev) => ({
-        ...prev,
-        modelTransform: transform,
-        calibrationPoints: calibration
-      }));
-    }
-  }, [calibration.image.length, calibration.model.length]);
-
-  useEffect(() => {
     if (mode !== "rooms") {
       setIsDrawingRoom(false);
       setDraftRoomPoints([]);
@@ -987,12 +674,6 @@ export default function FloorplanPage() {
     if (mode !== "view") {
       setIsSettingImageScale(false);
       setDraftScalePoints([]);
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode === "calibration") {
-      setShow3dPanel(true);
     }
   }, [mode]);
 
@@ -1059,7 +740,6 @@ export default function FloorplanPage() {
   const effectiveCanvasScale = Math.max(0.2, fitScale * canvasZoom);
   const canvasRenderWidth = Math.max(320, Math.round(imageWidth * effectiveCanvasScale));
   const canvasRenderHeight = Math.max(240, Math.round(imageHeight * effectiveCanvasScale));
-  const effectiveShow3dPanel = pageStage === "editor" && (show3dPanel || mode === "calibration");
   const selectedRoom = draft?.rooms.find((room) => room.id === selectedRoomId) || null;
   const selectedPlacedDevice = draft?.devices.find((device) => device.deviceId === selectedDeviceId) || null;
   const selectedDevice = selectedPlacedDevice ? deviceMap[selectedPlacedDevice.deviceId] : null;
@@ -1068,6 +748,7 @@ export default function FloorplanPage() {
   const availablePlacementDeviceIds = new Set(availablePlacementDevices.map((device) => device.id));
   const persistedImageScale = draft?.imageScale || null;
   const imageScaleMetrics = getImageScaleMetrics(persistedImageScale, imageWidth, imageHeight);
+  const selectedDeviceCoordinates = getDevicePhysicalCoordinates(selectedPlacedDevice, imageScaleMetrics);
   const activeScalePoints = isSettingImageScale ? draftScalePoints : persistedImageScale?.points || [];
   const activeScaleMetrics =
     isSettingImageScale && draftScalePoints.length === 2
@@ -1093,6 +774,11 @@ export default function FloorplanPage() {
   };
 
   const startPlacingDevice = (deviceId: string) => {
+    if (!imageScaleMetrics) {
+      setStatus("请先设置并保存有效的 2D 比例尺，再添加设备");
+      setPlacingDeviceId(null);
+      return;
+    }
     const found = devices.find((device) => device.id === deviceId);
     if (!found) {
       setStatus(`未找到设备 ${deviceId}，请先保存设备并刷新列表`);
@@ -1124,14 +810,6 @@ export default function FloorplanPage() {
       return;
     }
 
-    if (mode === "calibration" && calibration.image.length < 3) {
-      setCalibration((prev) => {
-        const next = { ...prev, image: [...prev.image, point] };
-        return next;
-      });
-      return;
-    }
-
     if (mode === "devices" && placingDeviceId) {
       const placedDeviceId = placingDeviceId;
       updateDraft((prev) => {
@@ -1145,8 +823,6 @@ export default function FloorplanPage() {
               x: point.x,
               y: point.y,
               height: 0,
-              rotation: 0,
-              scale: 1,
               roomId
             }
           ]
@@ -1154,7 +830,7 @@ export default function FloorplanPage() {
       });
       setPlacingDeviceId(null);
       setSelectedDeviceId(placedDeviceId);
-      setStatus("设备点位已添加，可在右侧继续调整高度、旋转和语义信息");
+      setStatus("设备点位已添加，米制坐标已自动计算；保存户型后会绑定到设备属性");
       return;
     }
   };
@@ -1271,6 +947,10 @@ export default function FloorplanPage() {
   };
 
   const clearImageScale = () => {
+    if (draft?.devices.length) {
+      setStatus("当前户型已有设备，请先移除设备后再清除比例尺");
+      return;
+    }
     updateDraft((prev) => ({
       ...prev,
       imageScale: null
@@ -1326,20 +1006,7 @@ export default function FloorplanPage() {
     setSelectedDeviceId(null);
   };
 
-  const resetCalibration = () => {
-    setCalibration({ image: [], model: [] });
-    updateDraft((prev) => ({ ...prev, modelTransform: null, calibrationPoints: null }));
-  };
-
-  const handlePick3dPoint = (point: Point3D) => {
-    setCalibration((prev) => {
-      if (prev.model.length >= 3) return prev;
-      const next = { ...prev, model: [...prev.model, point] };
-      return next;
-    });
-  };
-
-  const uploadAsset = async (file: File, kind: "floorplan_image" | "floorplan_model") => {
+  const uploadAsset = async (file: File, kind: "floorplan_image") => {
     const form = new FormData();
     form.set("kind", kind);
     form.set("file", file);
@@ -1357,12 +1024,20 @@ export default function FloorplanPage() {
 
   const saveFloorplan = async () => {
     if (!draft) return;
+    if (draft.devices.length && !imageScaleMetrics) {
+      setStatus("保存失败：当前户型包含设备，请先设置有效的 2D 比例尺");
+      return;
+    }
+    const payload = {
+      ...draft,
+      image: { ...draft.image, width: imageWidth, height: imageHeight }
+    };
     setStatus("保存中...");
     try {
       const res = await fetch(`/api/floorplans/${encodeURIComponent(draft.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1379,13 +1054,13 @@ export default function FloorplanPage() {
                 ...plan,
                 name: data.name,
                 image: data.image,
-                model: data.model,
                 roomCount: data.rooms?.length ?? plan.roomCount,
                 deviceCount: data.devices?.length ?? plan.deviceCount
               }
             : plan
         )
       );
+      await refreshDevices();
       setStatus("已保存");
     } catch (err) {
       setStatus(`保存失败: ${(err as Error).message}`);
@@ -1408,7 +1083,6 @@ export default function FloorplanPage() {
       id,
       name: newPlanName.trim(),
       image: newImageAsset,
-      model: newModelAsset || undefined,
       rooms: [],
       devices: []
     };
@@ -1427,7 +1101,6 @@ export default function FloorplanPage() {
       setNewPlanName("");
       setNewPlanId("");
       setNewImageAsset(null);
-      setNewModelAsset(null);
       await refreshFloorplans();
       resetEditorTransientState();
       setActiveId(data.id);
@@ -2317,46 +1990,32 @@ export default function FloorplanPage() {
           <p style={{ ...hintStyle, margin: 0 }}>
             当前选中：{deviceMap[selectedPlacedDevice.deviceId]?.name || selectedPlacedDevice.deviceId}。新布点成功后这里会自动切换到对应设备。
           </p>
-          <label style={labelStyle}>高度 (m)</label>
+          <div
+            data-testid="device-physical-coordinates"
+            style={{ padding: "10px 12px", borderRadius: 12, background: "#eff6ff", color: "#1e3a8a", fontSize: 13, lineHeight: 1.7 }}
+          >
+            {selectedDeviceCoordinates ? (
+              <>
+                物理坐标：x={selectedDeviceCoordinates.x.toFixed(3)} m · y={selectedDeviceCoordinates.y.toFixed(3)} m · z=
+                {selectedDeviceCoordinates.z.toFixed(3)} m
+                <br />
+                坐标系：当前户型图片左上角原点
+              </>
+            ) : (
+              "尚无有效比例尺，无法计算物理坐标"
+            )}
+          </div>
+          <label style={labelStyle}>离地高度 z (m)</label>
           <input
             type="number"
             step="0.05"
+            min="0"
             value={selectedPlacedDevice.height ?? 0}
             onChange={(e) =>
               updateDraft((prev) => ({
                 ...prev,
                 devices: prev.devices.map((device) =>
                   device.deviceId === selectedPlacedDevice.deviceId ? { ...device, height: Number(e.target.value) } : device
-                )
-              }))
-            }
-            style={inputStyle}
-          />
-          <label style={labelStyle}>旋转</label>
-          <input
-            type="number"
-            step="1"
-            value={selectedPlacedDevice.rotation ?? 0}
-            onChange={(e) =>
-              updateDraft((prev) => ({
-                ...prev,
-                devices: prev.devices.map((device) =>
-                  device.deviceId === selectedPlacedDevice.deviceId ? { ...device, rotation: Number(e.target.value) } : device
-                )
-              }))
-            }
-            style={inputStyle}
-          />
-          <label style={labelStyle}>缩放</label>
-          <input
-            type="number"
-            step="0.1"
-            value={selectedPlacedDevice.scale ?? 1}
-            onChange={(e) =>
-              updateDraft((prev) => ({
-                ...prev,
-                devices: prev.devices.map((device) =>
-                  device.deviceId === selectedPlacedDevice.deviceId ? { ...device, scale: Number(e.target.value) } : device
                 )
               }))
             }
@@ -2585,34 +2244,15 @@ export default function FloorplanPage() {
     </div>
   );
 
-  const renderCalibrationInspector = () => (
-    <div style={panelStyle}>
-      <h3 style={panelTitleStyle}>校准步骤</h3>
-      <ol style={{ margin: "0 0 0 18px", padding: 0, color: "#334155", fontSize: 14, lineHeight: 1.7 }}>
-        <li>先在 2D 户型图上点击 3 个位置清晰、尽量分散的点。</li>
-        <li>再在 3D 模型里点击与之对应的 3 个点。</li>
-        <li>校准完成后会生成 2D 到 3D 的映射，设备点位将出现在 3D 预览中。</li>
-      </ol>
-      <p style={{ ...hintStyle, marginTop: 12 }}>
-        当前进度：2D 点 {calibration.image.length}/3，3D 点 {calibration.model.length}/3
-      </p>
-      <p style={hintStyle}>{draft?.modelTransform ? "已存在校准结果，可继续微调或重置。" : "尚未完成三点校准。"}</p>
-      <button onClick={resetCalibration} style={secondaryButtonStyle}>
-        重置校准
-      </button>
-    </div>
-  );
-
   const renderFloorplanSummaryPanel = () => (
     <div style={panelStyle}>
       <h3 style={panelTitleStyle}>当前户型</h3>
       <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{draft?.name}</p>
       <p style={hintStyle}>ID：{draft?.id}</p>
       <p style={hintStyle}>
-        房间 {draft?.rooms.length || 0} 个 · 设备 {draft?.devices.length || 0} 个 · {draft?.model?.url ? "已上传 3D 模型" : "仅 2D 户型图"}
+        房间 {draft?.rooms.length || 0} 个 · 设备 {draft?.devices.length || 0} 个 · 2D 户型图
       </p>
       <p style={hintStyle}>{draft?.imageScale ? `比例尺已设置：参考线 ${draft.imageScale.distanceMeters} 米` : "尚未设置 2D 比例尺"}</p>
-      <p style={hintStyle}>{draft?.modelTransform ? "三点校准已完成" : "尚未完成三点校准"}</p>
     </div>
   );
 
@@ -2789,17 +2429,14 @@ export default function FloorplanPage() {
 
           {mode === "view" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={hintStyle}>先浏览平面图与设备布点，需要看 3D 时再展开预览或切换到校准模式。</p>
+              <p style={hintStyle}>比例尺将图片像素换算为米制坐标；设置完成后才能添加设备。</p>
               <p style={hintStyle}>
                 {draft.imageScale
                   ? activeScaleMetrics
                     ? `当前比例尺 ${draft.imageScale.distanceMeters} 米，约 1 米 = ${activeScaleMetrics.pixelsPerMeter.toFixed(1)} 像素`
                     : `当前比例尺 ${draft.imageScale.distanceMeters} 米`
-                  : "建议上传底图后先设置比例尺，再继续做房间、设备和校准。"}
+                  : "请先设置比例尺，再继续添加设备。"}
               </p>
-              <button type="button" style={secondaryButtonStyle} onClick={() => setShow3dPanel((prev) => !prev)}>
-                {effectiveShow3dPanel ? "收起 3D 预览" : "打开 3D 预览"}
-              </button>
               <button
                 type="button"
                 style={secondaryButtonStyle}
@@ -2929,15 +2566,6 @@ export default function FloorplanPage() {
             </div>
           )}
 
-          {mode === "calibration" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={hintStyle}>校准时会自动打开 3D 预览。建议先在 2D 中选角点，再去 3D 中选对应点。</p>
-              <p style={hintStyle}>当前进度：2D 点 {calibration.image.length}/3，3D 点 {calibration.model.length}/3</p>
-              <button onClick={resetCalibration} style={secondaryButtonStyle} type="button">
-                重置校准
-              </button>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -2959,7 +2587,7 @@ export default function FloorplanPage() {
           <>
             <div style={panelStyle}>
               <h3 style={panelTitleStyle}>查看信息</h3>
-              <p style={hintStyle}>当前户型只展示与预览相关的内容；房间、设备、校准入口都在顶部模式切换中。</p>
+              <p style={hintStyle}>当前户型使用 2D 图片、房间区域和设备点位描述空间关系。</p>
               <p style={hintStyle}>
                 图片分辨率：{draft.image.width || imageDims?.width || "-"} × {draft.image.height || imageDims?.height || "-"}
               </p>
@@ -2973,7 +2601,6 @@ export default function FloorplanPage() {
                   估算换算：1 米约等于 {imageScaleMetrics.pixelsPerMeter.toFixed(1)} 像素，每像素约 {imageScaleMetrics.metersPerPixel.toFixed(4)} 米
                 </p>
               )}
-              <p style={hintStyle}>{draft.model?.url ? "已挂载 3D 模型，可随时展开预览。" : "尚未上传 3D 模型。"}</p>
               {persistedImageScale && !isSettingImageScale && (
                 <button type="button" onClick={clearImageScale} style={dangerButtonStyle} data-testid="clear-image-scale">
                   清除比例尺
@@ -2985,7 +2612,6 @@ export default function FloorplanPage() {
         )}
         {mode === "rooms" && renderRoomInspector()}
         {mode === "devices" && renderDeviceInspector()}
-        {mode === "calibration" && renderCalibrationInspector()}
       </div>
     );
   };
@@ -3060,7 +2686,7 @@ export default function FloorplanPage() {
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{plan.name}</div>
                     <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{plan.id}</div>
                     <div style={{ fontSize: 12, color: "#475569", marginTop: 10 }}>
-                      房间 {plan.roomCount ?? 0} 个 · 设备 {plan.deviceCount ?? 0} 个 · {plan.model?.url ? "含 3D" : "仅 2D"}
+                      房间 {plan.roomCount ?? 0} 个 · 设备 {plan.deviceCount ?? 0} 个 · 2D 户型
                     </div>
                     <button
                       type="button"
@@ -3111,36 +2737,8 @@ export default function FloorplanPage() {
             {newImageUploadError && !newImageUploading && <p style={{ ...hintStyle, color: "#b91c1c" }}>2D 上传失败：{newImageUploadError}</p>}
             {newImageAsset && !newImageUploading && <p style={hintStyle}>已上传：{newImageAsset.url}</p>}
 
-            <label style={labelStyle}>上传 3D 模型（GLB，可选）</label>
-            <input
-              type="file"
-              accept=".glb,model/gltf-binary"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                setNewModelUploadError("");
-                setNewModelAsset(null);
-                setNewModelUploading(true);
-                setStatus("3D 模型上传中...");
-                try {
-                  const asset = await uploadAsset(file, "floorplan_model");
-                  setNewModelAsset(asset);
-                  setStatus("3D 模型上传成功");
-                } catch (err) {
-                  const message = (err as Error).message;
-                  setNewModelUploadError(message);
-                  setStatus(`上传失败: ${message}`);
-                } finally {
-                  setNewModelUploading(false);
-                }
-              }}
-            />
-            {newModelUploading && <p style={hintStyle}>3D 模型上传中...</p>}
-            {newModelUploadError && !newModelUploading && <p style={{ ...hintStyle, color: "#b91c1c" }}>3D 上传失败：{newModelUploadError}</p>}
-            {newModelAsset && !newModelUploading && <p style={hintStyle}>已上传：{newModelAsset.url}</p>}
-
-            <button onClick={createFloorplan} style={primaryButtonStyle} disabled={newImageUploading || newModelUploading}>
-              {newImageUploading || newModelUploading ? "上传中..." : "创建户型并进入编辑"}
+            <button onClick={createFloorplan} style={primaryButtonStyle} disabled={newImageUploading}>
+              {newImageUploading ? "上传中..." : "创建户型并进入编辑"}
             </button>
           </div>
         )}
@@ -3149,13 +2747,13 @@ export default function FloorplanPage() {
           <div style={panelStyle}>
             <h3 style={panelTitleStyle}>工作流说明</h3>
             <p style={hintStyle}>1. 先选择已有户型，或者新建并上传底图。</p>
-            <p style={hintStyle}>2. 进入编辑后，顶部切换“视图 / 房间编辑 / 设备编辑 / 校准”。</p>
+            <p style={hintStyle}>2. 进入编辑后先设置比例尺，再切换“房间编辑 / 设备编辑”。</p>
             <p style={hintStyle}>3. 左侧只显示当前模式的工具，中间是可滚动的 2D 画布，右侧显示当前选中对象的属性。</p>
           </div>
           <div style={panelStyle}>
             <h3 style={panelTitleStyle}>当前概况</h3>
             <p style={hintStyle}>已保存户型：{floorplans.length} 个</p>
-            <p style={hintStyle}>优先推荐先完成 2D 房间与设备布点，再进行三点校准。</p>
+            <p style={hintStyle}>设备布点会自动换算为米制坐标，并在保存户型时绑定到设备。</p>
           </div>
         </div>
       </div>
@@ -3165,17 +2763,8 @@ export default function FloorplanPage() {
   return (
     <>
       <Head>
-        <title>户型编辑与 3D 预览</title>
+        <title>2D 户型编辑</title>
       </Head>
-      <Script
-        id="three-importmap"
-        type="importmap"
-        strategy="beforeInteractive"
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify({ imports: { three: "/vendor/three/three.module.js" } })
-        }}
-      />
       <main
         style={{
           minHeight: "100vh",
@@ -3188,9 +2777,9 @@ export default function FloorplanPage() {
       >
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: "20px", flexWrap: "wrap" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "24px", letterSpacing: "-0.02em" }}>户型编辑与 3D 预览</h1>
+            <h1 style={{ margin: 0, fontSize: "24px", letterSpacing: "-0.02em" }}>2D 户型编辑与设备布点</h1>
             <p style={{ margin: "6px 0 0", color: "#475569" }}>
-              {pageStage === "browse" ? "先选择或新建户型，再进入 2D 编辑、设备布点和三点校准。" : "2D 编辑优先，3D 预览在需要时展开。"}
+              {pageStage === "browse" ? "先选择或新建户型，再设置比例尺、编辑房间和布置设备。" : "比例尺负责把图片像素换算为设备的米制坐标。"}
             </p>
           </div>
 
@@ -3202,12 +2791,6 @@ export default function FloorplanPage() {
                 </button>
                 <button type="button" onClick={() => replaceImageInputRef.current?.click()} style={secondaryButtonStyle}>
                   替换底图
-                </button>
-                <button type="button" onClick={() => replaceModelInputRef.current?.click()} style={secondaryButtonStyle}>
-                  替换 3D
-                </button>
-                <button type="button" onClick={() => setShow3dPanel((prev) => !prev)} style={secondaryButtonStyle}>
-                  {effectiveShow3dPanel ? "收起 3D" : "展开 3D"}
                 </button>
                 <button onClick={saveFloorplan} style={primaryButtonStyle} data-testid="save-floorplan" disabled={!isDirty}>
                   {isDirty ? "保存户型" : "已保存"}
@@ -3251,16 +2834,13 @@ export default function FloorplanPage() {
                     updateDraft((prev) => ({
                       ...prev,
                       image: asset,
-                      modelTransform: null,
-                      calibrationPoints: null,
                       imageScale: null
                     }));
-                    setCalibration({ image: [], model: [] });
                     setIsSettingImageScale(false);
                     setDraftScalePoints([]);
                     setScaleDistanceInput("");
                     setCanvasZoom(1);
-                    setStatus("底图已替换，比例尺与校准结果已清空，请重新设置");
+                    setStatus("底图已替换，比例尺已清空；重新设置比例尺后所有设备坐标会自动重算");
                   } catch (err) {
                     setStatus(`上传失败: ${(err as Error).message}`);
                   } finally {
@@ -3269,31 +2849,6 @@ export default function FloorplanPage() {
                 }}
               />
 
-              <input
-                ref={replaceModelInputRef}
-                type="file"
-                accept=".glb,model/gltf-binary"
-                style={{ display: "none" }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file || !draft) return;
-                  try {
-                    const asset = await uploadAsset(file, "floorplan_model");
-                    updateDraft((prev) => ({
-                      ...prev,
-                      model: asset,
-                      modelTransform: null,
-                      calibrationPoints: null
-                    }));
-                    setCalibration({ image: [], model: [] });
-                    setStatus("3D 模型已替换，请重新完成三点校准");
-                  } catch (err) {
-                    setStatus(`上传失败: ${(err as Error).message}`);
-                  } finally {
-                    e.currentTarget.value = "";
-                  }
-                }}
-              />
             </div>
           )}
         </header>
@@ -3318,9 +2873,7 @@ export default function FloorplanPage() {
                           ? placingDeviceId
                             ? `待放置设备：${placingDeviceLabel}。下一次点击 2D 户型图会创建点位，并自动打开右侧属性。`
                             : "先在左侧点一个待放置设备，再到 2D 户型图点击完成布点；点击已放置设备可编辑，拖动设备点位可调整位置。"
-                          : mode === "calibration"
-                            ? "先在 2D 选 3 个点，再到 3D 选对应的 3 个点。"
-                            : "默认按图片比例自适应显示，可手动放大后滚动查看细节。"}
+                          : "默认按图片比例自适应显示，可手动放大后滚动查看细节。"}
                     </p>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -3379,9 +2932,7 @@ export default function FloorplanPage() {
                                     : "default"
                                 : mode === "rooms" && isDrawingRoom
                                   ? "crosshair"
-                                  : mode === "calibration"
-                                    ? "crosshair"
-                                    : "default"
+                                  : "default"
                           }}
                           onPointerDown={(evt) => handleSvgClick(evt)}
                           onPointerMove={handlePointerMove}
@@ -3528,10 +3079,6 @@ export default function FloorplanPage() {
                               )}
                             </g>
                           ))}
-                          {mode === "calibration" &&
-                            calibration.image.map((point, idx) => (
-                              <circle key={`calib-${idx}`} cx={point.x * imageWidth} cy={point.y * imageHeight} r={6} fill="#f97316" />
-                            ))}
                         </svg>
                       </div>
                     </div>
@@ -3541,37 +3088,6 @@ export default function FloorplanPage() {
                 )}
               </div>
 
-              {effectiveShow3dPanel && (
-                <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
-                  <div style={panelHeaderStyle}>
-                    <div>
-                      <h3 style={{ margin: 0 }}>3D 预览</h3>
-                      <p style={{ ...hintStyle, marginTop: 4 }}>校准模式下会在 3D 模型里拾取点位；其他模式仅用于辅助核对空间关系。</p>
-                    </div>
-                    {mode !== "calibration" && (
-                      <button type="button" onClick={() => setShow3dPanel(false)} style={secondaryButtonStyle}>
-                        收起
-                      </button>
-                    )}
-                  </div>
-                  {draft?.model?.url ? (
-                    <div style={{ height: 320 }}>
-                      <ThreePreview
-                        modelUrl={resolveAssetUrl(draft.model.url)}
-                        transform={draft.modelTransform}
-                        devices={draft.devices}
-                        calibrationPoints={calibration}
-                        mode={mode}
-                        sceneEffects={sceneEffects}
-                        onPickPoint={handlePick3dPoint}
-                        selectedDeviceId={selectedDeviceId}
-                      />
-                    </div>
-                  ) : (
-                    <div style={{ padding: 20 }}>暂无 3D 模型，请先在顶部上传 GLB 文件。</div>
-                  )}
-                </div>
-              )}
             </section>
 
             <aside className="floorplan-sidebar">{renderContextPanels()}</aside>

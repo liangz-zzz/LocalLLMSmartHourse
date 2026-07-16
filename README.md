@@ -15,7 +15,7 @@
    - `npm run dev`
 4) 打开页面：
    - `http://localhost:3000/`（设备面板）
-   - `http://localhost:3000/floorplan`（户型编辑与 3D 预览）
+   - `http://localhost:3000/floorplan`（2D 户型编辑、比例尺与设备布点）
    - `http://localhost:3000/scenes`（场景编辑）
    - `http://localhost:3000/automations`（联动/自动化编辑）
 

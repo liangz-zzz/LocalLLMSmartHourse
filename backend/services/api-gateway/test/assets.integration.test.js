@@ -62,7 +62,7 @@ test("POST /assets rejects mismatched asset kinds", async () => {
     form.set("file", new Blob([buffer], { type: "image/png" }), "tiny.png");
 
     const res = await fetch(`${baseUrl}/assets`, { method: "POST", body: form });
-    assert.equal(res.status, 415);
+    assert.equal(res.status, 400);
 
     await app.close();
   });

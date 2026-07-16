@@ -194,7 +194,11 @@ function normalizeMic(item) {
         y: normalizeNumber(coordinates.y),
         z: normalizeNumber(coordinates.z),
         lat: normalizeNumber(coordinates.lat),
-        lon: normalizeNumber(coordinates.lon)
+        lon: normalizeNumber(coordinates.lon),
+        unit: coordinates.unit === "m" ? "m" : undefined,
+        frame: coordinates.frame === "floorplan_image" ? "floorplan_image" : undefined,
+        floorplanId: coordinates.floorplanId ? String(coordinates.floorplanId) : undefined,
+        source: coordinates.source === "floorplan" ? "floorplan" : undefined
       }
     }
   };

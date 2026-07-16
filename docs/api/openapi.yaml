@@ -69,6 +69,40 @@ components:
           type: string
         description:
           type: string
+        coordinates:
+          $ref: "#/components/schemas/PlacementCoordinates"
+    PlacementCoordinates:
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        z:
+          type: number
+        lat:
+          type: number
+        lon:
+          type: number
+        unit:
+          type: string
+          enum: [m]
+        frame:
+          type: string
+          enum: [floorplan_image]
+        floorplanId:
+          type: string
+        source:
+          type: string
+          enum: [floorplan]
+      allOf:
+        - if:
+            properties:
+              source:
+                const: floorplan
+            required: [source]
+          then:
+            required: [x, y, z, unit, frame, floorplanId]
     Capability:
       type: object
       required: [action]
@@ -158,51 +192,6 @@ components:
           type: number
         y:
           type: number
-    Point3D:
-      type: object
-      required: [x, y, z]
-      properties:
-        x:
-          type: number
-        y:
-          type: number
-        z:
-          type: number
-    ModelTransform:
-      type: object
-      required: [matrix, translate]
-      properties:
-        matrix:
-          type: array
-          minItems: 4
-          maxItems: 4
-          items:
-            type: number
-          description: Row-major 2x2 matrix mapping 2D to 3D (x/z).
-        translate:
-          type: object
-          required: [x, z]
-          properties:
-            x:
-              type: number
-            z:
-              type: number
-    CalibrationPoints:
-      type: object
-      required: [image, model]
-      properties:
-        image:
-          type: array
-          minItems: 3
-          maxItems: 3
-          items:
-            $ref: "#/components/schemas/Point2D"
-        model:
-          type: array
-          minItems: 3
-          maxItems: 3
-          items:
-            $ref: "#/components/schemas/Point3D"
     FloorplanAsset:
       type: object
       required: [assetId, url]
@@ -244,10 +233,6 @@ components:
           type: number
         height:
           type: number
-        rotation:
-          type: number
-        scale:
-          type: number
         roomId:
           type: string
     ImageScaleReference:
@@ -262,7 +247,7 @@ components:
             $ref: "#/components/schemas/Point2D"
         distanceMeters:
           type: number
-          minimum: 0
+          exclusiveMinimum: 0
     Floorplan:
       type: object
       required: [id, name, image, rooms, devices]
@@ -273,12 +258,6 @@ components:
           type: string
         image:
           $ref: "#/components/schemas/FloorplanAsset"
-        model:
-          $ref: "#/components/schemas/FloorplanAsset"
-        modelTransform:
-          $ref: "#/components/schemas/ModelTransform"
-        calibrationPoints:
-          $ref: "#/components/schemas/CalibrationPoints"
         imageScale:
           $ref: "#/components/schemas/ImageScaleReference"
         rooms:
@@ -299,8 +278,6 @@ components:
           type: string
         image:
           $ref: "#/components/schemas/FloorplanAsset"
-        model:
-          $ref: "#/components/schemas/FloorplanAsset"
         roomCount:
           type: integer
         deviceCount:
@@ -315,7 +292,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [floorplan_image, floorplan_model]
+          enum: [floorplan_image]
         mime:
           type: string
         size:
@@ -964,7 +941,7 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [floorplan_image, floorplan_model]
+                  enum: [floorplan_image]
                 file:
                   type: string
                   format: binary

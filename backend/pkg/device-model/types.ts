@@ -1,12 +1,24 @@
 export type Protocol = "zigbee" | "wifi" | "bluetooth_mesh" | "matter" | "virtual";
 
+export interface PlacementCoordinates {
+  x?: number;
+  y?: number;
+  z?: number;
+  lat?: number;
+  lon?: number;
+  unit?: "m";
+  frame?: "floorplan_image";
+  floorplanId?: string;
+  source?: "floorplan";
+}
+
 export interface Placement {
   room: string;
   zone?: string;
   floor?: string;
   mount?: "ceiling" | "wall" | "desktop" | "window" | "floor";
   description?: string;
-  coordinates?: { x?: number; y?: number; z?: number; lat?: number; lon?: number };
+  coordinates?: PlacementCoordinates;
 }
 
 export interface Zigbee2MqttBinding {

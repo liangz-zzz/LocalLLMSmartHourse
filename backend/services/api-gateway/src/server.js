@@ -16,6 +16,7 @@ import { VirtualDevicesStoreError } from "./virtual-devices-store.js";
 import { SceneRunnerError } from "./scene-runner.js";
 import { DeviceIdentityResolver } from "./device-identity.js";
 import { filterDevicesForFloorplan, getSceneScopeFloorplanIds, sceneMatchesFloorplan } from "./floorplan-utils.js";
+import { buildFloorplanCoordinateMap } from "./floorplan-coordinates.js";
 
 export function buildServer({
   store,
@@ -40,7 +41,6 @@ export function buildServer({
     assetsDir = path.resolve(process.cwd(), assetsDir);
   }
   const assetMaxImageBytes = Math.max(1, Number(config.assetMaxImageMb || 20)) * 1024 * 1024;
-  const assetMaxModelBytes = Math.max(1, Number(config.assetMaxModelMb || 200)) * 1024 * 1024;
   const identityResolver = new DeviceIdentityResolver({ store, logger });
 
   try {
@@ -60,7 +60,7 @@ export function buildServer({
 
   app.register(multipart, {
     limits: {
-      fileSize: Math.max(assetMaxImageBytes, assetMaxModelBytes)
+      fileSize: assetMaxImageBytes
     }
   });
 
@@ -95,18 +95,25 @@ export function buildServer({
 
   const listVisibleDevices = async () => {
     const list = (await store.list()) || [];
-    if (!deviceOverridesStore?.listVoiceMics) return list;
-    const synthetic = await buildVoiceSatelliteDevices(deviceOverridesStore);
-    if (!synthetic.length) return list;
-    const existingIds = new Set(list.map((item) => String(item?.id || "").trim()).filter(Boolean));
-    return [...list, ...synthetic.filter((item) => !existingIds.has(String(item?.id || "").trim()))];
+    if (!deviceOverridesStore?.list) return list;
+    const [overrides, synthetic] = await Promise.all([
+      deviceOverridesStore.list(),
+      deviceOverridesStore.listVoiceMics ? buildVoiceSatelliteDevices(deviceOverridesStore) : []
+    ]);
+    const overrideMap = new Map(overrides.map((item) => [String(item?.id || "").trim(), item]));
+    const merged = list.map((item) => applyVisibleDeviceOverride(item, overrideMap.get(String(item?.id || "").trim())));
+    const existingIds = new Set(merged.map((item) => String(item?.id || "").trim()).filter(Boolean));
+    return [...merged, ...synthetic.filter((item) => !existingIds.has(String(item?.id || "").trim()))];
   };
 
   const getVisibleDevice = async (id) => {
     const deviceId = String(id || "").trim();
     if (!deviceId) return null;
     const found = await store.get(deviceId);
-    if (found) return found;
+    if (found) {
+      const override = await deviceOverridesStore?.get?.(deviceId);
+      return applyVisibleDeviceOverride(found, override);
+    }
     if (!deviceOverridesStore?.getVoiceMic) return null;
     const [voiceMic, override] = await Promise.all([deviceOverridesStore.getVoiceMic(deviceId), deviceOverridesStore.get(deviceId)]);
     if (!voiceMic) return null;
@@ -229,8 +236,7 @@ export function buildServer({
         mimetype: filePart.mimetype,
         kind: normalizedKind,
         assetsDir,
-        maxImageBytes: assetMaxImageBytes,
-        maxModelBytes: assetMaxModelBytes
+        maxImageBytes: assetMaxImageBytes
       });
       return payload;
     } catch (err) {
@@ -504,7 +510,6 @@ export function buildServer({
         id: plan.id,
         name: plan.name,
         image: plan.image,
-        model: plan.model,
         roomCount: Array.isArray(plan.rooms) ? plan.rooms.length : 0,
         deviceCount: Array.isArray(plan.devices) ? plan.devices.length : 0
       }));
@@ -529,7 +534,7 @@ export function buildServer({
     if (!floorplanStore) return reply.code(503).send({ error: "floorplan_store_unavailable" });
     try {
       const created = await floorplanStore.create(req.body || {});
-      await syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan: created });
+      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.created", { id: created?.id, actor: getActor(req) });
       triggerHaSync("floorplan.created");
       return created;
@@ -546,7 +551,7 @@ export function buildServer({
     }
     try {
       const updated = await floorplanStore.update(req.params.id, payload);
-      await syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan: updated });
+      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.updated", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("floorplan.updated");
       return updated;
@@ -559,6 +564,7 @@ export function buildServer({
     if (!floorplanStore) return reply.code(503).send({ error: "floorplan_store_unavailable" });
     try {
       const result = await floorplanStore.delete(req.params.id);
+      await reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore });
       logger?.info("floorplan.deleted", { id: req.params.id, actor: getActor(req) });
       triggerHaSync("floorplan.deleted");
       return { status: "deleted", removed: result.removed };
@@ -1012,22 +1018,24 @@ function buildVoiceSatelliteOverride({ mic, override }) {
   };
 }
 
-async function syncVoiceSatelliteFloorplanPlacement({ deviceOverridesStore, floorplan }) {
-  if (!deviceOverridesStore?.getVoiceMic || !deviceOverridesStore?.upsertVoiceMic) return;
-  for (const item of floorplan?.devices || []) {
-    const deviceId = String(item?.deviceId || "").trim();
-    if (!deviceId) continue;
-    const mic = await deviceOverridesStore.getVoiceMic(deviceId);
-    if (!mic) continue;
-    await deviceOverridesStore.upsertVoiceMic(deviceId, {
-      placement: {
-        coordinates: {
-          x: item.x,
-          y: item.y
-        }
-      }
-    });
-  }
+async function reconcileFloorplanCoordinates({ floorplanStore, deviceOverridesStore }) {
+  if (!floorplanStore?.list || !deviceOverridesStore?.reconcileFloorplanCoordinates) return;
+  const floorplans = await floorplanStore.list();
+  await deviceOverridesStore.reconcileFloorplanCoordinates(buildFloorplanCoordinateMap(floorplans));
+}
+
+function applyVisibleDeviceOverride(device, override) {
+  if (!override || typeof override !== "object") return device;
+  return {
+    ...device,
+    ...(override.name ? { name: override.name } : {}),
+    ...(override.protocol ? { protocol: override.protocol } : {}),
+    placement: deepMergePlain(device?.placement || {}, override.placement || {}),
+    bindings: deepMergePlain(device?.bindings || {}, override.bindings || {}),
+    semantics: deepMergePlain(device?.semantics || {}, override.semantics || {}),
+    capabilities: Array.isArray(override.capabilities) ? override.capabilities : device?.capabilities,
+    id: device.id
+  };
 }
 
 function deepMergePlain(a, b) {
@@ -1050,44 +1058,28 @@ function humanizeIdentifier(value) {
     .trim();
 }
 
-async function storeAsset({ file, filename, mimetype, kind, assetsDir, maxImageBytes, maxModelBytes }) {
+async function storeAsset({ file, mimetype, kind, assetsDir, maxImageBytes }) {
   const normalizedKind = String(kind || "").trim();
-  if (!["floorplan_image", "floorplan_model"].includes(normalizedKind)) {
+  if (normalizedKind !== "floorplan_image") {
     await drainStream(file);
-    const err = new Error("kind must be floorplan_image or floorplan_model");
+    const err = new Error("kind must be floorplan_image");
     err.code = "asset_invalid";
     throw err;
   }
 
-  const isImage = normalizedKind === "floorplan_image";
   const allowedImage = {
     "image/png": ".png",
     "image/jpeg": ".jpg"
   };
-  const allowedModel = new Set(["model/gltf-binary", "application/octet-stream"]);
-  let ext = "";
-  if (isImage) {
-    ext = allowedImage[mimetype];
-    if (!ext) {
-      await drainStream(file);
-      const err = new Error(`unsupported image mimetype ${mimetype || "unknown"}`);
-      err.code = "unsupported_media_type";
-      throw err;
-    }
-  } else {
-    if (!allowedModel.has(mimetype)) {
-      const nameExt = path.extname(String(filename || "")).toLowerCase();
-      if (nameExt !== ".glb") {
-        await drainStream(file);
-        const err = new Error(`unsupported model mimetype ${mimetype || "unknown"}`);
-        err.code = "unsupported_media_type";
-        throw err;
-      }
-    }
-    ext = ".glb";
+  const ext = allowedImage[mimetype];
+  if (!ext) {
+    await drainStream(file);
+    const err = new Error(`unsupported image mimetype ${mimetype || "unknown"}`);
+    err.code = "unsupported_media_type";
+    throw err;
   }
 
-  const maxBytes = isImage ? maxImageBytes : maxModelBytes;
+  const maxBytes = maxImageBytes;
   const assetId = `asset_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   const targetDir = path.join(assetsDir, "floorplans");
   await fsPromises.mkdir(targetDir, { recursive: true });
@@ -1123,18 +1115,16 @@ async function storeAsset({ file, filename, mimetype, kind, assetsDir, maxImageB
 
   let width;
   let height;
-  if (isImage) {
-    try {
-      const buffer = await fsPromises.readFile(finalPath);
-      const sizeInfo = imageSize(buffer);
-      width = sizeInfo.width;
-      height = sizeInfo.height;
-    } catch (err) {
-      await fsPromises.rm(finalPath, { force: true });
-      const error = new Error(`failed to read image size: ${err.message}`);
-      error.code = "asset_invalid";
-      throw error;
-    }
+  try {
+    const buffer = await fsPromises.readFile(finalPath);
+    const sizeInfo = imageSize(buffer);
+    width = sizeInfo.width;
+    height = sizeInfo.height;
+  } catch (err) {
+    await fsPromises.rm(finalPath, { force: true });
+    const error = new Error(`failed to read image size: ${err.message}`);
+    error.code = "asset_invalid";
+    throw error;
   }
 
   return {

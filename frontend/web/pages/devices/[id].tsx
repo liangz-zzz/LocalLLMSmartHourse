@@ -140,6 +140,13 @@ export default function DevicePage() {
             <p style={{ margin: "6px 0 0", color: "#475569" }}>
               placement: {[device.placement?.room, device.placement?.zone, device.placement?.description].filter(Boolean).join(" / ") || "未配置"}
             </p>
+            {device.placement?.coordinates?.source === "floorplan" &&
+            [device.placement.coordinates.x, device.placement.coordinates.y, device.placement.coordinates.z].every(Number.isFinite) ? (
+              <p style={{ margin: "6px 0 0", color: "#475569" }} data-testid="device-detail-coordinates">
+                coordinates: x={Number(device.placement.coordinates.x).toFixed(3)} m / y={Number(device.placement.coordinates.y).toFixed(3)} m / z=
+                {Number(device.placement.coordinates.z).toFixed(3)} m · floorplan={device.placement.coordinates.floorplanId}
+              </p>
+            ) : null}
           </section>
 
           <section

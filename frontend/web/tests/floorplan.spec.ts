@@ -10,8 +10,15 @@ const floorplanDetail = {
   id: "floor1",
   name: "一层",
   image: { url: "/assets/floorplans/floor1.png", width: 100, height: 80 },
+  imageScale: {
+    points: [
+      { x: 0.1, y: 0.2 },
+      { x: 0.6, y: 0.2 }
+    ],
+    distanceMeters: 5
+  },
   rooms: [],
-  devices: [{ deviceId: "light1", x: 0.2, y: 0.2, height: 1, rotation: 0, scale: 1 }]
+  devices: [{ deviceId: "light1", x: 0.2, y: 0.2, height: 1 }]
 };
 
 const baseDevices: any[] = [
@@ -82,7 +89,6 @@ function buildFloorplanSummary(plan: any) {
     id: plan.id,
     name: plan.name,
     image: plan.image,
-    model: plan.model,
     roomCount: Array.isArray(plan.rooms) ? plan.rooms.length : 0,
     deviceCount: Array.isArray(plan.devices) ? plan.devices.length : 0
   };
@@ -425,7 +431,24 @@ test.describe("floorplan editor", () => {
     await clickCanvasPoint(page, 0.62, 0.48);
     await expect(page.getByTestId("floorplan-device-plug1")).toBeVisible();
     await expect(page.getByText("当前选中：玄关插座")).toBeVisible();
+    await expect(page.getByTestId("device-physical-coordinates")).toContainText("x=6.200 m");
+    await expect(page.getByTestId("device-physical-coordinates")).toContainText("y=3.840 m");
     await expect(page.getByTestId("placement-empty")).toBeVisible();
+  });
+
+  test("cannot place a device before defining image scale", async ({ page }) => {
+    await page.goto("/floorplan");
+    await page.getByTestId("browse-create").click();
+    await page.getByPlaceholder("例如：一层").fill("无比例尺户型");
+    await page.getByTestId("create-floorplan-form").locator('input[type="file"]').setInputFiles({
+      name: "unscaled.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(tinyPngBase64, "base64")
+    });
+    await page.getByRole("button", { name: "创建户型并进入编辑" }).click();
+    await page.getByTestId("mode-devices").click();
+    await page.getByTestId("start-place-light1").click();
+    await expect(page.getByText("请先设置并保存有效的 2D 比例尺，再添加设备")).toBeVisible();
   });
 
   test("selected placed device exposes HA and Zigbee2MQTT links", async ({ page }) => {

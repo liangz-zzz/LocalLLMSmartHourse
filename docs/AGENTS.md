@@ -7,7 +7,7 @@
 - `api/openapi.yaml`: API Gateway REST 接口定义（设备、动作、规则、健康）。
 - `api/README.md`: API/WS/LLM 入口概览与地址。
 - `feature/automation/README.md`: 自动化/规则（用户可配置联动：trigger/when/forMs/then，复用 Scene）。
-- `feature/floorplan_editor/README.md`: 户型编辑与 3D 预览（2D 编辑、三点校准、API 设计）。
+- `feature/floorplan_editor/README.md`: 2D 户型编辑与设备坐标（比例尺、布点、米制坐标绑定、API 设计）。
 - `feature/smart_house_agent/README.md`: 智能家居 Agent（MCP 工具调用）需求与设计文档索引。
 - `feature/scene_integration/README.md`: 场景集成（JSON 场景配置、API/MCP/Agent 执行链路）文档索引。
 - `feature/device_simulation/README.md`: 设备模拟（配置注入虚拟设备、与 Agent 透明交互）设计与运行说明。

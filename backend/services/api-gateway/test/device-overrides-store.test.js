@@ -131,3 +131,50 @@ test("upsertVoiceMic preserves virtual/device envelope and updates placement", a
     assert.equal(saved.voice_control.mics[0].placement.coordinates.y, 0.66);
   });
 });
+
+test("reconcileFloorplanCoordinates updates derived coordinates and preserves manual coordinates", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = path.join(dir, "devices.config.json");
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        devices: [
+          { id: "manual_sensor", placement: { coordinates: { x: 1, y: 2, z: 0 } } },
+          {
+            id: "old_light",
+            name: "旧灯",
+            placement: {
+              room: "living_room",
+              coordinates: { x: 3, y: 4, z: 1, unit: "m", frame: "floorplan_image", floorplanId: "floor1", source: "floorplan" }
+            }
+          }
+        ],
+        voice_control: {
+          mics: [
+            {
+              id: "mic1",
+              placement: {
+                room: "living_room",
+                coordinates: { x: 2, y: 2, z: 1, unit: "m", frame: "floorplan_image", floorplanId: "floor1", source: "floorplan" }
+              }
+            }
+          ]
+        }
+      }),
+      "utf8"
+    );
+    const store = new DeviceOverridesStore({ deviceOverridesPath: filePath });
+    const coordinates = new Map([
+      ["new_light", { x: 5, y: 6, z: 1.2, unit: "m", frame: "floorplan_image", floorplanId: "floor2", source: "floorplan" }]
+    ]);
+
+    await store.reconcileFloorplanCoordinates(coordinates);
+    const saved = JSON.parse(await fs.readFile(filePath, "utf8"));
+    assert.deepEqual(saved.devices.find((item) => item.id === "manual_sensor").placement.coordinates, { x: 1, y: 2, z: 0 });
+    assert.equal(saved.devices.find((item) => item.id === "old_light").placement.coordinates, undefined);
+    assert.equal(saved.devices.find((item) => item.id === "old_light").name, "旧灯");
+    assert.equal(saved.devices.find((item) => item.id === "new_light").placement.coordinates.floorplanId, "floor2");
+    assert.equal(saved.voice_control.mics[0].placement.coordinates, undefined);
+    assert.equal(saved.voice_control.mics[0].placement.room, "living_room");
+  });
+});

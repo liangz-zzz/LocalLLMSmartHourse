@@ -22,10 +22,19 @@
   "floor": "1F",
   "mount": "ceiling",
   "description": "客厅南侧双路吸顶灯，靠近沙发区",
-  "coordinates": { "x": 5.2, "y": 3.1, "z": 2.6 }
+  "coordinates": {
+    "x": 5.2,
+    "y": 3.1,
+    "z": 2.6,
+    "unit": "m",
+    "frame": "floorplan_image",
+    "floorplanId": "floor1",
+    "source": "floorplan"
+  }
 }
 ```
 - `room` 必填；`zone`/`floor`/`mount`/`coordinates` 选填。
+- 户型派生坐标以图片左上角为原点，`x` 向右、`y` 向下、`z` 为离地高度；距离计算前必须确认 `floorplanId/frame/unit` 一致。
 - `description` 用于 LLM 提供丰富语义，不必严格格式。
 
 ### semantics（语义标签/偏好）
@@ -118,7 +127,11 @@
           "properties": {
             "x": { "type": "number" },
             "y": { "type": "number" },
-            "z": { "type": "number" }
+            "z": { "type": "number" },
+            "unit": { "type": "string", "enum": ["m"] },
+            "frame": { "type": "string", "enum": ["floorplan_image"] },
+            "floorplanId": { "type": "string" },
+            "source": { "type": "string", "enum": ["floorplan"] }
           },
           "additionalProperties": false
         }

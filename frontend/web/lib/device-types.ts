@@ -20,7 +20,17 @@ export type DevicePlacement = {
   floor?: string;
   mount?: string;
   description?: string;
-  coordinates?: { x?: number; y?: number; z?: number; lat?: number; lon?: number };
+  coordinates?: {
+    x?: number;
+    y?: number;
+    z?: number;
+    lat?: number;
+    lon?: number;
+    unit?: "m";
+    frame?: "floorplan_image";
+    floorplanId?: string;
+    source?: "floorplan";
+  };
 };
 
 export type DeviceBindings = {

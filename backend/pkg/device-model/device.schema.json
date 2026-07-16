@@ -22,8 +22,18 @@
             "y": { "type": "number" },
             "z": { "type": "number" },
             "lat": { "type": "number" },
-            "lon": { "type": "number" }
+            "lon": { "type": "number" },
+            "unit": { "type": "string", "enum": ["m"] },
+            "frame": { "type": "string", "enum": ["floorplan_image"] },
+            "floorplanId": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "enum": ["floorplan"] }
           },
+          "allOf": [
+            {
+              "if": { "properties": { "source": { "const": "floorplan" } }, "required": ["source"] },
+              "then": { "required": ["x", "y", "z", "unit", "frame", "floorplanId"] }
+            }
+          ],
           "additionalProperties": false
         }
       },

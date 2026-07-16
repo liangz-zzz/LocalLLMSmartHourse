@@ -1,21 +1,33 @@
 import { z } from "zod";
 
+const coordinatesSchema = z
+  .object({
+    x: z.number().optional(),
+    y: z.number().optional(),
+    z: z.number().optional(),
+    lat: z.number().optional(),
+    lon: z.number().optional(),
+    unit: z.literal("m").optional(),
+    frame: z.literal("floorplan_image").optional(),
+    floorplanId: z.string().min(1).optional(),
+    source: z.literal("floorplan").optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.source !== "floorplan") return;
+    for (const key of ["x", "y", "z", "unit", "frame", "floorplanId"]) {
+      if (value[key] === undefined) {
+        ctx.addIssue({ code: "custom", path: [key], message: `${key} is required for floorplan coordinates` });
+      }
+    }
+  });
+
 const placementSchema = z.object({
   room: z.string().min(1),
   zone: z.string().optional(),
   floor: z.string().optional(),
   mount: z.enum(["ceiling", "wall", "desktop", "window", "floor"]).optional(),
   description: z.string().optional(),
-  coordinates: z
-    .object({
-      x: z.number().optional(),
-      y: z.number().optional(),
-      z: z.number().optional(),
-      lat: z.number().optional(),
-      lon: z.number().optional()
-    })
-    .partial()
-    .optional()
+  coordinates: coordinatesSchema.optional()
 });
 
 const zigbeeBinding = z.object({

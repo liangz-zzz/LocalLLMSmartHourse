@@ -72,6 +72,9 @@ test("floorplan store creates, updates, and deletes floorplans", async () => {
     const store = new FloorplanStore({ floorplansPath: path.join(dir, "floorplans.json") });
     const created = await store.create(buildPlan());
     assert.equal(created.id, "floor1");
+    assert.equal(created.model, undefined);
+    assert.equal(created.devices[0].rotation, undefined);
+    assert.equal(created.devices[0].scale, undefined);
 
     const list = await store.list();
     assert.equal(list.length, 1);
@@ -132,6 +135,29 @@ test("floorplan store validates rooms and devices", async () => {
             }
           })
         ),
+      (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan"
+    );
+
+    await assert.rejects(
+      () => store.create(buildPlan({ imageScale: null })),
+      (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan" && err.message.includes("valid imageScale")
+    );
+  });
+});
+
+test("floorplan store reads legacy unscaled and 3D data without writing it back", async () => {
+  await withTempDir(async (dir) => {
+    const floorplansPath = path.join(dir, "floorplans.json");
+    await fs.writeFile(floorplansPath, JSON.stringify({ version: 1, floorplans: [buildPlan({ imageScale: null })] }), "utf8");
+    const store = new FloorplanStore({ floorplansPath });
+
+    const list = await store.list();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].model, undefined);
+    assert.equal(list[0].devices[0].rotation, undefined);
+
+    await assert.rejects(
+      () => store.update("floor1", list[0]),
       (err) => err instanceof FloorplanStoreError && err.code === "invalid_floorplan"
     );
   });

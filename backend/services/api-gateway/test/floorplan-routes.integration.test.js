@@ -95,7 +95,7 @@ test("floorplan routes support CRUD", async () => {
   });
 });
 
-test("floorplan updates sync placed voice satellites back to voice_control coordinates", async () => {
+test("floorplan updates persist physical coordinates for devices and voice satellites", async () => {
   await withTempDir(async (dir) => {
     const samplePath = new URL("../src/fixtures/living_room_plug.json", import.meta.url);
     const store = new MockStore(samplePath);
@@ -130,7 +130,10 @@ test("floorplan updates sync placed voice satellites back to voice_control coord
 
     const payload = {
       ...buildPlan(),
-      devices: [{ deviceId: "living-room-respeaker", x: 0.62, y: 0.18 }]
+      devices: [
+        { deviceId: "living-room-respeaker", x: 0.62, y: 0.18, height: 1.1 },
+        { deviceId: "plug_living_room_1", x: 0.5, y: 0.25, height: 0.4 }
+      ]
     };
     const createdRes = await fetch(`${baseUrl}/floorplans`, {
       method: "POST",
@@ -140,8 +143,49 @@ test("floorplan updates sync placed voice satellites back to voice_control coord
     assert.equal(createdRes.status, 200);
 
     const saved = JSON.parse(await fs.readFile(deviceOverridesPath, "utf8"));
-    assert.equal(saved.voice_control.mics[0].placement.coordinates.x, 0.62);
-    assert.equal(saved.voice_control.mics[0].placement.coordinates.y, 0.18);
+    const metersPerPixel = 4.6 / 300;
+    const micCoordinates = saved.voice_control.mics[0].placement.coordinates;
+    assert.ok(Math.abs(micCoordinates.x - 0.62 * 1000 * metersPerPixel) < 1e-12);
+    assert.ok(Math.abs(micCoordinates.y - 0.18 * 800 * metersPerPixel) < 1e-12);
+    assert.equal(micCoordinates.z, 1.1);
+    assert.equal(micCoordinates.unit, "m");
+    assert.equal(micCoordinates.floorplanId, "floor1");
+
+    const plugOverride = saved.devices.find((item) => item.id === "plug_living_room_1");
+    assert.ok(plugOverride);
+    assert.ok(Math.abs(plugOverride.placement.coordinates.x - 0.5 * 1000 * metersPerPixel) < 1e-12);
+    assert.equal(plugOverride.placement.coordinates.source, "floorplan");
+
+    const deviceRes = await fetch(`${baseUrl}/devices/plug_living_room_1`);
+    assert.equal(deviceRes.status, 200);
+    const device = await deviceRes.json();
+    assert.equal(device.placement.coordinates.floorplanId, "floor1");
+    assert.equal(device.placement.coordinates.z, 0.4);
+
+    const rescaledPayload = {
+      ...payload,
+      imageScale: { ...payload.imageScale, distanceMeters: 9.2 }
+    };
+    const rescaleRes = await fetch(`${baseUrl}/floorplans/floor1`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rescaledPayload)
+    });
+    assert.equal(rescaleRes.status, 200);
+    const rescaled = JSON.parse(await fs.readFile(deviceOverridesPath, "utf8"));
+    const rescaledPlug = rescaled.devices.find((item) => item.id === "plug_living_room_1");
+    assert.ok(Math.abs(rescaledPlug.placement.coordinates.x - 0.5 * 1000 * (9.2 / 300)) < 1e-12);
+    assert.ok(Math.abs(rescaled.voice_control.mics[0].placement.coordinates.y - 0.18 * 800 * (9.2 / 300)) < 1e-12);
+
+    const updateRes = await fetch(`${baseUrl}/floorplans/floor1`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, devices: [] })
+    });
+    assert.equal(updateRes.status, 200);
+    const cleared = JSON.parse(await fs.readFile(deviceOverridesPath, "utf8"));
+    assert.equal(cleared.devices.some((item) => item.id === "plug_living_room_1"), false);
+    assert.equal(cleared.voice_control.mics[0].placement.coordinates, undefined);
 
     await app.close();
   });

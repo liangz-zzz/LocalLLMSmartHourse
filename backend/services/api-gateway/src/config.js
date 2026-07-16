@@ -13,7 +13,6 @@ export function loadConfig() {
   const deviceOverridesPath =
     String(process.env.DEVICE_CONFIG_PATH || "").trim() || (configDir ? path.join(configDir, "devices.config.json") : "./devices.config.json");
   const assetMaxImageMb = parsePositiveNumber(process.env.ASSET_MAX_IMAGE_MB, 20);
-  const assetMaxModelMb = parsePositiveNumber(process.env.ASSET_MAX_MODEL_MB, 200);
   const haBaseUrl = String(process.env.HA_BASE_URL || "").trim() || "http://homeassistant:8123";
   const haToken = String(process.env.HA_TOKEN || process.env.HA_ELEVATED_TOKEN || "").trim();
   const haSyncHomeAssistantConfigDir = String(process.env.HA_SYNC_HA_CONFIG_DIR || "").trim() || "/homeassistant-config";
@@ -35,7 +34,6 @@ export function loadConfig() {
     assetsDir,
     deviceOverridesPath,
     assetMaxImageMb,
-    assetMaxModelMb,
     haBaseUrl,
     haToken,
     haSyncEnabled: parseBoolean(process.env.HA_SYNC_ENABLED, Boolean(haBaseUrl && haToken)),

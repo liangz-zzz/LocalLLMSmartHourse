@@ -17,7 +17,7 @@
 - `pages/_app.tsx` + `components/app-shell.tsx`：共享壳层，统一主导航和 HA / Zigbee2MQTT 外部入口。
 - `pages/index.tsx`：Command Center，只保留设备摘要、LLM chat / intent、系统摘要和跳转入口，不再作为主设备控制台。
 - `pages/ha-hub.tsx`：集中承载 HA 生态深链入口（Overview / Devices / Automations / Scenes / History / Logbook）。
-- `pages/floorplan.tsx`：户型编辑与 3D 预览（2D 房间/设备编辑、三点校准、设备布点、外部系统跳转）。
+- `pages/floorplan.tsx`：2D 户型编辑（比例尺、房间/设备布点、米制坐标预览、外部系统跳转）。
 - `pages/virtual-devices.tsx`：虚拟设备概览页，入口仍聚焦到 floorplan 工作区。
 - `pages/scenes.tsx`：高级场景编排，保留 wait_for / step-based / scene 引用等高阶能力。
 - `pages/automations.tsx`、`pages/devices/[id].tsx`：过渡/调试入口，正式用户流程优先导向 HA。
@@ -33,7 +33,6 @@
 - `lib/device-types.ts`：前端统一设备读模型与 capability 类型。
 - `lib/integrations.ts`：HA / Zigbee2MQTT 基址、HA Hub 深链和设备外链解析。
 - `lib/api-client.ts`：轻量 API SDK（devices/actions/rules）供前端/集成复用，默认基址 `API_HTTP_BASE`/`NEXT_PUBLIC_API_HTTP_BASE`。
-- `public/vendor/three/*`：3D 预览所需的 three.js 模块（importmap + 动态加载）。
 
 环境变量
 - `NEXT_PUBLIC_WS_BASE` 可显式设置网关 WebSocket 地址；留空时默认推断 `ws://<当前访问主机>:4001/ws`，`NEXT_PUBLIC_WS_PORT` 覆盖端口。

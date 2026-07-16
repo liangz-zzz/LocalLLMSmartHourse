@@ -21,15 +21,12 @@ export type FloorplanDevicePlacement = {
   y: number;
   roomId?: string;
   height?: number;
-  rotation?: number;
-  scale?: number;
 };
 
 export type FloorplanSummary = {
   id: string;
   name: string;
   image?: FloorplanAsset;
-  model?: FloorplanAsset;
   roomCount: number;
   deviceCount: number;
 };
@@ -38,7 +35,6 @@ export type Floorplan = {
   id: string;
   name: string;
   image: FloorplanAsset;
-  model?: FloorplanAsset;
   rooms: FloorplanRoom[];
   devices: FloorplanDevicePlacement[];
 };

@@ -29,6 +29,13 @@ function buildPlan() {
       mime: "image/png",
       size: 1234
     },
+    imageScale: {
+      points: [
+        { x: 0.1, y: 0.1 },
+        { x: 0.4, y: 0.1 }
+      ],
+      distanceMeters: 4.5
+    },
     rooms: [
       {
         id: "living",

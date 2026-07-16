@@ -126,3 +126,35 @@ test("validateDevice accepts identity fields", () => {
   const result = validateDevice(withIdentity);
   assert.equal(result.success, true);
 });
+
+test("validateDevice accepts complete floorplan coordinates", () => {
+  const withCoordinates = {
+    ...sample,
+    placement: {
+      ...sample.placement,
+      coordinates: {
+        x: 2.4,
+        y: 1.8,
+        z: 1.2,
+        unit: "m",
+        frame: "floorplan_image",
+        floorplanId: "floor1",
+        source: "floorplan"
+      }
+    }
+  };
+  assert.equal(validateDevice(withCoordinates).success, true);
+});
+
+test("validateDevice rejects incomplete floorplan coordinates", () => {
+  const withCoordinates = {
+    ...sample,
+    placement: {
+      ...sample.placement,
+      coordinates: { x: 2.4, y: 1.8, source: "floorplan" }
+    }
+  };
+  const result = validateDevice(withCoordinates);
+  assert.equal(result.success, false);
+  assert.ok(result.errors?.placement?.coordinates);
+});
